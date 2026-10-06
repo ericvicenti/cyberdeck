@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { writeFileSync, mkdirSync, readFileSync } from "fs";
 import { join } from "path";
-import { startTestServer, TEST_TOKEN, type TestServer } from "./helpers";
+import { startTestServer, testConfig, TEST_TOKEN, type TestServer } from "./helpers";
 import { tmpHomeDir } from "./helpers";
 
 const { dir, cleanup } = tmpHomeDir("api");
@@ -149,5 +149,42 @@ describe("fs over http", () => {
     ).json();
     expect((st.mode & 0o777).toString(8)).toBe("640");
     expect(st.user).toBeTruthy();
+  });
+});
+
+describe("control module", () => {
+  test("404 without a fleet dir", async () => {
+    const s = startTestServer(testConfig({ fleetDir: null }));
+    try {
+      const res = await s.api("/api/control/overview");
+      expect(res.status).toBe(404);
+      expect((await res.json()).error).toBe("no fleet dir");
+    } finally {
+      s.stop();
+    }
+  });
+  test("overview aggregates the fleet CLI", async () => {
+    const fixture = join(import.meta.dir, "fixtures", "fleet");
+    const s = startTestServer(testConfig({ fleetDir: fixture }));
+    try {
+      const res = await s.api("/api/control/overview");
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.status.host).toBe("test-node");
+      expect(body.projects[0].slug).toBe("demo");
+      expect(body.todo.sections[0].entries.length).toBe(1);
+      expect(body.handoff[0].agent).toBe("cc");
+      expect(body.collab.tasks[0].id).toBe("t1");
+      expect(body.collab.auto).toBe(false);
+      const sessions = await (await s.api("/api/control/sessions?q=t")).json();
+      expect(sessions[0].id).toBe("abc");
+      const added = await (await s.api("/api/control/collab/add", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "New" }) })).json();
+      expect(added.id).toBe("t2");
+      const log = await (await s.api("/api/control/collab/runs/nope/log?file=worker.log")).json();
+      expect(log.size).toBe(0);
+      expect((await s.api("/api/control/collab/runs/nope/log?file=../etc")).status).toBe(400);
+    } finally {
+      s.stop();
+    }
   });
 });

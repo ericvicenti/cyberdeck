@@ -1,10 +1,163 @@
 @import "tailwindcss";
 
+/* ---------- Steward HUD theme ----------
+   One place for the look: the Tailwind palette is retuned here so every view
+   (old and new) picks it up, and a handful of utility classes carry the
+   game-HUD motifs. Keep views simple: use .hud-card, .hud-label, .led, .neon-*. */
+@theme {
+  --font-sans: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  /* near-black base scale */
+  --color-zinc-950: #07080c;
+  --color-zinc-925: #0b0d14;
+  --color-zinc-900: #0e1119;
+  --color-zinc-800: #1a1f2e;
+  --color-zinc-700: #283046;
+  --color-zinc-600: #4b5673;
+  --color-zinc-500: #76819c;
+  --color-zinc-400: #9aa5bf;
+  --color-zinc-300: #bcc6dc;
+  --color-zinc-200: #d9e0ef;
+  --color-zinc-100: #eef2fb;
+  /* neon accents */
+  --color-emerald-300: #c6f27a;
+  --color-emerald-400: #a3e635;
+  --color-emerald-500: #84cc16;
+  --color-emerald-600: #65a30d;
+  --color-sky-300: #67e8f9;
+  --color-sky-400: #22d3ee;
+  --color-sky-500: #06b6d4;
+  --color-violet-300: #f0abfc;
+  --color-violet-400: #e879f9;
+  --color-violet-500: #d946ef;
+  --color-orange-300: #f0abfc;
+  --color-orange-500: #e879f9;
+  --color-amber-400: #fbbf24;
+  --color-amber-500: #f59e0b;
+  --color-red-400: #fb7185;
+  --color-red-500: #f43f5e;
+}
+
 :root {
   color-scheme: dark;
+  --hud-bg: #07080c;
+  --hud-panel: #0b0d14;
+  --hud-cyan: #22d3ee;
+  --hud-magenta: #e879f9;
+  --hud-green: #a3e635;
+  --hud-amber: #fbbf24;
+  --hud-red: #fb7185;
+  --hud-line: rgba(34, 211, 238, 0.22);
+  --hud-grid: rgba(34, 211, 238, 0.045);
 }
 
 body {
   @apply bg-zinc-950 text-zinc-200 antialiased;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
+  animation: hud-boot 300ms ease-out both;
+}
+
+h1, h2, h3, .hud-label {
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+}
+
+/* uppercase letter-spaced section label */
+.hud-label {
+  @apply text-[10px] uppercase tracking-widest text-zinc-500;
+}
+
+/* panel with faint grid, thin glowing border and corner brackets */
+.hud-card {
+  position: relative;
+  border: 1px solid var(--hud-line);
+  background-color: var(--hud-panel);
+  background-image:
+    linear-gradient(var(--hud-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--hud-grid) 1px, transparent 1px);
+  background-size: 22px 22px;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.08), inset 0 0 40px rgba(7, 8, 12, 0.6);
+  border-radius: 0.5rem;
+}
+.hud-card::before, .hud-card::after {
+  content: "";
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  pointer-events: none;
+  border-color: var(--hud-cyan);
+  border-style: solid;
+  opacity: 0.8;
+}
+.hud-card::before { top: -1px; left: -1px; border-width: 1.5px 0 0 1.5px; }
+.hud-card::after { bottom: -1px; right: -1px; border-width: 0 1.5px 1.5px 0; }
+.hud-card.hud-magenta { border-color: rgba(232, 121, 249, 0.25); box-shadow: 0 0 8px rgba(232, 121, 249, 0.1); }
+.hud-card.hud-magenta::before, .hud-card.hud-magenta::after { border-color: var(--hud-magenta); }
+.hud-card.hud-green { border-color: rgba(163, 230, 53, 0.25); box-shadow: 0 0 8px rgba(163, 230, 53, 0.1); }
+.hud-card.hud-green::before, .hud-card.hud-green::after { border-color: var(--hud-green); }
+.hud-card.hud-red { border-color: rgba(251, 113, 133, 0.3); box-shadow: 0 0 10px rgba(251, 113, 133, 0.15); }
+.hud-card.hud-red::before, .hud-card.hud-red::after { border-color: var(--hud-red); }
+
+/* glowing text */
+.neon { color: var(--hud-cyan); text-shadow: 0 0 6px rgba(34, 211, 238, 0.55); }
+.neon-magenta { color: var(--hud-magenta); text-shadow: 0 0 6px rgba(232, 121, 249, 0.55); }
+.neon-green { color: var(--hud-green); text-shadow: 0 0 6px rgba(163, 230, 53, 0.5); }
+.neon-amber { color: var(--hud-amber); text-shadow: 0 0 6px rgba(251, 191, 36, 0.5); }
+.neon-red { color: var(--hud-red); text-shadow: 0 0 6px rgba(251, 113, 133, 0.55); }
+
+/* big HUD stat number */
+.hud-stat { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 1.35rem; line-height: 1; font-weight: 600; }
+
+/* status LEDs */
+.led { display: inline-block; width: 7px; height: 7px; border-radius: 9999px; background: var(--hud-cyan); box-shadow: 0 0 6px var(--hud-cyan); }
+.led-on { background: var(--hud-green); box-shadow: 0 0 6px var(--hud-green); animation: led-pulse 2.2s ease-in-out infinite; }
+.led-run { background: var(--hud-cyan); box-shadow: 0 0 6px var(--hud-cyan); animation: led-pulse 1s ease-in-out infinite; }
+.led-warn { background: var(--hud-amber); box-shadow: 0 0 6px var(--hud-amber); }
+.led-off { background: #3a4259; box-shadow: none; }
+.led-err { background: var(--hud-red); box-shadow: 0 0 6px var(--hud-red); animation: led-pulse 0.7s ease-in-out infinite; }
+
+/* caps status badge */
+.hud-badge { @apply rounded-sm px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.18em]; font-family: var(--font-mono); border: 1px solid currentColor; opacity: 0.95; }
+
+/* striped progress bar for running work */
+.hud-progress { height: 4px; border-radius: 2px; overflow: hidden; background: rgba(34, 211, 238, 0.12); }
+.hud-progress > span {
+  display: block; height: 100%; width: 100%;
+  background: repeating-linear-gradient(-45deg, var(--hud-cyan) 0 8px, rgba(34, 211, 238, 0.35) 8px 16px);
+  background-size: 32px 100%;
+  animation: hud-stripes 0.8s linear infinite;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.5);
+}
+
+/* HUD rows: hover glow */
+.hud-row { transition: background-color 120ms, box-shadow 120ms; }
+.hud-row:hover { background: rgba(34, 211, 238, 0.06); box-shadow: inset 2px 0 0 var(--hud-cyan); }
+
+/* blinking cursor for live logs */
+.hud-cursor::after { content: "▌"; color: var(--hud-cyan); animation: hud-blink 1s steps(2) infinite; margin-left: 2px; }
+
+/* scanline overlay for the shell */
+.scanlines { position: relative; }
+.scanlines::after {
+  content: "";
+  position: fixed; inset: 0; z-index: 50; pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 3px);
+  mix-blend-mode: overlay;
+}
+
+/* chrome bars (title / rail / status) */
+.hud-chrome { background: linear-gradient(180deg, #0b0d14, #07080c); border-color: var(--hud-line); }
+.hud-chip { @apply flex items-center gap-1.5 rounded-sm px-2 py-0.5 text-[10px] uppercase tracking-wider; border: 1px solid rgba(34, 211, 238, 0.18); background: rgba(34, 211, 238, 0.04); font-family: var(--font-mono); }
+
+/* inputs */
+input, select, textarea { font-family: var(--font-mono); }
+input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 1px var(--hud-cyan), 0 0 8px rgba(34, 211, 238, 0.35); }
+
+@keyframes led-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes hud-stripes { from { background-position: 0 0; } to { background-position: 32px 0; } }
+@keyframes hud-blink { to { visibility: hidden; } }
+@keyframes hud-boot { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .led-on, .led-run, .led-err, .hud-progress > span, .hud-cursor::after, body { animation: none; }
 }

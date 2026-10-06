@@ -107,3 +107,26 @@ export const ShuffleIcon = (p: P) => (
     <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
   </svg>
 );
+
+export const LayersIcon = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M12 3l9 5-9 5-9-5 9-5z" />
+    <path d="M3 13l9 5 9-5" />
+  </svg>
+);
+
+export const BotIcon = (p: P) => (
+  <svg {...base(p)}>
+    <rect x="4" y="8" width="16" height="11" rx="2" />
+    <path d="M12 4v4M8 4h8" />
+    <circle cx="9" cy="13.5" r="1" fill="currentColor" />
+    <circle cx="15" cy="13.5" r="1" fill="currentColor" />
+    <path d="M9.5 16.5h5" />
+  </svg>
+);
+
+export const PulseIcon = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M3 12h4l2-6 4 12 2-6h6" />
+  </svg>
+);

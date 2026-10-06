@@ -60,9 +60,9 @@ const RISK_STYLES: Record<Repo["risk"], string> = {
 function StatCard(props: { label: string; value: string; tone?: "red" | "amber" | "green" | "neutral" }) {
   const tones = { red: "text-red-400", amber: "text-amber-400", green: "text-emerald-400", neutral: "text-zinc-100" };
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-5 py-4">
-      <div className={`text-2xl font-semibold tabular-nums ${tones[props.tone ?? "neutral"]}`}>{props.value}</div>
-      <div className="mt-1 text-xs uppercase tracking-wider text-zinc-500">{props.label}</div>
+    <div className="hud-card px-5 py-4">
+      <div className={`hud-stat ${tones[props.tone ?? "neutral"]}`}>{props.value}</div>
+      <div className="hud-label mt-2">{props.label}</div>
     </div>
   );
 }
@@ -121,7 +121,7 @@ export function Data({ onLocked }: { onLocked: () => void }) {
     <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-zinc-100">Data{activeNode() ? ` on ${activeNodeName()}` : ""}</h1>
+          <h1 className="neon text-lg font-semibold uppercase tracking-[0.15em]">Data{activeNode() ? ` on ${activeNodeName()}` : ""}</h1>
           <p className="text-xs text-zinc-500">
             {status ? `${status.nodeName}${status.watching ? " · auto-rescan on changes" : ""} · scanned ${fmtAgo(status.lastScanAt)}` : "connecting…"}
           </p>

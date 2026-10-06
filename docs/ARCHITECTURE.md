@@ -589,6 +589,14 @@ hashes but scans must be fast (300 project dirs ≈ minutes, not hours).
 | POST | `/api/nodes/pairing/complete` | `{code, endpoint}` | `{node}` (dials endpoint, verifies code, exchanges pubkeys) |
 | DELETE | `/api/nodes/:id` | — | revoke pairing |
 | ANY | `/api/nodes/:id/proxy/*` | any | transparently forwards the request to that node's API over the authenticated WS tunnel; this is how "administer every node from any node" works — remote UIs reuse the same routes |
+| GET | `/api/control/overview` | — | fleet dashboard: `{fleetDir, status, projects, todo, handoff, collab:{tasks,runs,auto}, services}` from the Fleet repo's CLI (20 s cache); 404 `no fleet dir` when `fleetDir` is unset |
+| GET | `/api/control/sessions` | `?q=&host=&tool=` | cross-host agent session index (`fleet sessions --json`) |
+| POST | `/api/control/sessions/pull` | `{id}` | copies a transcript from its host so it can be resumed here |
+| GET/POST | `/api/control/services[/probe]` | — | last service probe / probe now (also every 5 min; emits `services` event) |
+| GET | `/api/control/collab` | — | `{tasks, runs, auto, intervalMinutes}` |
+| POST | `/api/control/collab/tick`, `/run`, `/add`, `/auto` | `{id}` / task fields / `{auto}` | start the next or a given collab run (detached `fleet collab …`), add a task, toggle the auto scheduler (persisted) |
+| GET | `/api/control/collab/runs/:id/log` | `?file=worker.log\|reviewer.log\|result.md&tail=` | `{text, size}` tail of a run log under `~/.fleet/runs/<id>/` |
+| POST | `/api/control/sync` | — | runs `fleet sync` |
 | GET | `/api/roots` | — | scan roots with last-scan summaries |
 | POST | `/api/roots` | `{path}` | adds root (also persisted to config) |
 | POST | `/api/roots/:id/scan` | `{full?: bool}` | `{jobId}` |

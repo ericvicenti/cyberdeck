@@ -12,6 +12,7 @@ import { registerFsRoutes } from "./api/fs";
 import { createTermHandlers } from "./api/term";
 import { registerFleetRoutes } from "./api/fleet";
 import { registerMediaRoutes, cleanupHlsCache } from "./api/media";
+import { registerControlRoutes } from "./api/control";
 import { currentCommit, checkForUpdate, applyUpdate, isUpdating } from "./updater";
 
 const UI_DIST = join(import.meta.dir, "../../dist/ui");
@@ -116,6 +117,7 @@ export function createServer(db: Database, cfg: StewardConfig, token: string, no
   registerFsRoutes(app);
   registerMediaRoutes(app, token);
   registerFleetRoutes(app, db, cfg, nodeId, token, upgradeWebSocket);
+  registerControlRoutes(app, cfg);
 
   app.get(
     "/api/term",
