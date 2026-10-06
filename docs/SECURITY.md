@@ -226,6 +226,30 @@ CREATE TABLE ui_sessions (
 
 ---
 
+## 4.5 Tailscale identity (implemented)
+
+The daemon leans on the tailnet for access control instead of a shared secret:
+
+- **Source gate.** With `bind: "tailscale"` (the default; a config that still says `0.0.0.0` is
+  migrated at boot) the daemon listens on all interfaces but answers only loopback and tailnet
+  source addresses (100.64.0.0/10, fd7a:115c:a1e0::/48). Everything else, UI included, gets 403.
+  `bind: "lan"` restores the old any-address, token-gated behaviour; an explicit IP binds just it.
+- **Identity.** A request from a tailnet address is attributed with `tailscale whois --json <ip>`
+  (cached 5 min, negative results 30 s). When `UserProfile.LoginName` equals the node owner
+  (`tailscaleOwner` in config.json, auto-detected once from `tailscale status` and persisted) the
+  request is trusted without a bearer token. Any other login falls back to the token rule.
+  Loopback callers (the `deck` CLI, local scripts) always need the token.
+- **Peers.** Nodes advertise their MagicDNS name (`http://<node>.<tailnet>:4777`) when pairing, so
+  the fleet keeps working away from the home LAN. `POST /api/fleet/pair-direct {url}` pairs with a
+  peer without a code: the peer accepts `pairing/complete` because it sees the caller as its owner
+  on the tailnet. The 6-digit code path remains for nodes that are not on the tailnet.
+- **HTTPS.** `cyberdeck serve` runs `tailscale serve --bg --https=443 http://127.0.0.1:4777`, giving
+  `https://<node>.<tailnet>` with a valid certificate, reachable only from the tailnet. Phones use
+  that URL and never see a token prompt.
+- **Trust boundary.** This trusts tailscaled on the node and the tailnet's device list. A device
+  logged in as the owner is the owner; revoke a lost device in the Tailscale admin console and
+  its identity stops resolving within the whois cache window (5 min).
+
 ## 5. The secrets vault
 
 ### 5.1 Key hierarchy

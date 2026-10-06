@@ -10,6 +10,14 @@ CYBERDECK_REPO="${CYBERDECK_REPO:-}"
 DEFAULT_REPO="https://github.com/ericvicenti/cyberdeck.git"
 SRC="$CYBERDECK_HOME/src"
 OS="$(uname -s)"
+OWNER="${CYBERDECK_OWNER:-}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --owner) OWNER="$2"; shift 2 ;;      # tailscale login trusted without a token
+    --owner=*) OWNER="${1#--owner=}"; shift ;;
+    *) shift ;;
+  esac
+done
 
 log() { printf '\033[1;36mcyberdeck\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31mcyberdeck\033[0m %s\n' "$*" >&2; exit 1; }
@@ -88,6 +96,17 @@ log "installing dependencies and building UI..."
 (cd "$SRC" && "$BUN" install --frozen-lockfile 2>/dev/null || "$BUN" install)
 (cd "$SRC" && "$BUN" run build)
 
+# --- config: tailscale owner -------------------------------------------------
+if [ -n "$OWNER" ]; then
+  mkdir -p "$CYBERDECK_HOME"
+  CYBERDECK_OWNER="$OWNER" CYBERDECK_HOME="$CYBERDECK_HOME" "$BUN" -e '
+    const fs = require("fs"); const p = process.env.CYBERDECK_HOME + "/config.json";
+    const c = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : {};
+    c.tailscaleOwner = process.env.CYBERDECK_OWNER;
+    fs.writeFileSync(p, JSON.stringify(c, null, 2) + "\n");'
+  log "tailscale owner set to $OWNER"
+fi
+
 # --- CLI shim ----------------------------------------------------------------
 cat > "$CYBERDECK_HOME/bin/cyberdeck" <<EOF
 #!/usr/bin/env bash
@@ -101,6 +120,7 @@ if [ -n "${CYBERDECK_TEST:-}" ]; then
   exit 0
 fi
 
+mkdir -p "$HOME/.local/bin" 2>/dev/null || true
 for dir in "$HOME/.local/bin" /usr/local/bin; do
   if [ -d "$dir" ] && [ -w "$dir" ]; then
     ln -sf "$CYBERDECK_HOME/bin/cyberdeck" "$dir/cyberdeck" && break
@@ -124,6 +144,8 @@ elif [ "$OS" = "Linux" ]; then
   sed -e "s|@BUN@|$BUN|g" -e "s|@SRC@|$SRC|g" -e "s|@HOME@|$CYBERDECK_HOME|g" \
     "$SRC/service/cyberdeck.service.tmpl" > "$UNIT_DIR/cyberdeck.service"
   systemctl --user disable --now steward.service 2>/dev/null || true; rm -f "$HOME/.config/systemd/user/steward.service"
+  # Keep the user service running without a login session (servers, ssh-only boxes).
+  loginctl enable-linger "$(id -un)" 2>/dev/null || true
   systemctl --user daemon-reload
   systemctl --user enable --now cyberdeck.service
   log "systemd user service installed (cyberdeck.service)"

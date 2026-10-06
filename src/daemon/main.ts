@@ -12,9 +12,12 @@ const nodeId = loadNodeId();
 const db = openDb();
 const { fetch, websocket } = createServer(db, cfg, token, nodeId);
 
+// "tailscale" and "lan" both listen everywhere; the server's source-address gate
+// (server.ts) is what keeps "tailscale" closed to LAN clients.
+const hostname = cfg.bind === "tailscale" || cfg.bind === "lan" ? "0.0.0.0" : cfg.bind;
 const server = Bun.serve({
   port: cfg.port,
-  hostname: cfg.bind,
+  hostname,
   // Default is 10s, which kills slow-but-legitimate requests (large uploads,
   // fleet proxying, HLS transcode start). 0 disables the idle timeout.
   idleTimeout: 0,
@@ -23,7 +26,7 @@ const server = Bun.serve({
 });
 
 console.log(`cyberdeck ${VERSION} — node "${cfg.nodeName}"`);
-console.log(`listening on http://127.0.0.1:${server.port} (data in ${CYBERDECK_HOME})`);
+console.log(`listening on http://127.0.0.1:${server.port} (bind ${cfg.bind}; data in ${CYBERDECK_HOME})`);
 
 // Initial scans on boot; the watcher handles change-driven rescans, with a
 // slow periodic fallback in case watches drop events.

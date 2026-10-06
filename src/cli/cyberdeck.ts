@@ -4,6 +4,7 @@ import { join } from "path";
 import { readFileSync, existsSync } from "fs";
 import { homedir } from "os";
 import { CYBERDECK_HOME, loadConfig } from "../daemon/config";
+import { tailscaleBin, Tailscale } from "../daemon/tailscale";
 
 const cfg = loadConfig();
 const BASE = `http://127.0.0.1:${cfg.port}`;
@@ -91,6 +92,24 @@ switch (cmd) {
     console.log("updated and restarted");
     break;
   }
+  case "serve": {
+    // HTTPS on the tailnet via `tailscale serve`: valid certs for <node>.<tailnet>, reachable only from the tailnet.
+    const bin = tailscaleBin();
+    if (!bin) { console.log("tailscale CLI not found"); process.exit(1); }
+    if (process.argv[3] === "off") {
+      process.exit(await sh([bin, "serve", "--https=443", "off"]));
+    }
+    const code = await sh([bin, "serve", "--bg", "--https=443", `http://127.0.0.1:${cfg.port}`]);
+    if (code !== 0) process.exit(code);
+    const self = await new Tailscale().self();
+    console.log(self ? `serving https://${self.dnsName}` : "serving (run `tailscale status` for the hostname)");
+    break;
+  }
+  case "whoami": {
+    const res = await fetch(`${BASE}/api/auth/whoami`, { headers: { authorization: `Bearer ${token()}` } });
+    console.log(JSON.stringify(await res.json()));
+    break;
+  }
   default:
     console.log(`cyberdeck — fleet-and-data guardian
 
@@ -102,5 +121,7 @@ usage: cyberdeck <command>
   restart    restart the daemon service
   stop/start manage the daemon service
   logs       tail daemon logs
-  update     pull own source, rebuild, restart`);
+  update     pull own source, rebuild, restart
+  serve      expose the UI as https://<node>.<tailnet> via tailscale serve (serve off: stop)
+  whoami     how the local daemon sees this caller`);
 }

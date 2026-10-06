@@ -10,6 +10,7 @@ import { networkInterfaces } from "os";
 import { randomBytes, randomInt, timingSafeEqual } from "crypto";
 import type { CyberdeckConfig } from "../config";
 import { currentCommit, nudgePeer, maybeSelfUpdate } from "../updater";
+import type { Tailscale } from "../tailscale";
 
 export type NodeRow = {
   id: string;
@@ -54,14 +55,35 @@ export function registerFleetRoutes(
   cfg: CyberdeckConfig,
   nodeId: string,
   myToken: string,
-  upgradeWebSocket: any
+  upgradeWebSocket: any,
+  extras: { tailscale?: Tailscale; authedViaTailscale?: (c: { req: { raw: Request } }) => boolean } = {}
 ) {
   const getNode = (id: string): NodeRow | null =>
     (db.query("SELECT * FROM nodes WHERE id = ?").get(id) as NodeRow) ?? null;
+  const tailnetInfo = async () => (extras.tailscale ? await extras.tailscale.self() : null);
 
-  app.get("/api/fleet/self", (c) =>
-    c.json({ nodeId, name: cfg.nodeName, port: cfg.port, urls: lanUrls(cfg.port) })
-  );
+  /** URL peers should dial us at: the MagicDNS name when on a tailnet, else the LAN address closest to the peer. */
+  const selfUrl = async (peerUrl?: string): Promise<string> => {
+    const self = await tailnetInfo();
+    if (self?.dnsName) return `http://${self.dnsName}:${cfg.port}`;
+    const myUrls = lanUrls(cfg.port);
+    const peerHost = peerUrl ? new URL(peerUrl).hostname : "";
+    return (
+      myUrls.find((u) => new URL(u).hostname.split(".").slice(0, 3).join(".") === peerHost.split(".").slice(0, 3).join(".")) ??
+      myUrls[0] ??
+      `http://127.0.0.1:${cfg.port}`
+    );
+  };
+  const upsertNode = (id: string, name: string, url: string, token: string) =>
+    db.query(
+      `INSERT INTO nodes (id, name, url, token, added_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET name=excluded.name, url=excluded.url, token=excluded.token`
+    ).run(id, name, url, token, Date.now());
+
+  app.get("/api/fleet/self", async (c) => {
+    const self = await tailnetInfo();
+    return c.json({ nodeId, name: cfg.nodeName, port: cfg.port, urls: lanUrls(cfg.port), url: await selfUrl(), tailscale: self });
+  });
 
   app.post("/api/fleet/pairing/start", (c) => {
     pairing = {
@@ -71,50 +93,50 @@ export function registerFleetRoutes(
     return c.json({ code: pairing.code, expiresAt: pairing.expiresAt, urls: lanUrls(cfg.port) });
   });
 
-  // Called BY the other node (unauthenticated; gated by the one-time code).
+  // Called BY the other node. Gated by the one-time code, or by the caller
+  // being the node owner on the tailnet (identified by `tailscale whois`).
   app.post("/api/fleet/pairing/complete", async (c) => {
     const body = await c.req.json();
-    if (!codeMatches(body.code)) return c.json({ error: "invalid or expired pairing code" }, 403);
-    pairing = null; // single use
+    const viaCode = codeMatches(body.code);
+    if (!viaCode && !extras.authedViaTailscale?.(c)) return c.json({ error: "invalid or expired pairing code" }, 403);
+    if (viaCode) pairing = null; // single use
     if (!body.nodeId || !body.url || !body.token) return c.json({ error: "missing fields" }, 400);
-    db.query(
-      `INSERT INTO nodes (id, name, url, token, added_at) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET name=excluded.name, url=excluded.url, token=excluded.token`
-    ).run(body.nodeId, String(body.name ?? "node"), String(body.url), String(body.token), Date.now());
-    return c.json({ nodeId, name: cfg.nodeName, token: myToken, urls: lanUrls(cfg.port) });
+    upsertNode(body.nodeId, String(body.name ?? "node"), String(body.url), String(body.token));
+    return c.json({ nodeId, name: cfg.nodeName, token: myToken, urls: lanUrls(cfg.port), url: await selfUrl(String(body.url)) });
   });
 
-  // Initiate pairing from this side: we call the peer's /complete.
-  app.post("/api/fleet/pair", async (c) => {
-    const body = await c.req.json(); // { url, code }
-    const peerUrl = String(body.url ?? "").replace(/\/+$/, "");
-    if (!/^https?:\/\//.test(peerUrl)) return c.json({ error: "url must start with http://" }, 400);
-    // Advertise a URL the peer can reach us at: prefer the LAN address that
-    // shares a prefix with the peer's, else first LAN address.
-    const myUrls = lanUrls(cfg.port);
-    const peerHost = new URL(peerUrl).hostname;
-    const myUrl =
-      myUrls.find((u) => new URL(u).hostname.split(".").slice(0, 3).join(".") === peerHost.split(".").slice(0, 3).join(".")) ??
-      myUrls[0] ??
-      `http://127.0.0.1:${cfg.port}`;
+  // Initiate pairing from this side: we call the peer's /complete. With a
+  // code this works on any network; without one (pair-direct) the peer must
+  // see us as its owner on the tailnet.
+  const pairWith = async (peerUrl: string, code: string) => {
+    if (!/^https?:\/\//.test(peerUrl)) return { status: 400, body: { error: "url must start with http://" } };
+    const myUrl = await selfUrl(peerUrl);
     let res: Response;
     try {
       res = await fetch(`${peerUrl}/api/fleet/pairing/complete`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ code: String(body.code ?? ""), nodeId, name: cfg.nodeName, url: myUrl, token: myToken }),
+        body: JSON.stringify({ code, nodeId, name: cfg.nodeName, url: myUrl, token: myToken }),
         signal: AbortSignal.timeout(10_000),
       });
     } catch (err) {
-      return c.json({ error: `could not reach ${peerUrl}: ${err instanceof Error ? err.message : err}` }, 502);
+      return { status: 502, body: { error: `could not reach ${peerUrl}: ${err instanceof Error ? err.message : err}` } };
     }
     const peer = await res.json();
-    if (!res.ok) return c.json({ error: peer.error ?? `pairing failed (${res.status})` }, 502);
-    db.query(
-      `INSERT INTO nodes (id, name, url, token, added_at) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET name=excluded.name, url=excluded.url, token=excluded.token`
-    ).run(peer.nodeId, String(peer.name ?? "node"), peerUrl, String(peer.token), Date.now());
-    return c.json({ paired: { id: peer.nodeId, name: peer.name, url: peerUrl } });
+    if (!res.ok) return { status: 502, body: { error: peer.error ?? `pairing failed (${res.status})` } };
+    const url = typeof peer.url === "string" && peer.url ? peer.url : peerUrl;
+    upsertNode(peer.nodeId, String(peer.name ?? "node"), url, String(peer.token));
+    return { status: 200, body: { paired: { id: peer.nodeId, name: peer.name, url } } };
+  };
+  app.post("/api/fleet/pair", async (c) => {
+    const body = await c.req.json(); // { url, code }
+    const r = await pairWith(String(body.url ?? "").replace(/\/+$/, ""), String(body.code ?? ""));
+    return c.json(r.body, r.status as any);
+  });
+  app.post("/api/fleet/pair-direct", async (c) => {
+    const body = await c.req.json(); // { url }
+    const r = await pairWith(String(body.url ?? "").replace(/\/+$/, ""), "");
+    return c.json(r.body, r.status as any);
   });
 
   app.get("/api/fleet/nodes", async (c) => {
