@@ -1,4 +1,4 @@
-import { loadConfig, loadToken, loadNodeId, STEWARD_HOME } from "./config";
+import { loadConfig, loadToken, loadNodeId, CYBERDECK_HOME } from "./config";
 import { openDb } from "./db";
 import { createServer, VERSION } from "./server";
 import { runScan } from "./indexer/scan";
@@ -22,8 +22,8 @@ const server = Bun.serve({
   websocket,
 });
 
-console.log(`steward ${VERSION} — node "${cfg.nodeName}"`);
-console.log(`listening on http://127.0.0.1:${server.port} (data in ${STEWARD_HOME})`);
+console.log(`cyberdeck ${VERSION} — node "${cfg.nodeName}"`);
+console.log(`listening on http://127.0.0.1:${server.port} (data in ${CYBERDECK_HOME})`);
 
 // Initial scans on boot; the watcher handles change-driven rescans, with a
 // slow periodic fallback in case watches drop events.

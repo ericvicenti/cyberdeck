@@ -1,16 +1,16 @@
 // Control module: the fleet dashboard. Projects, handoff, agent sessions, service
 // probes, and the autonomous cc/cx collaboration loop, all sourced from the private
-// Fleet repo through its `fleet` CLI (`<fleetDir>/bin/fleet.ts ... --json`). Steward
+// Fleet repo through its `deck` CLI (`<fleetDir>/bin/deck.ts ... --json`). Cyberdeck
 // owns scheduling, caching, log serving and events; the CLI owns the data format.
 import type { Hono } from "hono";
 import { existsSync, readFileSync, readdirSync, statSync, openSync, readSync, closeSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import type { StewardConfig } from "../config";
+import type { CyberdeckConfig } from "../config";
 import { saveConfigPatch } from "../config";
 import { bus } from "../events";
 
-const FLEET_HOME = process.env.FLEET_HOME ?? join(homedir(), ".fleet");
+const FLEET_HOME = process.env.DECK_HOME ?? join(homedir(), ".deck");
 const RUNS_DIR = join(FLEET_HOME, "runs");
 const CACHE_MS = 20_000;
 const CLI_TIMEOUT_MS = 60_000;
@@ -29,7 +29,7 @@ function cliEnv(): Record<string, string> {
 
 /** Run the fleet CLI to completion. Uses the daemon's own bun so the service PATH is irrelevant. */
 export async function fleetCli(fleetDir: string, args: string[], timeoutMs = CLI_TIMEOUT_MS): Promise<CliResult> {
-  const cli = join(fleetDir, "bin", "fleet.ts");
+  const cli = join(fleetDir, "bin", "deck.ts");
   const p = Bun.spawn([process.execPath, cli, ...args], { cwd: fleetDir, env: cliEnv(), stdin: "ignore", stdout: "pipe", stderr: "pipe" });
   const timer = setTimeout(() => p.kill(), timeoutMs);
   const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
@@ -42,7 +42,7 @@ function fleetCliDetached(fleetDir: string, args: string[]): { log: string } {
   mkdirSync(RUNS_DIR, { recursive: true });
   const log = join(RUNS_DIR, `spawn-${Date.now()}.log`);
   const fd = openSync(log, "a");
-  const p = Bun.spawn([process.execPath, join(fleetDir, "bin", "fleet.ts"), ...args], { cwd: fleetDir, env: cliEnv(), stdin: "ignore", stdout: fd, stderr: fd });
+  const p = Bun.spawn([process.execPath, join(fleetDir, "bin", "deck.ts"), ...args], { cwd: fleetDir, env: cliEnv(), stdin: "ignore", stdout: fd, stderr: fd });
   p.unref();
   return { log };
 }
@@ -81,8 +81,8 @@ function readRunMetas(): Record<string, string> {
   return out;
 }
 
-export function registerControlRoutes(app: Hono, cfg: StewardConfig) {
-  const fleetDir = () => (cfg.fleetDir && existsSync(join(cfg.fleetDir, "bin", "fleet.ts")) ? cfg.fleetDir : null);
+export function registerControlRoutes(app: Hono, cfg: CyberdeckConfig) {
+  const fleetDir = () => (cfg.fleetDir && existsSync(join(cfg.fleetDir, "bin", "deck.ts")) ? cfg.fleetDir : null);
 
   // ---- cached CLI reads ----
   const cache = new Map<string, { at: number; value: unknown }>();

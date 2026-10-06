@@ -1,5 +1,5 @@
 {
-  "name": "steward",
+  "name": "cyberdeck",
   "version": "0.1.0",
   "private": true,
   "description": "Self-hosted fleet-and-data guardian: indexes your machines, keeps novel data redundant, converges every box to your setup.",

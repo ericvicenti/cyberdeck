@@ -1,6 +1,6 @@
-# 🛡️ Steward
+# 🛡️ Cyberdeck
 
-Self-hosted fleet-and-data guardian. Steward runs as a background service on every machine
+Self-hosted fleet-and-data guardian. Cyberdeck runs as a background service on every machine
 you own and makes sure all novel data is known, synced, and redundantly backed up — and that
 every machine converges to your desired setup.
 
@@ -9,12 +9,12 @@ every machine converges to your desired setup.
 On any Mac or Linux box (needs git; Linux also needs unzip and curl):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ericvicenti/steward/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ericvicenti/cyberdeck/main/install.sh | bash
 ```
 
 From a source checkout: `./install.sh`. Re-running either form updates and restarts.
 
-This installs bun if needed, clones the source to `~/.steward/src`, builds the UI, registers
+This installs bun if needed, clones the source to `~/.cyberdeck/src`, builds the UI, registers
 a launchd (macOS) or systemd (Linux) service, and opens the web UI at
 `http://127.0.0.1:4777`.
 
@@ -29,10 +29,10 @@ bun run build      # build UI into dist/ui (daemon serves it)
 
 ## CLI
 
-`steward status | open | scan | restart | stop | start | logs | update`
+`cyberdeck status | open | scan | restart | stop | start | logs | update`
 
-`steward update` pulls Steward's own source, rebuilds, and restarts the service —
-Steward manages itself.
+`cyberdeck update` pulls Cyberdeck's own source, rebuilds, and restarts the service —
+Cyberdeck manages itself.
 
 ## Docs
 

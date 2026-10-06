@@ -1,7 +1,7 @@
-// Stub fleet CLI for Steward's control-module tests: prints fixed JSON per subcommand.
+// Stub fleet CLI for Cyberdeck's control-module tests: prints fixed JSON per subcommand.
 const [cmd, sub] = process.argv.slice(2);
 const out: Record<string, unknown> = {
-  status: { host: "test-node", time: "2026-10-07T00:00:00Z", hosts: [{ name: "test-node", kind: "laptop", os: "macos", roles: ["agents"], online: true, steward: null }], repo: { branch: "main", dirty: 0, ahead: 0, behind: 0 }, handoffOpen: 2, sessionsIndexed: 1 },
+  status: { host: "test-node", time: "2026-10-07T00:00:00Z", hosts: [{ name: "test-node", kind: "laptop", os: "macos", roles: ["agents"], online: true, cyberdeck: null }], repo: { branch: "main", dirty: 0, ahead: 0, behind: 0 }, handoffOpen: 2, sessionsIndexed: 1 },
   projects: [{ slug: "demo", name: "Demo", status: "active", depth: 0, parent: null, repos: ["demo"], hosts: ["test-node"], links: [], body: "A demo project.", file: "projects/demo/index.md" }],
   todo: { sections: [{ title: "Open", entries: [{ date: "2026-10-07", text: "**Demo** thing" }] }] },
   handoff: [{ file: "test-node-cc.md", host: "test-node", agent: "cc", text: "hi" }],

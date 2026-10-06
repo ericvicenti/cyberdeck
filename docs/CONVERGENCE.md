@@ -3,7 +3,7 @@
 Status: design, implementation-ready
 Depends on: BRIEF.md (authoritative), vault (BRIEF §8), node identity (BRIEF §identity)
 
-This document specifies how `steward setup` converges a fresh Mac/Linux box to the user's
+This document specifies how `cyberdeck setup` converges a fresh Mac/Linux box to the user's
 profile, and how the same machinery continuously detects and repairs drift on every machine
 in the fleet.
 
@@ -35,7 +35,7 @@ Design principles (these resolve most later arguments; treat as normative):
    machine that the profile doesn't mention are reported as *unmanaged*, not deleted.
    A facet instance can opt into `strict: true` to also remove extras (sensible for
    e.g. VS Code extensions, dangerous for brew formulae).
-3. **Idempotent apply, verified by recapture.** After apply, Steward re-runs capture and
+3. **Idempotent apply, verified by recapture.** After apply, Cyberdeck re-runs capture and
    re-diffs. Residual changes ⇒ the run is marked `partial` with the remainder listed.
    `apply` must be safe to run twice.
 4. **Every change is discrete, previewable, and individually selectable.** No facet applies
@@ -48,16 +48,16 @@ Design principles (these resolve most later arguments; treat as normative):
 
 ## 2. Facet definition format (TypeScript)
 
-Facets are TypeScript modules. **Builtin facets ship inside the Steward source tree**
-(`~/.steward/src/src/facets/builtin/*.ts`) so they update with Steward itself. **Custom
-facets live in the profile repo** (`~/.steward/profile/facets/<name>/facet.ts`). Both use
-the same API, imported from the Steward source (the profile depends on `steward` as a
+Facets are TypeScript modules. **Builtin facets ship inside the Cyberdeck source tree**
+(`~/.cyberdeck/src/src/facets/builtin/*.ts`) so they update with Cyberdeck itself. **Custom
+facets live in the profile repo** (`~/.cyberdeck/profile/facets/<name>/facet.ts`). Both use
+the same API, imported from the Cyberdeck source (the profile depends on `cyberdeck` as a
 workspace/path dependency; see §3).
 
 ### 2.1 Types
 
 ```ts
-// steward/src/facets/types.ts
+// cyberdeck/src/facets/types.ts
 
 export type Platform = "darwin" | "linux";
 export type Role = "laptop" | "desktop" | "server" | "backup";  // shared node-role enum (ARCHITECTURE §10, FLEET §2.4)
@@ -86,8 +86,8 @@ export interface FacetCtx {
   nodeId: string;          // "stw1…" pubkey-derived node id (FLEET.md §2.2)
   hostname: string;
   home: string;            // absolute $HOME
-  profileDir: string;      // ~/.steward/profile
-  facetDataDir: string;    // ~/.steward/profile/facets/<name>/
+  profileDir: string;      // ~/.cyberdeck/profile
+  facetDataDir: string;    // ~/.cyberdeck/profile/facets/<name>/
   /** Run a command; capture must only use it read-only (enforced by convention + review). */
   exec(cmd: string[], opts?: { sudo?: boolean; stdin?: string; timeoutMs?: number }):
     Promise<{ code: number; stdout: string; stderr: string }>;
@@ -135,7 +135,7 @@ Note `capture(desired, ctx)`: capture receives desired state so it can scope its
 ### 2.2 Example: the homebrew facet (builtin, abridged but real shape)
 
 ```ts
-// steward/src/facets/builtin/homebrew.ts
+// cyberdeck/src/facets/builtin/homebrew.ts
 import { z } from "zod";
 import { defineFacet } from "../types";
 
@@ -209,16 +209,16 @@ export default defineFacet<z.infer<typeof State>>({
 
 ---
 
-## 3. Profile repo layout (`~/.steward/profile`)
+## 3. Profile repo layout (`~/.cyberdeck/profile`)
 
 The profile is a **git repo** (usually with a private remote, but node-to-node sync works
-too — it's just another repo Steward stewards). Everything in it is plaintext-safe:
+too — it's just another repo Cyberdeck cyberdecks). Everything in it is plaintext-safe:
 secrets are vault references, never values.
 
 ```
-~/.steward/profile/
-  package.json               # { "dependencies": { "steward": "file:../src" } } — types only
-  steward.profile.ts         # manifest (below)
+~/.cyberdeck/profile/
+  package.json               # { "dependencies": { "cyberdeck": "file:../src" } } — types only
+  cyberdeck.profile.ts         # manifest (below)
   machines.json              # nodeId → machine record (below)
   facets/
     homebrew/
@@ -238,10 +238,10 @@ secrets are vault references, never values.
   fonts/                     # font payloads (or vault/URL refs for licensed fonts)
 ```
 
-### 3.1 `steward.profile.ts`
+### 3.1 `cyberdeck.profile.ts`
 
 ```ts
-import { defineProfile, builtin, local } from "steward/profile";
+import { defineProfile, builtin, local } from "cyberdeck/profile";
 
 export default defineProfile({
   facets: [
@@ -258,7 +258,7 @@ export default defineProfile({
 });
 ```
 
-`builtin(name)` references a facet shipped with Steward; `local(path)` imports from the
+`builtin(name)` references a facet shipped with Cyberdeck; `local(path)` imports from the
 profile. The manifest is the single source of *which facets are active*; a facet with no
 manifest entry is inert even if its state files exist.
 
@@ -276,7 +276,7 @@ manifest entry is inert even if its state files exist.
 }
 ```
 
-New machines are appended by `steward setup` (§7) and the file is committed/pushed like any
+New machines are appended by `cyberdeck setup` (§7) and the file is committed/pushed like any
 profile change.
 
 ### 3.3 State overlays and merging
@@ -309,8 +309,8 @@ daemon, and apply needs its own lifecycle). Each facet action runs in a spawned 
 subprocess:
 
 ```
-bun ~/.steward/src/src/facets/runner.ts \
-  --profile ~/.steward/profile --facet homebrew --action capture --machine m4max
+bun ~/.cyberdeck/src/src/facets/runner.ts \
+  --profile ~/.cyberdeck/profile --facet homebrew --action capture --machine m4max
 ```
 
 Protocol: runner writes NDJSON events to stdout —
@@ -318,7 +318,7 @@ Protocol: runner writes NDJSON events to stdout —
 `{"t":"error","message":...,"stack":...}` — and exits 0/1. The daemon supervises with a
 timeout (capture: 120s default; apply: 30min). Vault access is brokered: the runner does
 **not** get the vault key; `ctx.vault.get()` calls back to the daemon over a unix socket
-(`~/.steward/facet.sock`, mode 0600) with a per-run token, so plaintext secrets exist only
+(`~/.cyberdeck/facet.sock`, mode 0600) with a per-run token, so plaintext secrets exist only
 in the runner's memory during apply.
 
 ### 4.2 Ordering and dependencies
@@ -338,7 +338,7 @@ in the runner's memory during apply.
 - A facet whose `requires` failed is **skipped** (status `blocked`), but independent
   branches of the DAG continue.
 
-### 4.3 The converge algorithm (used by `steward setup`, `steward apply`, and UI "Converge")
+### 4.3 The converge algorithm (used by `cyberdeck setup`, `cyberdeck apply`, and UI "Converge")
 
 ```
 load profile (git pull first unless --offline)
@@ -355,11 +355,11 @@ present full plan (CLI table / UI review screen), grouped by facet, flagged by d
 selection policy:
     --yes / auto-converge: include danger=safe only
     interactive: safe pre-checked; caution unchecked; destructive requires typing facet name
-    manual changes: always shown as checklist, never "applied" by steward
+    manual changes: always shown as checklist, never "applied" by cyberdeck
 if any selected change needsSudo:
     CLI: `sudo -v` once up front + keepalive `sudo -v` every 60s during apply
     UI-initiated run on the local node: daemon has no TTY → sudo-needing changes are
-    deferred into a "terminal required" bundle; UI shows `steward apply --pending` to run
+    deferred into a "terminal required" bundle; UI shows `cyberdeck apply --pending` to run
 for f in order (apply phase, serial):
     if any of f.requires ended failed → mark blocked, continue
     run(f.apply, selectedChanges) with live log streaming
@@ -378,14 +378,14 @@ passwordless sudo the user configured themselves, which `sudo -n true` detects).
 
 This is the first-run story on the *current, already-configured* Mac.
 
-### 5.1 `steward profile init`
+### 5.1 `cyberdeck profile init`
 
 ```
-steward profile init [--remote git@github.com:eric/steward-profile.git]
+cyberdeck profile init [--remote git@github.com:eric/cyberdeck-profile.git]
 ```
 
-1. Create `~/.steward/profile`, `git init`, scaffold `package.json`,
-   `steward.profile.ts` with all platform-applicable builtin facets, `machines.json`
+1. Create `~/.cyberdeck/profile`, `git init`, scaffold `package.json`,
+   `cyberdeck.profile.ts` with all platform-applicable builtin facets, `machines.json`
    with this machine (name defaults to lowercased short hostname; prompt to confirm).
 2. For each builtin facet that implements `bootstrap()`, run it (parallel, read-only) and
    write the proposed state to `facets/<name>/state.json`.
@@ -407,11 +407,11 @@ steward profile init [--remote git@github.com:eric/steward-profile.git]
 
 ### 5.2 Continuous adoption
 
-`steward capture <facet>` (CLI) or UI "Adopt" on a drift item runs `adopt`: default
+`cyberdeck capture <facet>` (CLI) or UI "Adopt" on a drift item runs `adopt`: default
 implementation overwrites the machine-appropriate state file — base `state.json` if the
 value isn't overridden anywhere, otherwise the most specific overlay that currently defines
-it — then commits to the profile repo (`steward: adopt <facet> on <machine>` message).
-Push is a separate explicit step (`steward profile sync` = pull --rebase, then push).
+it — then commits to the profile repo (`cyberdeck: adopt <facet> on <machine>` message).
+Push is a separate explicit step (`cyberdeck profile sync` = pull --rebase, then push).
 
 ### 5.3 Adopt granularity
 
@@ -420,7 +420,7 @@ touching other pending changes. The default `adopt` handles this via the structu
 path info; custom facets with custom diffs must implement `adopt` if they want partial
 adoption (else it's all-or-nothing with a warning).
 
-### 5.4 SQLite schema (daemon DB, `~/.steward/steward.db`)
+### 5.4 SQLite schema (daemon DB, `~/.cyberdeck/cyberdeck.db`)
 
 ```sql
 CREATE TABLE facet_state (          -- latest capture per facet per node
@@ -488,14 +488,14 @@ diff(cur, des, path="/"):
 
 The daemon scheduler (same subsystem as data-indexing jobs) enqueues per-facet capture on
 `driftInterval` (default 6h; jittered ±10%), plus immediately after: profile git change
-(pull or local commit), `steward apply`, machine wake from sleep (>1h asleep), and manual
+(pull or local commit), `cyberdeck apply`, machine wake from sleep (>1h asleep), and manual
 "Check now".
 
 Cheap optimization: capture writes `state_hash`; if unchanged from last capture **and** the
 profile rev is unchanged, skip diffing entirely.
 
 Drift lifecycle: new `Change.id` ⇒ insert `open` row; re-seen ⇒ bump `last_seen`; absent
-in latest diff ⇒ row deleted (resolved outside Steward counts as resolved). `dismissed`
+in latest diff ⇒ row deleted (resolved outside Cyberdeck counts as resolved). `dismissed`
 rows persist and suppress the change until the profile rev changes (dismiss = "not now",
 not "never"). `manual` changes stay open until the user marks `manual_done` in the UI,
 after which recapture usually confirms them resolved anyway.
@@ -507,15 +507,15 @@ open non-manual changes.
 
 ---
 
-## 7. `steward setup` — fresh machine flow
+## 7. `cyberdeck setup` — fresh machine flow
 
 Precondition: the one-line installer (BRIEF §1) has run; daemon is up; browser opened.
-`steward setup` is a **terminal** flow by design (sudo, vault password).
+`cyberdeck setup` is a **terminal** flow by design (sudo, vault password).
 
 ```
-steward setup
+cyberdeck setup
   1. Profile source — one of:
-     a. git URL (prompt; clone to ~/.steward/profile)
+     a. git URL (prompt; clone to ~/.cyberdeck/profile)
      b. pair with an existing node (short code / QR, per BRIEF identity):
         the peer streams the profile repo over the node channel (git bundle),
         no external remote required
@@ -531,8 +531,8 @@ steward setup
      DAG: everything else
   5. Print summary: converged/partial/blocked per facet + the manual checklist
      (also persisted; UI shows it until checked off):
-       [ ] Sign into App Store (mas), then re-run: steward apply app-store
-       [ ] Grant Full Disk Access to Steward (System Settings → Privacy)
+       [ ] Sign into App Store (mas), then re-run: cyberdeck apply app-store
+       [ ] Grant Full Disk Access to Cyberdeck (System Settings → Privacy)
        [ ] Sign into Tailscale: tailscale up
        [ ] Log out/in for keyboard settings to fully take effect
 ```
@@ -565,7 +565,7 @@ not an error.
 
 All routes on the Hono server (localhost:4777); remote nodes reached via the canonical
 proxy route `/api/nodes/:id/proxy/*` over the authenticated node channel (ARCHITECTURE.md
-§6.2 — pattern shared with the rest of Steward).
+§6.2 — pattern shared with the rest of Cyberdeck).
 
 ```
 GET  /api/facets                     → [{name, platform-applicable, status, driftCount,
@@ -589,13 +589,13 @@ POST /api/profile/sync               → pull --rebase + push; returns conflicts
 CLI (thin wrappers over the same code paths, but with TTY powers):
 
 ```
-steward setup                     # §7
-steward profile init|sync|status
-steward plan [facet…]             # capture+diff, print table, no mutation
-steward apply [facet…] [--yes] [--pending] [--strict-ok]
-steward capture [facet…]          # a.k.a. adopt --all for the facet
-steward adopt <facet> [changeId…]
-steward drift [--node <name>] [--json]
+cyberdeck setup                     # §7
+cyberdeck profile init|sync|status
+cyberdeck plan [facet…]             # capture+diff, print table, no mutation
+cyberdeck apply [facet…] [--yes] [--pending] [--strict-ok]
+cyberdeck capture [facet…]          # a.k.a. adopt --all for the facet
+cyberdeck adopt <facet> [changeId…]
+cyberdeck drift [--node <name>] [--json]
 ```
 
 ---
@@ -631,10 +631,10 @@ they matter and are otherwise out of scope.
 
 ---
 
-## 11. File layout summary (Steward source side)
+## 11. File layout summary (Cyberdeck source side)
 
 ```
-~/.steward/src/src/facets/
+~/.cyberdeck/src/src/facets/
   types.ts          # §2.1
   runner.ts         # subprocess entrypoint (§4.1)
   merge.ts          # overlay merge (§3.3)

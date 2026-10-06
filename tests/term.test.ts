@@ -33,9 +33,9 @@ test("terminal runs a real shell over websocket", async () => {
     ws.addEventListener("open", resolve);
     ws.addEventListener("error", reject);
   });
-  ws.send(JSON.stringify({ t: "input", data: "echo steward_$((40+2))\r" }));
-  await until(() => buf.output().includes("steward_42"));
-  expect(buf.output()).toContain("steward_42");
+  ws.send(JSON.stringify({ t: "input", data: "echo cyberdeck_$((40+2))\r" }));
+  await until(() => buf.output().includes("cyberdeck_42"));
+  expect(buf.output()).toContain("cyberdeck_42");
   ws.close();
 }, 15000);
 

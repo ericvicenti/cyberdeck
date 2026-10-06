@@ -35,10 +35,10 @@ export function App() {
     const onHash = () => setRoute(parseHash());
     const onNode = () => setNodeGen((g) => g + 1);
     window.addEventListener("hashchange", onHash);
-    window.addEventListener("steward-node-changed", onNode);
+    window.addEventListener("cyberdeck-node-changed", onNode);
     return () => {
       window.removeEventListener("hashchange", onHash);
-      window.removeEventListener("steward-node-changed", onNode);
+      window.removeEventListener("cyberdeck-node-changed", onNode);
     };
   }, []);
 
@@ -94,7 +94,7 @@ export function App() {
       {/* title bar: game HUD */}
       <header className="hud-chrome flex h-9 shrink-0 items-center gap-2 border-b px-3">
         <ShieldIcon size={15} className="neon" />
-        <span className="neon text-[13px] font-semibold uppercase tracking-[0.2em]">Steward</span>
+        <span className="neon text-[13px] font-semibold uppercase tracking-[0.2em]">Cyberdeck</span>
         <span className="hidden text-[10px] uppercase tracking-widest text-zinc-600 sm:inline">/ {NAV.find((n) => isActive(n.view))?.label ?? route.view}</span>
         <div className="hidden items-center gap-1.5 pl-3 md:flex" data-testid="hud-chips">
           <span className="hud-chip text-zinc-300"><span className="led led-on" />{nodeId ? activeNodeName() : fleet?.self.name ?? "local"}</span>
@@ -152,7 +152,7 @@ export function App() {
         </span>
         {hud && <span>handoff {hud.handoff}</span>}
         <div className="flex-1" />
-        <span className="font-mono normal-case">steward {fleet?.self.commit ?? ""}</span>
+        <span className="font-mono normal-case">cyberdeck {fleet?.self.commit ?? ""}</span>
       </footer>
 
       {/* bottom nav (mobile) */}

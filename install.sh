@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Steward installer - usage:
-#   curl -fsSL https://steward.sh/install | bash          (once hosted)
+# Cyberdeck installer - usage:
+#   curl -fsSL https://cyberdeck.sh/install | bash          (once hosted)
 #   ./install.sh                                          (from a source checkout)
 # Idempotent: safe to re-run; updates source, rebuilds, restarts the service.
 set -euo pipefail
 
-STEWARD_HOME="${STEWARD_HOME:-$HOME/.steward}"
-STEWARD_REPO="${STEWARD_REPO:-}"
-DEFAULT_REPO="https://github.com/ericvicenti/steward.git"
-SRC="$STEWARD_HOME/src"
+CYBERDECK_HOME="${CYBERDECK_HOME:-$HOME/.cyberdeck}"
+CYBERDECK_REPO="${CYBERDECK_REPO:-}"
+DEFAULT_REPO="https://github.com/ericvicenti/cyberdeck.git"
+SRC="$CYBERDECK_HOME/src"
 OS="$(uname -s)"
 
-log() { printf '\033[1;36msteward\033[0m %s\n' "$*"; }
-fail() { printf '\033[1;31msteward\033[0m %s\n' "$*" >&2; exit 1; }
+log() { printf '\033[1;36mcyberdeck\033[0m %s\n' "$*"; }
+fail() { printf '\033[1;31mcyberdeck\033[0m %s\n' "$*" >&2; exit 1; }
 
 command -v git >/dev/null || fail "git is required. On macOS: xcode-select --install; on Debian/Ubuntu: apt install git"
 if [ "$OS" = "Linux" ] && ! command -v unzip >/dev/null && ! command -v bun >/dev/null; then
@@ -28,7 +28,7 @@ export PATH="$HOME/.bun/bin:$PATH"
 BUN="$(command -v bun)"
 
 # --- ffmpeg (media transcoding; non-fatal if it cannot be installed) --------
-if [ -z "${STEWARD_TEST:-}" ] && ! command -v ffmpeg >/dev/null; then
+if [ -z "${CYBERDECK_TEST:-}" ] && ! command -v ffmpeg >/dev/null; then
   if [ "$OS" = "Darwin" ]; then
     if ! command -v brew >/dev/null; then
       for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do
@@ -64,14 +64,14 @@ if [ -z "${STEWARD_TEST:-}" ] && ! command -v ffmpeg >/dev/null; then
 fi
 
 # --- source ------------------------------------------------------------------
-mkdir -p "$STEWARD_HOME/bin"
+mkdir -p "$CYBERDECK_HOME/bin"
 if [ -d "$SRC/.git" ]; then
   log "updating source in $SRC..."
   git -C "$SRC" pull --ff-only || log "warning: could not fast-forward; keeping current source"
-elif [ -n "$STEWARD_REPO" ]; then
-  log "cloning $STEWARD_REPO..."
-  git clone "$STEWARD_REPO" "$SRC"
-elif [ -f "$(dirname "$0")/package.json" ] && grep -q '"name": "steward"' "$(dirname "$0")/package.json"; then
+elif [ -n "$CYBERDECK_REPO" ]; then
+  log "cloning $CYBERDECK_REPO..."
+  git clone "$CYBERDECK_REPO" "$SRC"
+elif [ -f "$(dirname "$0")/package.json" ] && grep -q '"name": "cyberdeck"' "$(dirname "$0")/package.json"; then
   # Running from a source checkout: clone it locally so the service owns its copy.
   local_src="$(cd "$(dirname "$0")" && pwd)"
   log "installing from local checkout ${local_src}"
@@ -89,47 +89,49 @@ log "installing dependencies and building UI..."
 (cd "$SRC" && "$BUN" run build)
 
 # --- CLI shim ----------------------------------------------------------------
-cat > "$STEWARD_HOME/bin/steward" <<EOF
+cat > "$CYBERDECK_HOME/bin/cyberdeck" <<EOF
 #!/usr/bin/env bash
-exec "$BUN" run "$SRC/src/cli/steward.ts" "\$@"
+exec "$BUN" run "$SRC/src/cli/cyberdeck.ts" "\$@"
 EOF
-chmod +x "$STEWARD_HOME/bin/steward"
+chmod +x "$CYBERDECK_HOME/bin/cyberdeck"
 
-# Test mode (STEWARD_TEST=1): stop before touching PATH, services, or the browser.
-if [ -n "${STEWARD_TEST:-}" ]; then
+# Test mode (CYBERDECK_TEST=1): stop before touching PATH, services, or the browser.
+if [ -n "${CYBERDECK_TEST:-}" ]; then
   log "test mode: skipping PATH link, service registration, and browser open"
   exit 0
 fi
 
 for dir in "$HOME/.local/bin" /usr/local/bin; do
   if [ -d "$dir" ] && [ -w "$dir" ]; then
-    ln -sf "$STEWARD_HOME/bin/steward" "$dir/steward" && break
+    ln -sf "$CYBERDECK_HOME/bin/cyberdeck" "$dir/cyberdeck" && break
   fi
 done
-command -v steward >/dev/null || log "add $STEWARD_HOME/bin to your PATH to use the 'steward' CLI"
+command -v cyberdeck >/dev/null || log "add $CYBERDECK_HOME/bin to your PATH to use the 'cyberdeck' CLI"
 
 # --- service -----------------------------------------------------------------
 if [ "$OS" = "Darwin" ]; then
-  PLIST="$HOME/Library/LaunchAgents/sh.steward.daemon.plist"
-  mkdir -p "$HOME/Library/LaunchAgents" "$STEWARD_HOME/logs"
-  sed -e "s|@BUN@|$BUN|g" -e "s|@SRC@|$SRC|g" -e "s|@HOME@|$STEWARD_HOME|g" \
-    "$SRC/service/sh.steward.daemon.plist.tmpl" > "$PLIST"
+  PLIST="$HOME/Library/LaunchAgents/sh.cyberdeck.daemon.plist"
+  mkdir -p "$HOME/Library/LaunchAgents" "$CYBERDECK_HOME/logs"
+  sed -e "s|@BUN@|$BUN|g" -e "s|@SRC@|$SRC|g" -e "s|@HOME@|$CYBERDECK_HOME|g" \
+    "$SRC/service/sh.cyberdeck.daemon.plist.tmpl" > "$PLIST"
+  launchctl bootout "gui/$(id -u)/sh.steward.daemon" 2>/dev/null || true; rm -f "$HOME/Library/LaunchAgents/sh.steward.daemon.plist"
   launchctl bootout "gui/$(id -u)" "$PLIST" 2>/dev/null || true
   launchctl bootstrap "gui/$(id -u)" "$PLIST"
-  log "launchd service installed (sh.steward.daemon)"
+  log "launchd service installed (sh.cyberdeck.daemon)"
 elif [ "$OS" = "Linux" ]; then
   UNIT_DIR="$HOME/.config/systemd/user"
-  mkdir -p "$UNIT_DIR" "$STEWARD_HOME/logs"
-  sed -e "s|@BUN@|$BUN|g" -e "s|@SRC@|$SRC|g" -e "s|@HOME@|$STEWARD_HOME|g" \
-    "$SRC/service/steward.service.tmpl" > "$UNIT_DIR/steward.service"
+  mkdir -p "$UNIT_DIR" "$CYBERDECK_HOME/logs"
+  sed -e "s|@BUN@|$BUN|g" -e "s|@SRC@|$SRC|g" -e "s|@HOME@|$CYBERDECK_HOME|g" \
+    "$SRC/service/cyberdeck.service.tmpl" > "$UNIT_DIR/cyberdeck.service"
+  systemctl --user disable --now steward.service 2>/dev/null || true; rm -f "$HOME/.config/systemd/user/steward.service"
   systemctl --user daemon-reload
-  systemctl --user enable --now steward.service
-  log "systemd user service installed (steward.service)"
+  systemctl --user enable --now cyberdeck.service
+  log "systemd user service installed (cyberdeck.service)"
 else
   fail "unsupported OS: $OS"
 fi
 
 # --- open --------------------------------------------------------------------
 sleep 1.5
-"$STEWARD_HOME/bin/steward" open || true
-log "done. UI: http://127.0.0.1:4777  .  CLI: steward status"
+"$CYBERDECK_HOME/bin/cyberdeck" open || true
+log "done. UI: http://127.0.0.1:4777  .  CLI: cyberdeck status"

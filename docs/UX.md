@@ -1,6 +1,6 @@
-# Steward — Web UI/UX Design
+# Cyberdeck — Web UI/UX Design
 
-Authoritative design spec for the Steward web UI (React + Vite + Tailwind, served by the
+Authoritative design spec for the Cyberdeck web UI (React + Vite + Tailwind, served by the
 daemon at `http://localhost:4777`). Companion to `docs/BRIEF.md`. A developer should be able
 to build every screen from this document without mockups.
 
@@ -10,7 +10,7 @@ to build every screen from this document without mockups.
 
 Three words, in priority order: **calm, legible, trustworthy.**
 
-- Steward is a guardian, not a dashboard toy. No gauges, no gradients-for-decoration, no
+- Cyberdeck is a guardian, not a dashboard toy. No gauges, no gradients-for-decoration, no
   confetti. The UI's job is to answer one question instantly — *"is everything safe?"* —
   and then get out of the way.
 - **Green is earned.** The interface is mostly neutral gray. Color appears only to carry
@@ -59,7 +59,7 @@ intended surface.
   --accent-hover:  #6ba1f9;
   --accent-muted:  #1a2c4d;  /* accent-tinted fills, selected nav item bg */
 
-  /* Status — the semantic core of Steward */
+  /* Status — the semantic core of Cyberdeck */
   --ok:        #3fb970;  --ok-muted:    #10281c;  /* safe / redundant / clean */
   --warn:      #d9a03f;  --warn-muted:  #2c2312;  /* at risk / dirty / drifted */
   --danger:    #e5534b;  --danger-muted:#2d1513;  /* single-copy / failed / destructive */
@@ -137,7 +137,7 @@ ever.
   No emoji anywhere in the UI. No filled icon style except status dots.
 - Canonical assignments (do not improvise): Fleet `radar`, Data `database`, Repos
   `git-branch`, Files `folder`, Docker `container`, Vault `lock` / unlocked `lock-open`,
-  Setup `sliders-horizontal`, Steward `shield`, node-mac `laptop`, node-linux `server`,
+  Setup `sliders-horizontal`, Cyberdeck `shield`, node-mac `laptop`, node-linux `server`,
   offline `plug-zap` (dimmed), sync `refresh-cw` (spins while active), redundancy
   `copy-check`, junk `trash-2`, push `arrow-up`, pull `arrow-down`, dirty `circle-dot`.
 - Status is **never icon-only**: every status icon/dot pairs with a text label or tooltip.
@@ -169,7 +169,7 @@ ever.
 
 **Nav rail** (`--bg-surface`, right border `--border-subtle`), top to bottom:
 
-1. Wordmark block: `shield` icon + "Steward" + current node hostname in `text-xs`
+1. Wordmark block: `shield` icon + "Cyberdeck" + current node hostname in `text-xs`
    `--text-tertiary`.
 2. Sections (icon 20px + label `text-sm`; active item gets `--accent-muted` bg,
    `--accent` 2px left bar, `--text-primary`):
@@ -182,7 +182,7 @@ ever.
    - **Vault** `/vault`
    - **Setup** `/setup` — convergence/facets
 3. Spacer, then pinned bottom:
-   - **Steward** `/steward` — self-management (version, update, logs, pairing, this node)
+   - **Cyberdeck** `/cyberdeck` — self-management (version, update, logs, pairing, this node)
    - Theme toggle + collapse-rail button (collapsed rail = 56px, icons + tooltips).
 
 Nav badges: small count pills on sections needing attention — Fleet shows at-risk count
@@ -220,7 +220,7 @@ count (`--warn`). Zero = no pill. This makes the rail itself a status summary.
 /setup                  Convergence matrix (facets × machines)
 /setup/facets/:facetId  Facet definition + per-node drift
 /setup/nodes/:nodeId    One machine's checklist
-/steward                Self view: version, update, daemon log, pairing, identity
+/cyberdeck                Self view: version, update, daemon log, pairing, identity
 ```
 
 Deep-linkable state (selected file in a diff, filter chips, node scope) lives in query
@@ -316,7 +316,7 @@ Responsive grid (min card width 320px, `auto-fill`). One card per node:
 │ Disk ▓▓▓▓▓▓▓░░ 412 / 994 GB             │  ← thin bar, --chart-1; --warn >85%, --danger >95%
 │ Novel 96 GB · Junk 71 GB · Repos 214    │
 │ ⚠ 2 at risk · ↻ syncing 1.2 GB → hub    │  ← status line, only if noteworthy
-│ Steward v0.4.2 · seen just now          │
+│ Cyberdeck v0.4.2 · seen just now          │
 └─────────────────────────────────────────┘
 ```
 
@@ -329,7 +329,7 @@ Responsive grid (min card width 320px, `auto-fill`). One card per node:
 ### Region D — Activity feed (right column on ≥1280px, bottom otherwise)
 
 Reverse-chron event list, 20 items, `text-xs`: "backed up `~/Code/aria` → vault-server
-(2.1 GB)", "pushed `steward` main → origin", "node `deck` came online". Each row has a
+(2.1 GB)", "pushed `cyberdeck` main → origin", "node `deck` came online". Each row has a
 timestamp and links to the object. Live-prepends via WS with a subtle 240ms slide-in.
 
 ---
@@ -341,7 +341,7 @@ timestamp and links to the object. Live-prepends via WS with a subtle 240ms slid
 - **Header strip:** segmented control `Novel | All | Junk` (default Novel) + node scope
   (inherits TopBar) + filter chips: `×1 copies`, `×2`, `>1 GB`, `untracked by git`,
   `stale >90d`.
-- **Main table** of *datasets* — Steward's unit of tracked data (a root directory it has
+- **Main table** of *datasets* — Cyberdeck's unit of tracked data (a root directory it has
   classified, e.g. one project dir under `~/Code`, `~/Documents`, a photo library).
   Columns: name, path (mono), classification `Badge` (`novel | derivable | junk | mixed`),
   size, `RedundancyBadge`, nodes holding copies (NodeChips, deduped), last-verified time,
@@ -457,7 +457,7 @@ remote…** (name + URL). Switching branches with a dirty tree offers: stash & s
 bring changes / cancel.
 
 All git mutations stream their real command output into a collapsible mono footer strip
-("Console") on the repo screen — Steward never hides what git actually said; errors expand
+("Console") on the repo screen — Cyberdeck never hides what git actually said; errors expand
 it automatically.
 
 ---
@@ -606,7 +606,7 @@ state summarizes: "31 applied · 2 failed · 1 skipped" with failure rows expand
 
 Definition card (its type: `brew | dotfile | defaults-write | script | file-sync`; its
 declarative spec rendered as syntax-highlighted source with "edit in repo" — facets live
-as files in the profile repo, stewarded like any repo), per-node status table, and change
+as files in the profile repo, cyberdecked like any repo), per-node status table, and change
 history (git log of the facet file, reusing History components).
 
 ---
@@ -681,7 +681,7 @@ Topics follow the daemon's dot taxonomy (ARCHITECTURE §7): `job.*`, `scan.*`, `
 `node.*`, `backup.*`, `redundancy.changed`, `vault.changed`, `system.*` — payloads carry
 object ids, and the client filters/fans out to query keys. Job-tray state is driven by
 `job.queued|started|progress|done|failed` events. The client (TanStack Query) fetches a
-REST snapshot, reads its `X-Steward-Seq` header, then subscribes `since` that seq —
+REST snapshot, reads its `X-Cyberdeck-Seq` header, then subscribes `since` that seq —
 nothing is missed across reconnects; `SEQ_TOO_OLD` triggers a full refetch. Everything
 on screen is live; there are **no refresh buttons anywhere in the app**.
 
@@ -765,7 +765,7 @@ ui/
       docker/ (index.tsx, container.tsx, ComposeCard.tsx, LogPane.tsx)
       vault/  (index.tsx, Unlock.tsx, ItemDetail.tsx, Generator.tsx, vault.worker.ts)
       setup/  (matrix.tsx, node.tsx, facet.tsx, DriftDrawer.tsx)
-      steward/(index.tsx, Pairing.tsx, DaemonLog.tsx)
+      cyberdeck/(index.tsx, Pairing.tsx, DaemonLog.tsx)
 ```
 
 Libraries (final): React 19, `react-router` (data routers), `@tanstack/react-query` +

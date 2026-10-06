@@ -64,7 +64,7 @@ export function Services({ onLocked }: { onLocked: () => void }) {
                   <span className="flex items-center gap-3 text-[11px] text-zinc-500">
                     <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px]">{h.kind}</span>
                     {h.roles.join(", ")}
-                    {h.steward && <span className="text-zinc-400">steward {h.steward.version} · {h.steward.repos} repos · {h.steward.atRisk} at risk{h.steward.lastScanAt ? ` · scanned ${fmtAgo(h.steward.lastScanAt)}` : ""}</span>}
+                    {h.cyberdeck && <span className="text-zinc-400">cyberdeck {h.cyberdeck.version} · {h.cyberdeck.repos} repos · {h.cyberdeck.atRisk} at risk{h.cyberdeck.lastScanAt ? ` · scanned ${fmtAgo(h.cyberdeck.lastScanAt)}` : ""}</span>}
                     <span className={`hud-badge flex items-center gap-1.5 ${h.online === true ? "neon-green" : h.online === false ? "neon-red" : "text-zinc-500"}`}>
                       <span className={`led ${h.online === true ? "led-on" : h.online === false ? "led-err" : "led-off"}`} />
                       {h.online === true ? "online" : h.online === false ? "unreachable" : "off-tailnet"}

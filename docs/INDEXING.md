@@ -1,7 +1,7 @@
-# Steward — Content Indexing & Redundancy Scoring
+# Cyberdeck — Content Indexing & Redundancy Scoring
 
 Status: design, implementation-ready.
-Scope: the indexer subsystem of the Steward daemon (Bun process). Everything here runs
+Scope: the indexer subsystem of the Cyberdeck daemon (Bun process). Everything here runs
 inside the daemon; the UI and other nodes consume its output via the HTTP API and the
 node-to-node channel described in BRIEF.md.
 
@@ -22,7 +22,7 @@ The indexer answers three questions, continuously and cheaply:
 | **Dataset** | The unit of redundancy accounting. A directory subtree (or single large file) that is treated as one logical thing: a git repo, a project dir, a photo library, `~/Documents/Taxes`. Datasets never nest for scoring purposes (a repo inside `~/Code` is its own dataset; the residue of `~/Code` outside any repo is another). |
 | **Novel** | Data that cannot be regenerated or re-fetched. Losing the last copy = permanent loss. |
 | **Derivable** | Data reproducible from novel data + the network: `node_modules`, build output, caches, pushed git objects, re-downloadable artifacts. |
-| **Location** | A (node, path, kind) triple where a copy of a dataset lives. Kinds: `live` (working tree/dir), `blob` (Steward blob-store snapshot), `remote` (external, e.g. GitHub). |
+| **Location** | A (node, path, kind) triple where a copy of a dataset lives. Kinds: `live` (working tree/dir), `blob` (Cyberdeck blob-store snapshot), `remote` (external, e.g. GitHub). |
 | **Copy** | A location that would survive the loss of every other location. Precise rules in §7. |
 | **Project** | A UI-level grouping of related datasets (the ~300 `~/Code` dirs collapse into far fewer projects). Grouping rules in §8. |
 
@@ -35,7 +35,7 @@ The indexer answers three questions, continuously and cheaply:
 Scan roots are user-configured rows in `scan_roots`, seeded on first run per-OS:
 
 macOS defaults: `~/Code`, `~/Documents`, `~/Desktop`, `~/Downloads`, `~/Pictures`,
-`~/Movies`, `~/Music`, `~/.ssh` (metadata only, never blobbed unencrypted), `~/.steward` excluded.
+`~/Movies`, `~/Music`, `~/.ssh` (metadata only, never blobbed unencrypted), `~/.cyberdeck` excluded.
 Linux defaults: `~/` minus the exclusion list below, plus any user additions like `/srv`, `/data`.
 
 Each root has a `policy`: `deep` (default — full recursion), `shallow` (index only
@@ -106,7 +106,7 @@ API.
 ### 2.5 Watching: FSEvents / inotify
 
 - **macOS:** spawn a long-lived helper using the FSEvents CLI shim we ship
-  (`steward-fswatch`, a ~100-line Swift or `fswatch`-vendored binary) subscribed to each
+  (`cyberdeck-fswatch`, a ~100-line Swift or `fswatch`-vendored binary) subscribed to each
   root; it emits changed *directory paths* (FSEvents granularity) on stdout as
   NDJSON. Bun reads the stream.
 - **Linux:** inotify via Bun FFI (`inotify_init1`/`inotify_add_watch`), recursive-watch
@@ -303,7 +303,7 @@ What counts as a copy (each +1, max one per node per kind):
 | Copy kind | Counts when |
 |---|---|
 | `live` on another node | Fleet manifest shows the dataset on node B with a `content_fingerprint` match, OR (git) same `identity` and B's repo contains all of A's novel commits (B's tips ⊇ A's tips, checked via manifest `git_state_hash` = hash of sorted `(ref,tip)` pairs; mismatch ⇒ counts as **stale copy**, worth +0 but shown in UI as "copy exists, 12 days behind") |
-| `blob` snapshot | A completed Steward blob-store snapshot of the dataset exists on some node, `snapshot.fingerprint == current fingerprint` ⇒ current; else stale (+0, surfaced). Snapshots on the *same* node as the live data count +0 (same-disk death), unless on a distinct physical volume (APFS container / mount device id differs) ⇒ +1 with an "same-machine" annotation. |
+| `blob` snapshot | A completed Cyberdeck blob-store snapshot of the dataset exists on some node, `snapshot.fingerprint == current fingerprint` ⇒ current; else stale (+0, surfaced). Snapshots on the *same* node as the live data count +0 (same-disk death), unless on a distinct physical volume (APFS container / mount device id differs) ⇒ +1 with an "same-machine" annotation. |
 | `remote` | Git only. `objects_novel == false` component: the pushed history counts as +1 copy *of the history*, verified per §5 liveness. It does NOT cover dirty/untracked/stash novelty — score is computed on the **weakest component**: `score(dataset) = min(score(history), score(worktree-novel))` for repos with any worktree novelty. |
 
 Scoring semantics (what the UI paints):
@@ -362,7 +362,7 @@ deleting 41 safe-delete clones; 12 dirs need a push first; 9 are diverged."
 
 ## 9. SQLite schema
 
-`~/.steward/steward.db`, WAL mode, `PRAGMA synchronous=NORMAL`, all timestamps unix ms.
+`~/.cyberdeck/cyberdeck.db`, WAL mode, `PRAGMA synchronous=NORMAL`, all timestamps unix ms.
 
 **The core tables — `nodes`, `scan_roots`, `scans`, `repos`, `files`, `dir_stats`,
 `jobs`, `snapshots`, `blobs` — are canonical in ARCHITECTURE.md §4.2.** The indexer
@@ -506,7 +506,7 @@ src/scan/
   projects.ts       # grouping, suggestions, dedupe verdicts
 src/jobs/scan.ts    # 'scan' handler   src/jobs/repo-audit.ts  # 'repo_audit' handler
 src/api/files.ts src/api/scans.ts …   # Hono routes above (migrations in migrations/)
-native/steward-fswatch/   # macOS FSEvents shim
+native/cyberdeck-fswatch/   # macOS FSEvents shim
 ```
 
 ## 12. Performance & correctness invariants

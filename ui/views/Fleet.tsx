@@ -163,7 +163,7 @@ export function Fleet({ onLocked }: { onLocked: () => void }) {
     <div className="h-full overflow-auto">
       <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
         <h1 className="neon text-lg font-semibold uppercase tracking-[0.15em]">Fleet</h1>
-        <p className="mt-0.5 text-xs text-zinc-500">Every machine running Steward. Pair them and manage any node from any other.</p>
+        <p className="mt-0.5 text-xs text-zinc-500">Every machine running Cyberdeck. Pair them and manage any node from any other.</p>
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           <NodeCard

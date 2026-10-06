@@ -1,17 +1,17 @@
-# Steward Fleet — Multi-Node Design
+# Cyberdeck Fleet — Multi-Node Design
 
 Status: design, implementation-ready.
 Scope: node identity, pairing, transport mesh, RPC protocol, remote management (API
 proxying), fleet state replication, conflict rules, offline handling, security posture.
 
 This document assumes the stack in `docs/BRIEF.md`: Bun + TypeScript daemon, Hono on
-`127.0.0.1:4777`, SQLite at `~/.steward/steward.db`, ed25519 node identity.
+`127.0.0.1:4777`, SQLite at `~/.cyberdeck/cyberdeck.db`, ed25519 node identity.
 
 ---
 
 ## 1. Concepts and vocabulary
 
-- **Node** — one Steward daemon on one machine. Exactly one per machine.
+- **Node** — one Cyberdeck daemon on one machine. Exactly one per machine.
 - **Fleet** — the set of nodes that have all been (transitively) paired. One fleet per
   user. A node belongs to at most one fleet.
 - **Peer record** — a node's signed, self-published metadata document (name, addresses,
@@ -31,9 +31,9 @@ control panel for every other node.** There is no coordinator, no primary, no cl
 
 Each node generates an ed25519 keypair on first boot:
 
-- Private key: `~/.steward/identity/node.key` — 32-byte seed, file mode `0600`, never
+- Private key: `~/.cyberdeck/identity/node.key` — 32-byte seed, file mode `0600`, never
   leaves the machine, never written to SQLite.
-- Public key: `~/.steward/identity/node.pub` (also cached in DB for convenience).
+- Public key: `~/.cyberdeck/identity/node.pub` (also cached in DB for convenience).
 - Generated with `crypto.subtle` ed25519 (supported in Bun); libsodium-wrappers is the
   fallback and is already required for the transport cipher (§4.3), so use
   `libsodium-wrappers` (`crypto_sign_keypair`) for everything — one crypto library,
@@ -88,11 +88,11 @@ Two flows, both initiated from the web UI of an already-running node:
 }
 ```
 
-   URL form: `steward://pair?v=1&id=stw1k7f…&a=192.168.1.20:4778,100.101.5.9:4778&t=u4…`
-   plus an equivalent `https://steward.sh/pair#…` fallback that just renders instructions
+   URL form: `cyberdeck://pair?v=1&id=stw1k7f…&a=192.168.1.20:4778,100.101.5.9:4778&t=u4…`
+   plus an equivalent `https://cyberdeck.sh/pair#…` fallback that just renders instructions
    (fragment never sent to server).
 
-2. On node B's UI: **Add node → Enter link** (or `steward pair <url>` in the CLI). B dials
+2. On node B's UI: **Add node → Enter link** (or `cyberdeck pair <url>` in the CLI). B dials
    each address, runs the transport handshake (§4.3) **pinned to A's nodeId from the URL**
    — so a MITM is impossible — then sends `pair.request` carrying the token and B's peer
    record. A verifies the token (constant-time, single use, unexpired), marks B trusted,
@@ -105,8 +105,8 @@ For when you can see A's screen but can't paste a URL (fresh headless box, phone
 1. Node A UI shows: `Pairing code: 481-905` and its LAN addresses. Internally A calls
    `POST /api/nodes/pairing/start {"mode":"code"}` → 6-digit code, 2-minute TTL, max **3** failed
    attempts fleet-wide before the code is invalidated.
-2. Node B: `steward pair --code 481905 [--host 192.168.1.20]`. Without `--host`, B mDNS-
-   browses for pairable Steward nodes (§4.1) and tries each.
+2. Node B: `cyberdeck pair --code 481905 [--host 192.168.1.20]`. Without `--host`, B mDNS-
+   browses for pairable Cyberdeck nodes (§4.1) and tries each.
 
 A 6-digit code cannot pin a pubkey, so the code authenticates the handshake instead of
 the URL doing it. We use a **PAKE-style confirmation** over the already-established (but
@@ -144,7 +144,7 @@ gossip:
 
 Every node that sees it drops the peer's trust, closes links, and remembers the
 revocation forever (tombstone) so gossip can't resurrect the peer. Re-adding a revoked
-machine requires it to generate a fresh identity (`steward identity reset`) and pair
+machine requires it to generate a fresh identity (`cyberdeck identity reset`) and pair
 again. Any fleet member may revoke any other — acceptable for a single-user fleet.
 
 ---
@@ -157,7 +157,7 @@ again. Any fleet member may revoke any other — acceptable for a single-user fl
 - **Port 4778** (fleet mesh): binds `0.0.0.0`. Speaks **only** the binary handshake
   below — it is not an HTTP server, has no unauthenticated surface beyond the handshake
   parser, and drops connections that don't complete the handshake in 10 s.
-- **mDNS**: advertise `_steward._tcp.local` on port 4778 with TXT records
+- **mDNS**: advertise `_cyberdeck._tcp.local` on port 4778 with TXT records
   `id=<nodeId> v=1 pair=<0|1>` (`pair=1` only while a pairing offer is live). Browse
   continuously; discovered addresses feed the dialer and the peer record's `addrs`.
   Implementation: a small pure-TS mDNS responder over Bun's `udpSocket` (multicast
@@ -173,7 +173,7 @@ again. Any fleet member may revoke any other — acceptable for a single-user fl
   the smaller nodeId, close the other.
 - Address candidates per peer, tried in order: (1) current mDNS-discovered LAN address,
   (2) `addrs` from the peer record (includes tailscale/WireGuard IPs — these make WAN
-  "just work" without Steward doing NAT traversal), (3) relay (§4.5).
+  "just work" without Cyberdeck doing NAT traversal), (3) relay (§4.5).
 - Reconnect with decorrelated jitter backoff: 1 s → cap 60 s. Heartbeat: transport-level
   `ping` every 15 s, drop link after 2 missed pongs (45 s).
 
@@ -189,7 +189,7 @@ Notation: `sA/sB` static X25519 (derived §2.3), `eA/eB` ephemeral X25519,
 
 ```
 M1  dialer → listener:
-    { proto:"steward/1", eA_pub, dst: listener_nodeId }            // plaintext CBOR
+    { proto:"cyberdeck/1", eA_pub, dst: listener_nodeId }            // plaintext CBOR
 M2  listener → dialer:
     eB_pub,
     enc1 = AEAD(k1, listener_cert)         // k1 = HKDF(DH(eA,eB), "stw-hs-1")
@@ -264,7 +264,7 @@ type Frame = Hello | Req | Res | Err | Sub | SubOk | Event | Unsub | Cancel;
 interface Hello {            // first frame in each direction after link-up
   t: "hello";
   proto: 1;                  // RPC protocol major version — mismatch → close 4505
-  app: string;               // steward version, e.g. "0.3.1+gitsha"
+  app: string;               // cyberdeck version, e.g. "0.3.1+gitsha"
   caps: string[];            // capability strings, e.g. ["git","docker","blobs","facets"]
   min: 1; max: 1;            // acceptable proto range; effective = min(max_A, max_B)
 }
@@ -306,7 +306,7 @@ Rules:
   dropped with `Err "unavailable"` (log-shaped topics). Never unbounded buffering.
 - Versioning: `proto` majors gate the frame format. Method-level evolution is additive
   (new methods, new optional params). A method call the peer lacks → `Err "not_found"`,
-  which the UI renders as "node X is on an older Steward" with its `app` version.
+  which the UI renders as "node X is on an older Cyberdeck" with its `app` version.
 
 ### 5.2 Method namespaces (registry)
 
@@ -368,7 +368,7 @@ ANY /api/nodes/:id/proxy/*  →  tunneled to C, replayed against C's 127.0.0.1:4
 
 Implementation: `m:"http.proxy"` RPC carrying `{method, path, headers (allowlist), body?}`
 with chunked response events over a `Sub` for streaming bodies. C's Hono app processes it
-as a normal request with header `x-steward-caller: <A's nodeId>`. Size cap 512 MB, then
+as a normal request with header `x-cyberdeck-caller: <A's nodeId>`. Size cap 512 MB, then
 use the bulk channel. This also gives us "open node C's full UI in a tab" for free:
 `http://127.0.0.1:4777/api/nodes/stw1…C/proxy/` (C's UI assets proxied through A) — useful
 when C is mid-upgrade and its RPC surface is older than A's UI expects.
@@ -506,18 +506,18 @@ Kept deliberately boring:
 - **All remote access = authenticated channel.** There is no auth token, no TLS cert, no
   reverse-proxy mode. Remote UI access to node C is "open any fleet node's UI and proxy"
   (§6) — the WAN story is tailscale/WireGuard addresses in `addrs`, which BRIEF names as
-  the intended connectivity layer. Steward never does its own WAN hole-punching in v1.
+  the intended connectivity layer. Cyberdeck never does its own WAN hole-punching in v1.
 - **Localhost UI trust:** browser and CLI auth against the loopback API (0600
-  `~/.steward/token` → one-time ticket → HttpOnly session cookie, plus Host/Origin/CSRF
+  `~/.cyberdeck/token` → one-time ticket → HttpOnly session cookie, plus Host/Origin/CSRF
   checks) is specified in SECURITY.md §4; the mesh never relies on it.
-- **Key hygiene:** `node.key` is `0600`, excluded from Steward's own backup indexing by
+- **Key hygiene:** `node.key` is `0600`, excluded from Cyberdeck's own backup indexing by
   hardcoded rule (identity must not replicate — that's how clones happen). Vault master
   key material never touches this layer; the fleet moves vault **ciphertext** only.
 - **Relay honesty:** relays carry end-to-end encrypted tunnels (§4.5) — a compromised
   relay node can drop or delay traffic, not read or forge it.
 - **Blast radius of one stolen machine:** its key is a full fleet admin (single-user
   model). Mitigation is revocation (§3.4) from any surviving node, which propagates as a
-  tombstone. Disk-level protection of `~/.steward` is delegated to FileVault/LUKS.
+  tombstone. Disk-level protection of `~/.cyberdeck` is delegated to FileVault/LUKS.
 - **Downgrade safety:** `proto` in `hello` is exchanged inside the encrypted channel;
   version negotiation cannot be tampered by a network attacker.
 

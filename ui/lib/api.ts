@@ -1,14 +1,14 @@
-export const token = () => localStorage.getItem("steward-token") ?? "";
+export const token = () => localStorage.getItem("cyberdeck-token") ?? "";
 
 // ---- active node: "" = local, otherwise a paired node id. All API helpers
 // route through the local daemon's proxy when a remote node is active. ----
-export const activeNode = (): string => localStorage.getItem("steward-active-node") ?? "";
-export const activeNodeName = (): string => localStorage.getItem("steward-active-node-name") ?? "";
+export const activeNode = (): string => localStorage.getItem("cyberdeck-active-node") ?? "";
+export const activeNodeName = (): string => localStorage.getItem("cyberdeck-active-node-name") ?? "";
 
 export function setActiveNode(id: string, name: string): void {
-  localStorage.setItem("steward-active-node", id);
-  localStorage.setItem("steward-active-node-name", name);
-  window.dispatchEvent(new Event("steward-node-changed"));
+  localStorage.setItem("cyberdeck-active-node", id);
+  localStorage.setItem("cyberdeck-active-node-name", name);
+  window.dispatchEvent(new Event("cyberdeck-node-changed"));
 }
 
 /** Map "/api/<rest>" onto the active node (via proxy) or leave local. */

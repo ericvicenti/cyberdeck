@@ -8,7 +8,7 @@ import type { Hono } from "hono";
 import type { Database } from "bun:sqlite";
 import { networkInterfaces } from "os";
 import { randomBytes, randomInt, timingSafeEqual } from "crypto";
-import type { StewardConfig } from "../config";
+import type { CyberdeckConfig } from "../config";
 import { currentCommit, nudgePeer, maybeSelfUpdate } from "../updater";
 
 export type NodeRow = {
@@ -51,7 +51,7 @@ async function peerFetch(node: NodeRow, path: string, init?: RequestInit): Promi
 export function registerFleetRoutes(
   app: Hono,
   db: Database,
-  cfg: StewardConfig,
+  cfg: CyberdeckConfig,
   nodeId: string,
   myToken: string,
   upgradeWebSocket: any

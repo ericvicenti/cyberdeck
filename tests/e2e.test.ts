@@ -1,4 +1,4 @@
-// Full-app e2e: real daemon (sandboxed STEWARD_HOME), real built UI, real
+// Full-app e2e: real daemon (sandboxed CYBERDECK_HOME), real built UI, real
 // Chromium. Covers browse, create, edit/save, rename, copy/paste, chmod,
 // symlinks, hidden files, upload, delete, and the web terminal.
 import { test, expect, beforeAll, afterAll } from "bun:test";
@@ -13,7 +13,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const TOKEN = "e2e-test-token";
 const ROOT = join(import.meta.dir, "..");
 
-let stewardHome: string;
+let cyberdeckHome: string;
 let play: string; // playground dir inside $HOME (fs API is home-confined)
 let daemon: Subprocess;
 let browser: Browser;
@@ -47,11 +47,11 @@ const rowMenu = async (name: string, itemLabel: string) => {
 
 beforeAll(async () => {
   // sandboxed daemon home
-  stewardHome = mkdtempSync(join(tmpdir(), "steward-e2e-home-"));
-  writeFileSync(join(stewardHome, "token"), TOKEN);
-  play = mkdtempSync(join(homedir(), ".steward-e2e-play-"));
+  cyberdeckHome = mkdtempSync(join(tmpdir(), "cyberdeck-e2e-home-"));
+  writeFileSync(join(cyberdeckHome, "token"), TOKEN);
+  play = mkdtempSync(join(homedir(), ".cyberdeck-e2e-play-"));
   writeFileSync(
-    join(stewardHome, "config.json"),
+    join(cyberdeckHome, "config.json"),
     JSON.stringify({ nodeName: "e2e-node", port: PORT, bind: "127.0.0.1", roots: [play], dataRoots: [join(play, "userdata")], cacheDirs: ["Caches"], watch: false, autoUpdate: false, junkDirs: ["node_modules"], skipDirs: [".git"], scanDepth: 2, fleetDir: null })
   );
   writeFileSync(join(play, "readme.md"), "# playground\n");
@@ -65,7 +65,7 @@ beforeAll(async () => {
   writeFileSync(join(play, "userdata", "Caches", "junk"), "cache bytes");
 
   daemon = Bun.spawn(["bun", "run", join(ROOT, "src/daemon/main.ts")], {
-    env: { ...process.env, STEWARD_HOME: stewardHome },
+    env: { ...process.env, CYBERDECK_HOME: cyberdeckHome },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -89,13 +89,13 @@ afterAll(async () => {
   await browser?.close();
   daemon?.kill();
   daemon2?.kill();
-  rmSync(stewardHome, { recursive: true, force: true });
+  rmSync(cyberdeckHome, { recursive: true, force: true });
   if (home2) rmSync(home2, { recursive: true, force: true });
   rmSync(play, { recursive: true, force: true });
 });
 
 test("shell renders: title bar, activity bar, fleet home", async () => {
-  expect(await page.textContent("header")).toContain("Steward");
+  expect(await page.textContent("header")).toContain("Cyberdeck");
   expect(await page.isVisible('[data-testid="nav-files"]')).toBe(true);
   expect(await page.textContent("main")).toContain("this machine");
 });
@@ -300,7 +300,7 @@ let daemon2: Subprocess | undefined;
 let home2: string | undefined;
 
 test("fleet: pair a second node via the UI and browse it", async () => {
-  home2 = mkdtempSync(join(tmpdir(), "steward-e2e-home2-"));
+  home2 = mkdtempSync(join(tmpdir(), "cyberdeck-e2e-home2-"));
   writeFileSync(join(home2, "token"), "e2e-token-two");
   writeFileSync(join(home2, "node-id"), "stw-e2e-two");
   writeFileSync(
@@ -308,7 +308,7 @@ test("fleet: pair a second node via the UI and browse it", async () => {
     JSON.stringify({ nodeName: "second-box", port: 4796, bind: "127.0.0.1", roots: [], dataRoots: [], watch: false, autoUpdate: false, junkDirs: [], skipDirs: [], scanDepth: 1 , fleetDir: null })
   );
   daemon2 = Bun.spawn(["bun", "run", join(ROOT, "src/daemon/main.ts")], {
-    env: { ...process.env, STEWARD_HOME: home2 },
+    env: { ...process.env, CYBERDECK_HOME: home2 },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -442,6 +442,6 @@ test("mobile: bottom nav, compact files table, no tree", async () => {
 test("auth: wrong token is locked out", async () => {
   const p2 = await browser.newPage();
   await p2.goto(`${BASE}/#t=wrong-token`);
-  await p2.waitForSelector("text=Steward is locked");
+  await p2.waitForSelector("text=Cyberdeck is locked");
   await p2.close();
 });

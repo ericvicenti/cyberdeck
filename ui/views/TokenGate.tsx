@@ -6,17 +6,17 @@ export function TokenGate() {
     <div className="flex min-h-screen items-center justify-center">
       <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900/60 p-8">
         <div className="text-3xl">🛡️</div>
-        <h1 className="mt-3 text-xl font-semibold text-zinc-100">Steward is locked</h1>
+        <h1 className="mt-3 text-xl font-semibold text-zinc-100">Cyberdeck is locked</h1>
         <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-          Run <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-200">steward open</code> in a
+          Run <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-200">cyberdeck open</code> in a
           terminal to open an authenticated session, or paste the token from{" "}
-          <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-200">~/.steward/token</code>.
+          <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-200">~/.cyberdeck/token</code>.
         </p>
         <form
           className="mt-5 flex gap-2"
           onSubmit={(e) => {
             e.preventDefault();
-            localStorage.setItem("steward-token", value.trim());
+            localStorage.setItem("cyberdeck-token", value.trim());
             location.reload();
           }}
         >

@@ -10,7 +10,7 @@ Phasing at a glance:
 | Phase | Scope |
 |-------|-------|
 | **v0** | Local-node Docker: engine discovery, list/inspect containers/images/volumes/networks, start/stop/restart/rm, logs + exec over WS, compose project detection (read-only), disk usage + prune *suggestions* (no auto-prune). |
-| **v1** | Fleet Docker (same UI against any node), compose up/down/restart, guarded prune execution, docker event stream → live UI. Git sync: bare mirrors, git-over-steward-channel transport, auto-push policies, mirror redundancy feeding the redundancy score. |
+| **v1** | Fleet Docker (same UI against any node), compose up/down/restart, guarded prune execution, docker event stream → live UI. Git sync: bare mirrors, git-over-cyberdeck-channel transport, auto-push policies, mirror redundancy feeding the redundancy score. |
 | **v2** | CI: YAML workflows in repos, docker-executed jobs on chosen nodes, log streaming, per-commit status. SSH transport fallback for git sync. |
 
 Everything below is implementation-ready for its phase; v2 sections are design-complete
@@ -77,7 +77,7 @@ Two consumers with different needs:
 - **Fleet overview / redundancy engine / offline nodes** want "what did this node's
   Docker look like last time we saw it" → periodic snapshot in SQLite.
 
-Snapshot tables (in `~/.steward/steward.db`; `node_id` is the fleet-wide node key so
+Snapshot tables (in `~/.cyberdeck/cyberdeck.db`; `node_id` is the fleet-wide node key so
 snapshots gossip between nodes like other fleet state):
 
 ```sql
@@ -158,7 +158,7 @@ name; the daemon passes them through — the engine resolves.
 
 ### 1.4 WebSocket protocol for logs / exec / progress
 
-One multiplexed WS at `GET /api/ws` (shared with the rest of Steward; base protocol in
+One multiplexed WS at `GET /api/ws` (shared with the rest of Cyberdeck; base protocol in
 ARCHITECTURE.md §6.3). Docker adds **stream frames** to that protocol — same `t`
 discriminator, `id`-scoped like subscriptions. Binary payloads (terminal bytes) are
 base64 inside JSON for v0 — simple, and log volume doesn't justify binary framing yet.
@@ -217,7 +217,7 @@ Two sources, merged by project name:
 CREATE TABLE compose_file (
   node_id      TEXT NOT NULL,
   path         TEXT NOT NULL,           -- absolute path
-  project_name TEXT NOT NULL,           -- x-steward name > top-level `name:` > dirname
+  project_name TEXT NOT NULL,           -- x-cyberdeck name > top-level `name:` > dirname
   parsed_json  TEXT,                    -- normalized parse, NULL if parse failed
   parse_error  TEXT,
   mtime        INTEGER NOT NULL,
@@ -253,7 +253,7 @@ CREATE TABLE compose_file (
 ```
 
 `orphaned` = engine labels with no known file (file deleted or on another machine) —
-a first-class UI state, since that's exactly the "what is this?" question Steward exists
+a first-class UI state, since that's exactly the "what is this?" question Cyberdeck exists
 to answer.
 
 **Control (v1)** shells out, always with explicit flags so state can't drift with the
@@ -298,11 +298,11 @@ Risk tiers are policy, hardcoded:
 
 - `safe` — one-click in v1 (still shows a confirm with reclaimable bytes).
 - `moderate` — requires expanding the item list and confirming.
-- `manual-only` — **volumes are novel data until proven otherwise.** Steward never
+- `manual-only` — **volumes are novel data until proven otherwise.** Cyberdeck never
   offers bulk volume prune. Deleting a volume is per-volume, requires typing its name
   (GitHub-repo-delete style), and is logged to the daemon's audit log. A future
   refinement can downgrade a volume to `derivable` if a facet/compose file marks it
-  `x-steward.derivable: true`.
+  `x-cyberdeck.derivable: true`.
 
 `POST /api/docker/prune {actions:[ids], dryRun}` (v1) executes via the engine's native
 prune endpoints (`/images/prune`, `/containers/prune`, `/build/prune`) and returns
@@ -333,7 +333,7 @@ ui/src/routes/docker/     # per UX.md §14
 
 ### 2.1 Concept
 
-Every node can hold **bare mirrors** of repos under `~/.steward/mirrors/`. A mirror is
+Every node can hold **bare mirrors** of repos under `~/.cyberdeck/mirrors/`. A mirror is
 a full clone of committed history — which makes it simultaneously (a) a GitHub-free
 remote you can push/pull against from any node, and (b) a redundancy copy: a repo whose
 committed data exists as mirrors on N healthy nodes has committed-data redundancy N+1.
@@ -344,12 +344,12 @@ those; the repo UI must show both numbers, not blur them.)
 
 Mirrors need an identity stable across path renames and across nodes. Rules:
 
-1. On first index of a repo, the daemon reads `git config steward.repoid`. If absent,
-   generate `r_<ulid>` and write it (`git config steward.repoid r_01J...`). This
+1. On first index of a repo, the daemon reads `git config cyberdeck.repoid`. If absent,
+   generate `r_<ulid>` and write it (`git config cyberdeck.repoid r_01J...`). This
    travels with clones? — no, git config doesn't clone. So additionally:
 2. Match key for correlating clones that don't share config: `root_commits` = sorted
    SHAs of `git rev-list --max-parents=0 HEAD` (cheap, cached). Two repos with
-   intersecting root commits and no `steward.repoid` conflict are offered as "same
+   intersecting root commits and no `cyberdeck.repoid` conflict are offered as "same
    project" in the UI; the user confirms merge → both get the same repoid. Auto-merge
    only when root commits match exactly *and* origin URLs match.
 3. Empty repos (no commits) get a repoid but can't be correlated; fine.
@@ -360,7 +360,7 @@ correlation key used below). Git-sync adds:
 
 ```sql
 CREATE TABLE repo_identity (
-  repo_id      TEXT PRIMARY KEY,        -- r_<ulid>, written to `git config steward.repoid`
+  repo_id      TEXT PRIMARY KEY,        -- r_<ulid>, written to `git config cyberdeck.repoid`
   display_name TEXT NOT NULL,
   root_commits TEXT NOT NULL DEFAULT '[]',
   created_at   INTEGER NOT NULL
@@ -387,11 +387,11 @@ CREATE TABLE repo_sync_policy (
 );
 ```
 
-Mirror path on disk: `~/.steward/mirrors/<repo_id>.git` (bare,
-`git init --bare` + fetch; a `steward.json` file inside stores
+Mirror path on disk: `~/.cyberdeck/mirrors/<repo_id>.git` (bare,
+`git init --bare` + fetch; a `cyberdeck.json` file inside stores
 `{repoId, displayName}` for humans poking around).
 
-### 2.3 Transport: git-over-steward-channel
+### 2.3 Transport: git-over-cyberdeck-channel
 
 Core trick: **each daemon exposes git smart-HTTP on localhost and proxies to peers
 over the existing authenticated node channel.** Git itself never learns about node
@@ -404,7 +404,7 @@ POST /git/:nodeId/:repoId.git/git-receive-pack
 ```
 
 - Local daemon (`nodeId = self`): spawn
-  `git http-backend` via CGI env (`GIT_PROJECT_ROOT=~/.steward/mirrors`,
+  `git http-backend` via CGI env (`GIT_PROJECT_ROOT=~/.cyberdeck/mirrors`,
   `GIT_HTTP_EXPORT_ALL=1`, `PATH_INFO=/<repoId>.git/...`), piping request body →
   stdin, stdout → response. `http-backend` handles both smart services and
   `http.receivepack` is enabled by setting `http.receivepack=true` in each mirror's
@@ -416,16 +416,16 @@ POST /git/:nodeId/:repoId.git/git-receive-pack
 So from any checkout, a mirror remote is plain git:
 
 ```
-git remote add steward http://127.0.0.1:4777/git/<nodeId>/<repoId>.git
+git remote add cyberdeck http://127.0.0.1:4777/git/<nodeId>/<repoId>.git
 ```
 
-The daemon writes this remote (named `steward`) into checkouts automatically when a
+The daemon writes this remote (named `cyberdeck`) into checkouts automatically when a
 sync policy is enabled, and rewrites it if the hosting node changes. Because the URL
 targets localhost, no credentials are ever stored in git config.
 
-**SSH fallback (v2):** for peers reachable by ssh but not yet running Steward (or
-during recovery), `git push ssh://user@host/~/.steward/mirrors/<repoId>.git` works
-because mirrors are ordinary bare repos. Steward can generate the command; it does not
+**SSH fallback (v2):** for peers reachable by ssh but not yet running Cyberdeck (or
+during recovery), `git push ssh://user@host/~/.cyberdeck/mirrors/<repoId>.git` works
+because mirrors are ordinary bare repos. Cyberdeck can generate the command; it does not
 manage ssh keys in v1.
 
 ### 2.4 Sync algorithm & auto-push
@@ -442,7 +442,7 @@ checkouts). Flow for a repo with policy enabled:
    - `on-commit`: the indexer's fs-watcher already watches `.git/HEAD` and
      `.git/refs/**`; on change, debounce 10s, then sync.
    - `interval`: timer per policy.
-   - `manual`: UI button / `steward repo push`.
+   - `manual`: UI button / `cyberdeck repo push`.
 3. **Push.** For each target mirror, from the checkout:
    `git push --prune http://127.0.0.1:4777/git/<node>/<repoId>.git
    +refs/heads/*:refs/heads/* +refs/tags/*:refs/tags/*`
@@ -477,8 +477,8 @@ POST /api/repos/:repoId/sync                → sync now (202; progress over WS 
                                               'repo.sync')
 ```
 
-CLI: `steward repo mirrors <path>`, `steward repo push <path>`,
-`steward repo policy <path> --auto-push on-commit --replicas 2`.
+CLI: `cyberdeck repo mirrors <path>`, `cyberdeck repo push <path>`,
+`cyberdeck repo policy <path> --auto-push on-commit --replicas 2`.
 
 New daemon code: `src/gitsync/{identity.ts, mirrors.ts, placement.ts, pusher.ts,
 httpbackend.ts, routes.ts}`.
@@ -489,17 +489,17 @@ httpbackend.ts, routes.ts}`.
 
 ### 3.1 Shape
 
-GitHub-Actions-like, radically smaller. A repo opts in with `.steward/ci.yml`.
+GitHub-Actions-like, radically smaller. A repo opts in with `.cyberdeck/ci.yml`.
 Workflows trigger on pushes **to the repo's mirrors** (git sync is the event source —
 no webhooks needed: the receiving daemon's `post-receive` hook, installed into every
 mirror at creation, POSTs `{repoId, refUpdates}` to `localhost:4777/internal/git-hook`).
 Jobs run in Docker containers on nodes you select. Status lands per commit and shows in
-Steward's repo/commit UI.
+Cyberdeck's repo/commit UI.
 
 ### 3.2 Workflow YAML
 
 ```yaml
-# .steward/ci.yml
+# .cyberdeck/ci.yml
 name: checks
 on:
   push:
@@ -581,12 +581,12 @@ Eligible runners poll the coordinator (over the node channel) for `queued` jobs 
 **Job execution on the runner:**
 
 1. `git clone --depth 50 http://127.0.0.1:4777/git/<coordinator>/<repoId>.git` into a
-   fresh workdir `~/.steward/ci/<runId>/<job>/src`, `git checkout <sha>`. Local git
+   fresh workdir `~/.cyberdeck/ci/<runId>/<job>/src`, `git checkout <sha>`. Local git
    transport again — CI needs no credentials, ever.
 2. Create container: image from YAML (pull if missing, progress into log), workdir
    bind-mounted at `/work`, `--workdir /work`, no other mounts. Cache: one named
-   volume `steward-ci-cache-<repoId>-<job>` mounted at `/cache` with
-   `STEWARD_CACHE=/cache` exported; tools can be pointed at it. Network on;
+   volume `cyberdeck-ci-cache-<repoId>-<job>` mounted at `/cache` with
+   `CYBERDECK_CACHE=/cache` exported; tools can be pointed at it. Network on;
    resource caps `--memory 8g --cpus 4` (node-config overridable).
 3. Steps run sequentially as `docker exec` invocations of
    `/bin/sh -euc '<script>'` in the one container (state persists between steps,

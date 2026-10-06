@@ -45,14 +45,14 @@ test("shellcheck-lite: unbraced variables directly followed by word chars", () =
 test(
   "install.sh completes a full sandboxed install (update branch skipped services)",
   async () => {
-    const sandbox = join(tmpdir(), `steward-install-test-${process.pid}`);
+    const sandbox = join(tmpdir(), `cyberdeck-install-test-${process.pid}`);
     rmSync(sandbox, { recursive: true, force: true });
     try {
       const proc = Bun.spawn(["bash", join(ROOT, "install.sh")], {
         env: {
           ...process.env,
-          STEWARD_HOME: sandbox,
-          STEWARD_TEST: "1", // skip service registration, PATH links, browser open
+          CYBERDECK_HOME: sandbox,
+          CYBERDECK_TEST: "1", // skip service registration, PATH links, browser open
         },
         stdout: "pipe",
         stderr: "pipe",
@@ -66,13 +66,13 @@ test(
 
       expect(existsSync(join(sandbox, "src", ".git"))).toBe(true);
       expect(existsSync(join(sandbox, "src", "dist", "ui", "index.html"))).toBe(true);
-      expect(existsSync(join(sandbox, "bin", "steward"))).toBe(true);
-      const shim = readFileSync(join(sandbox, "bin", "steward"), "utf8");
-      expect(shim).toContain("src/cli/steward.ts");
+      expect(existsSync(join(sandbox, "bin", "cyberdeck"))).toBe(true);
+      const shim = readFileSync(join(sandbox, "bin", "cyberdeck"), "utf8");
+      expect(shim).toContain("src/cli/cyberdeck.ts");
 
       // Second run exercises the update branch.
       const proc2 = Bun.spawn(["bash", join(ROOT, "install.sh")], {
-        env: { ...process.env, STEWARD_HOME: sandbox, STEWARD_TEST: "1" },
+        env: { ...process.env, CYBERDECK_HOME: sandbox, CYBERDECK_TEST: "1" },
         stdout: "pipe",
         stderr: "pipe",
       });

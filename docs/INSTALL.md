@@ -1,25 +1,25 @@
-# Steward — Installation & Daemonization Design
+# Cyberdeck — Installation & Daemonization Design
 
 Status: design, implementation-ready.
-Owns: `install.sh`, the `steward` CLI shim, launchd/systemd integration, uninstall, updates.
-Depends on: BRIEF.md (authoritative vision), port 4777, `~/.steward/` layout.
+Owns: `install.sh`, the `cyberdeck` CLI shim, launchd/systemd integration, uninstall, updates.
+Depends on: BRIEF.md (authoritative vision), port 4777, `~/.cyberdeck/` layout.
 
 ---
 
 ## 1. Goals & invariants
 
-1. `curl -fsSL https://steward.sh/install | bash` gets a machine from zero to a running,
-   daemonized Steward with the web UI open in the browser, in under 90 seconds on a
+1. `curl -fsSL https://cyberdeck.sh/install | bash` gets a machine from zero to a running,
+   daemonized Cyberdeck with the web UI open in the browser, in under 90 seconds on a
    normal connection.
 2. **Idempotent.** Re-running the installer on any machine (fresh, healthy, half-broken,
    ancient version) always converges to a healthy current install. The installer *is* the
    repair tool.
-3. **Everything lives under `~/.steward/`** plus exactly one service registration file
+3. **Everything lives under `~/.cyberdeck/`** plus exactly one service registration file
    (launchd plist or systemd unit) and one optional PATH line in the shell rc. Uninstall
    removes precisely those things.
 4. **The daemon runs from its own git checkout**, per BRIEF promise 6. The real mechanism
-   is `~/.steward/checkouts/<sha>` worktrees behind an atomic `~/.steward/current` symlink
-   (ARCHITECTURE.md §9); `~/.steward/src` is kept as a symlink alias to `current`. There is
+   is `~/.cyberdeck/checkouts/<sha>` worktrees behind an atomic `~/.cyberdeck/current` symlink
+   (ARCHITECTURE.md §9); `~/.cyberdeck/src` is kept as a symlink alias to `current`. There is
    no compiled release artifact in v1; "install" = clone + `bun install` + build UI.
 5. The installer is plain POSIX-ish bash (target: bash 3.2, the macOS default) with zero
    dependencies beyond `curl`, `tar`/`unzip`, and standard coreutils. It must run correctly
@@ -32,8 +32,8 @@ Non-goals: Windows, root-owned installs on macOS, package managers (brew/apt) in
 ## 2. On-disk layout (final)
 
 ```
-~/.steward/
-├── steward.db              # SQLite (bun:sqlite), created by daemon on first run
+~/.cyberdeck/
+├── cyberdeck.db              # SQLite (bun:sqlite), created by daemon on first run
 ├── blobs/                  # content-addressed backup store (daemon-managed)
 ├── checkouts/
 │   ├── .repo/              # primary clone (git fetch target); worktrees come from it
@@ -43,10 +43,10 @@ Non-goals: Windows, root-owned installs on macOS, package managers (brew/apt) in
 │       ├── ui/             #   React+Vite+Tailwind source
 │       └── dist/ui/        #   built static assets, served by daemon (gitignored)
 ├── current -> checkouts/<sha>   # active version; atomic symlink swap = version switch
-├── src -> current          # compat alias (BRIEF's "~/.steward/src")
+├── src -> current          # compat alias (BRIEF's "~/.cyberdeck/src")
 ├── bin/
-│   ├── steward             # CLI shim (bash script, §7)
-│   └── steward-daemon-shim # execs $STEWARD_BUN $STEWARD_HOME/current/src/daemon/main.ts
+│   ├── cyberdeck             # CLI shim (bash script, §7)
+│   └── cyberdeck-daemon-shim # execs $CYBERDECK_BUN $CYBERDECK_HOME/current/src/daemon/main.ts
 ├── env                     # KEY=VALUE overrides sourced by shim & daemon (§2.1)
 ├── daemon.lock             # flock singleton lock (ARCHITECTURE.md §1.3)
 ├── daemon.json             # runtime manifest {pid, port, version, gitSha}
@@ -61,29 +61,29 @@ Non-goals: Windows, root-owned installs on macOS, package managers (brew/apt) in
 └── install.meta.json       # written by installer: version, channel, timestamps (§2.2)
 ```
 
-Service registration (outside `~/.steward/`):
+Service registration (outside `~/.cyberdeck/`):
 
-- macOS: `~/Library/LaunchAgents/sh.steward.daemon.plist`
-- Linux (user): `~/.config/systemd/user/steward.service`
-- Linux (system, headless servers): `/etc/systemd/system/steward.service` + system user `steward`
+- macOS: `~/Library/LaunchAgents/sh.cyberdeck.daemon.plist`
+- Linux (user): `~/.config/systemd/user/cyberdeck.service`
+- Linux (system, headless servers): `/etc/systemd/system/cyberdeck.service` + system user `cyberdeck`
 
 Bun: installed to the standard `~/.bun` if missing. We do **not** vendor bun under
-`~/.steward` — sharing the user's bun avoids duplicate multi-hundred-MB runtimes, and the
+`~/.cyberdeck` — sharing the user's bun avoids duplicate multi-hundred-MB runtimes, and the
 shim pins the path explicitly so a user-upgraded bun can't silently break us only at the
-"we always use `$STEWARD_BUN`" level (§2.1).
+"we always use `$CYBERDECK_BUN`" level (§2.1).
 
-### 2.1 `~/.steward/env`
+### 2.1 `~/.cyberdeck/env`
 
 Sourced (bash) by the shim; parsed (KEY=VALUE, `#` comments) by the daemon at boot.
 Installer writes it once with defaults if absent; never overwrites existing values.
 
 ```sh
-STEWARD_PORT=4777
-STEWARD_HOME=/Users/eric/.steward
-STEWARD_BUN=/Users/eric/.bun/bin/bun        # absolute path pinned at install time
-STEWARD_CHANNEL=main                         # git branch to track for updates
-STEWARD_REPO=https://github.com/ericvicenti/steward.git
-STEWARD_HEADLESS=0                           # 1 = never try to open a browser
+CYBERDECK_PORT=4777
+CYBERDECK_HOME=/Users/eric/.cyberdeck
+CYBERDECK_BUN=/Users/eric/.bun/bin/bun        # absolute path pinned at install time
+CYBERDECK_CHANNEL=main                         # git branch to track for updates
+CYBERDECK_REPO=https://github.com/ericvicenti/cyberdeck.git
+CYBERDECK_HEADLESS=0                           # 1 = never try to open a browser
 ```
 
 ### 2.2 `install.meta.json`
@@ -107,7 +107,7 @@ the installer script itself is stale.
 
 ## 3. `install.sh` — exact flow
 
-Served at `https://steward.sh/install` (and checked into repo as `install.sh`; the website
+Served at `https://cyberdeck.sh/install` (and checked into repo as `install.sh`; the website
 route just serves the file from the `main` branch). The script sets `set -euo pipefail`
 (with a bash-3.2-safe pipefail guard), defines everything in functions, and calls
 `main "$@"` on the **last line** so a truncated curl download executes nothing.
@@ -116,23 +116,23 @@ Flags (parsed from `$@`, which works with `curl | bash -s -- --flag`):
 
 ```
 --headless          no browser open, implies non-interactive
---system            Linux only: system-wide systemd unit under user 'steward' (§9)
---port N            override port (writes STEWARD_PORT to env file)
+--system            Linux only: system-wide systemd unit under user 'cyberdeck' (§9)
+--port N            override port (writes CYBERDECK_PORT to env file)
 --channel BRANCH    track a branch other than main
 --repo URL          alternate git remote (dev/fork installs)
 --no-start          install everything but don't start the daemon
---uninstall         remove Steward (§6)
+--uninstall         remove Cyberdeck (§6)
 ```
 
 ### Step 0 — Preamble & environment probe
 
 ```
 main():
-  log "steward installer v$INSTALLER_VERSION"
+  log "cyberdeck installer v$INSTALLER_VERSION"
   detect_platform          # step 1
   parse_flags "$@"
-  mkdir -p ~/.steward/{bin,logs}; touch ~/.steward/install.log
-  exec > >(tee -a ~/.steward/install.log) 2>&1     # everything logged
+  mkdir -p ~/.cyberdeck/{bin,logs}; touch ~/.cyberdeck/install.log
+  exec > >(tee -a ~/.cyberdeck/install.log) 2>&1     # everything logged
 ```
 
 ### Step 1 — Detect OS/arch
@@ -156,35 +156,35 @@ ARCH=$(uname -m) # arm64|aarch64 -> arm64 ; x86_64 -> x64 ; else fatal
 
 ```
 find_bun():
-  candidates: $STEWARD_BUN (from existing env file), $(command -v bun), ~/.bun/bin/bun
+  candidates: $CYBERDECK_BUN (from existing env file), $(command -v bun), ~/.bun/bin/bun
   accept first that exists and `$bun --version` >= MIN_BUN (currently 1.1.30)
 install if none:
   curl -fsSL https://bun.sh/install | BUN_INSTALL="$HOME/.bun" bash
   BUN=~/.bun/bin/bun; verify `$BUN --version`
 ```
 
-The resolved absolute path is pinned as `STEWARD_BUN` in `~/.steward/env`. If an existing
+The resolved absolute path is pinned as `CYBERDECK_BUN` in `~/.cyberdeck/env`. If an existing
 env file pins a bun that no longer exists or is too old, re-resolve and rewrite that one key
 (idempotent repair).
 
 ### Step 3 — Clone or update source (checkouts + `current` symlink)
 
 ```
-if [ ! -d ~/.steward/checkouts/.repo/.git ]; then
-  rm -rf ~/.steward/checkouts                 # kill any half-clone debris
-  git clone --branch "$CHANNEL" "$REPO" ~/.steward/checkouts/.repo
+if [ ! -d ~/.cyberdeck/checkouts/.repo/.git ]; then
+  rm -rf ~/.cyberdeck/checkouts                 # kill any half-clone debris
+  git clone --branch "$CHANNEL" "$REPO" ~/.cyberdeck/checkouts/.repo
 else
-  git -C ~/.steward/checkouts/.repo remote set-url origin "$REPO"
-  git -C ~/.steward/checkouts/.repo fetch origin "$CHANNEL"
+  git -C ~/.cyberdeck/checkouts/.repo remote set-url origin "$REPO"
+  git -C ~/.cyberdeck/checkouts/.repo fetch origin "$CHANNEL"
 fi
-if active_checkout_is_dirty; then             # dirty = a dev hacking on ~/.steward/src
+if active_checkout_is_dirty; then             # dirty = a dev hacking on ~/.cyberdeck/src
   log "WARN: active checkout has local changes; skipping source update"
   # never clobber. Build proceeds from the dirty worktree's HEAD in place.
-  COMMIT=$(git -C ~/.steward/src rev-parse --short HEAD)
+  COMMIT=$(git -C ~/.cyberdeck/src rev-parse --short HEAD)
 else
-  COMMIT=$(git -C ~/.steward/checkouts/.repo rev-parse --short "origin/$CHANNEL")
-  [ -d ~/.steward/checkouts/$COMMIT ] || \
-    git -C ~/.steward/checkouts/.repo worktree add ~/.steward/checkouts/$COMMIT "origin/$CHANNEL"
+  COMMIT=$(git -C ~/.cyberdeck/checkouts/.repo rev-parse --short "origin/$CHANNEL")
+  [ -d ~/.cyberdeck/checkouts/$COMMIT ] || \
+    git -C ~/.cyberdeck/checkouts/.repo worktree add ~/.cyberdeck/checkouts/$COMMIT "origin/$CHANNEL"
 fi
 # 'current' is repointed only after step 4 succeeds; 'src -> current' alias maintained.
 ```
@@ -195,7 +195,7 @@ alone do not count as dirty (they survive `reset --hard` anyway).
 ### Step 4 — Install deps & build UI
 
 ```
-cd ~/.steward/checkouts/$COMMIT      # (or the dirty active checkout, per step 3)
+cd ~/.cyberdeck/checkouts/$COMMIT      # (or the dirty active checkout, per step 3)
 $BUN install --frozen-lockfile
 $BUN run build          # package.json script: vite build ui -> dist/ui
 $BUN run selfcheck      # src/daemon/main.ts --selfcheck: loads modules, opens throwaway
@@ -205,32 +205,32 @@ $BUN run selfcheck      # src/daemon/main.ts --selfcheck: loads modules, opens t
 If `--frozen-lockfile` fails (lockfile drift on a dirty dev checkout), retry once without
 the flag and log a warning. Any build/selfcheck failure is fatal *before* we touch the
 running service — an existing healthy daemon keeps running on its old code (§5). On
-success, atomically repoint `~/.steward/current` at the new checkout (temp symlink +
-`mv -f`) and ensure the `~/.steward/src -> current` alias exists.
+success, atomically repoint `~/.cyberdeck/current` at the new checkout (temp symlink +
+`mv -f`) and ensure the `~/.cyberdeck/src -> current` alias exists.
 
 ### Step 5 — Write CLI shim + env file
 
-- Write `~/.steward/bin/steward` (full script in §7), `chmod +x`.
-- Write `~/.steward/env` if absent; otherwise patch only `STEWARD_BUN` (and `STEWARD_PORT`
-  if `--port` given, `STEWARD_CHANNEL` if `--channel` given).
-- PATH: if `~/.steward/bin` is not already on PATH, append one guarded line to the rc file
-  (`~/.zshrc` on macOS/zsh, `~/.bashrc` else; also `~/.config/fish/conf.d/steward.fish`
+- Write `~/.cyberdeck/bin/cyberdeck` (full script in §7), `chmod +x`.
+- Write `~/.cyberdeck/env` if absent; otherwise patch only `CYBERDECK_BUN` (and `CYBERDECK_PORT`
+  if `--port` given, `CYBERDECK_CHANNEL` if `--channel` given).
+- PATH: if `~/.cyberdeck/bin` is not already on PATH, append one guarded line to the rc file
+  (`~/.zshrc` on macOS/zsh, `~/.bashrc` else; also `~/.config/fish/conf.d/cyberdeck.fish`
   if fish detected):
 
   ```sh
-  # steward
-  export PATH="$HOME/.steward/bin:$PATH"
+  # cyberdeck
+  export PATH="$HOME/.cyberdeck/bin:$PATH"
   ```
 
-  Idempotency: only append if `grep -qs '/.steward/bin' <rcfile>` fails.
+  Idempotency: only append if `grep -qs '/.cyberdeck/bin' <rcfile>` fails.
 
 ### Step 6 — Port conflict check (pre-flight)
 
-Before registering the service, probe `STEWARD_PORT`:
+Before registering the service, probe `CYBERDECK_PORT`:
 
 ```
-if curl -fsS --max-time 2 "http://127.0.0.1:$PORT/api/system/health" | grep -q '"steward"'; then
-  # it's us (an older steward) — fine, we'll restart it in step 7
+if curl -fsS --max-time 2 "http://127.0.0.1:$PORT/api/system/health" | grep -q '"cyberdeck"'; then
+  # it's us (an older cyberdeck) — fine, we'll restart it in step 7
 elif port_in_use "$PORT"; then      # bash /dev/tcp probe, no lsof dependency
   fatal "Port $PORT is in use by another program.
          Re-run with --port <other>, or free the port.
@@ -238,7 +238,7 @@ elif port_in_use "$PORT"; then      # bash /dev/tcp probe, no lsof dependency
 fi
 ```
 
-`/api/system/health` returns `{"app":"steward","version":...,"commit":...}` — the `"steward"`
+`/api/system/health` returns `{"app":"cyberdeck","version":...,"commit":...}` — the `"cyberdeck"`
 marker is how we distinguish "our old daemon" from "some other server squatting on 4777".
 The daemon itself performs the same check at boot and exits with a distinct code (see §8)
 so the service manager doesn't crash-loop against a foreign listener.
@@ -248,17 +248,17 @@ so the service manager doesn't crash-loop against a foreign listener.
 macOS (§4.1): write plist, then
 
 ```
-launchctl bootout "gui/$(id -u)/sh.steward.daemon" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/sh.steward.daemon.plist
-launchctl kickstart -k "gui/$(id -u)/sh.steward.daemon"
+launchctl bootout "gui/$(id -u)/sh.cyberdeck.daemon" 2>/dev/null || true
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/sh.cyberdeck.daemon.plist
+launchctl kickstart -k "gui/$(id -u)/sh.cyberdeck.daemon"
 ```
 
 Linux user mode (§4.2): write unit, then
 
 ```
 systemctl --user daemon-reload
-systemctl --user enable --now steward.service
-systemctl --user restart steward.service       # no-op start if it wasn't running
+systemctl --user enable --now cyberdeck.service
+systemctl --user restart cyberdeck.service       # no-op start if it wasn't running
 loginctl enable-linger "$USER"                 # daemon survives logout; warn if it fails
 ```
 
@@ -273,11 +273,11 @@ code is what's running.
 Poll `http://127.0.0.1:$PORT/api/system/health` every 250ms for up to 30s. On success, verify the
 reported `commit` equals `$COMMIT`; mismatch → warn "daemon is running an older commit"
 (can happen only with a dirty repo skip). On timeout: print last 40 lines of
-`~/.steward/logs/daemon.err.log` and exit 1. Write/refresh `install.meta.json`.
+`~/.cyberdeck/logs/daemon.err.log` and exit 1. Write/refresh `install.meta.json`.
 
 ### Step 9 — Open browser & finish
 
-Skip if `--headless`, `STEWARD_HEADLESS=1`, no display (`Linux && -z "$DISPLAY" && -z "$WAYLAND_DISPLAY"`),
+Skip if `--headless`, `CYBERDECK_HEADLESS=1`, no display (`Linux && -z "$DISPLAY" && -z "$WAYLAND_DISPLAY"`),
 or over SSH (`-n "$SSH_CONNECTION"`).
 
 ```
@@ -288,9 +288,9 @@ linux:  xdg-open "http://localhost:$PORT" >/dev/null 2>&1 || true
 Final output (always printed, even headless):
 
 ```
-✔ Steward v0.3.1 (abc1234) running — http://localhost:4777
-  CLI: steward status | logs | update | restart      (new shells; or restart this one)
-  macOS: grant Full Disk Access for complete indexing — see 'steward setup' or the UI banner.
+✔ Cyberdeck v0.3.1 (abc1234) running — http://localhost:4777
+  CLI: cyberdeck status | logs | update | restart      (new shells; or restart this one)
+  macOS: grant Full Disk Access for complete indexing — see 'cyberdeck setup' or the UI banner.
 ```
 
 ### 3.9 Interactivity rule
@@ -298,13 +298,13 @@ Final output (always printed, even headless):
 `curl | bash` means stdin is the script itself; any `read` would eat script text. The
 installer therefore never prompts. Where a decision is needed it either (a) picks the safe
 default and prints what it did, or (b) exits with the exact command to run. The
-interactive experience lives in `steward setup` and the web UI, not in install.sh.
+interactive experience lives in `cyberdeck setup` and the web UI, not in install.sh.
 
 ---
 
 ## 4. Service definitions
 
-### 4.1 launchd — `~/Library/LaunchAgents/sh.steward.daemon.plist`
+### 4.1 launchd — `~/Library/LaunchAgents/sh.cyberdeck.daemon.plist`
 
 Generated by installer (paths expanded to absolutes; launchd does not expand `~` or env
 vars in ProgramArguments):
@@ -314,18 +314,18 @@ vars in ProgramArguments):
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>sh.steward.daemon</string>
+  <key>Label</key><string>sh.cyberdeck.daemon</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/eric/.steward/bin/steward-daemon-shim</string>
+    <string>/Users/eric/.cyberdeck/bin/cyberdeck-daemon-shim</string>
   </array>
-  <!-- the shim sources ~/.steward/env and execs
-       $STEWARD_BUN /Users/eric/.steward/current/src/daemon/main.ts
+  <!-- the shim sources ~/.cyberdeck/env and execs
+       $CYBERDECK_BUN /Users/eric/.cyberdeck/current/src/daemon/main.ts
        so self-update can swap versions without touching this plist -->
-  <key>WorkingDirectory</key><string>/Users/eric/.steward/current</string>
+  <key>WorkingDirectory</key><string>/Users/eric/.cyberdeck/current</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>STEWARD_HOME</key><string>/Users/eric/.steward</string>
+    <key>CYBERDECK_HOME</key><string>/Users/eric/.cyberdeck</string>
     <key>HOME</key><string>/Users/eric</string>
     <key>PATH</key><string>/Users/eric/.bun/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
@@ -335,8 +335,8 @@ vars in ProgramArguments):
     <key>SuccessfulExit</key><false/>   <!-- restart on crash, not on clean exit -->
   </dict>
   <key>ThrottleInterval</key><integer>10</integer>
-  <key>StandardOutPath</key><string>/Users/eric/.steward/logs/daemon.log</string>
-  <key>StandardErrorPath</key><string>/Users/eric/.steward/logs/daemon.err.log</string>
+  <key>StandardOutPath</key><string>/Users/eric/.cyberdeck/logs/daemon.log</string>
+  <key>StandardErrorPath</key><string>/Users/eric/.cyberdeck/logs/daemon.err.log</string>
   <key>ProcessType</key><string>Background</string>
   <key>ExitTimeOut</key><integer>15</integer>
 </dict></plist>
@@ -348,35 +348,35 @@ Decisions:
   keychain-free design, TCC grants are per-app-per-user). Cost: not running before login.
   Acceptable for personal machines; headless Macs should enable auto-login or use the
   future SSH-based wake path.
-- `KeepAlive.SuccessfulExit=false`: `steward restart` and self-update exit non-zero
+- `KeepAlive.SuccessfulExit=false`: `cyberdeck restart` and self-update exit non-zero
   (`exit 64`, our "please restart me" code) to get relaunched; a deliberate
-  `steward stop`/uninstall does `launchctl bootout`, and a clean `exit 0` stays down.
+  `cyberdeck stop`/uninstall does `launchctl bootout`, and a clean `exit 0` stays down.
 - Bun runs TypeScript directly; no daemon build step, only the UI is built.
 - The plist executes the **shim**, never bun directly — all version/rollback intelligence
   lives in the shim + `current` symlink (ARCHITECTURE.md §1.2/§9); the unit stays dumb.
 - The plist includes explicit `PATH` because launchd's default PATH lacks bun and
   homebrew git.
 
-### 4.2 systemd user unit — `~/.config/systemd/user/steward.service`
+### 4.2 systemd user unit — `~/.config/systemd/user/cyberdeck.service`
 
 ```ini
 [Unit]
-Description=Steward daemon
+Description=Cyberdeck daemon
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/home/eric/.steward/bin/steward-daemon-shim
-WorkingDirectory=/home/eric/.steward/current
-Environment=STEWARD_HOME=/home/eric/.steward
+ExecStart=/home/eric/.cyberdeck/bin/cyberdeck-daemon-shim
+WorkingDirectory=/home/eric/.cyberdeck/current
+Environment=CYBERDECK_HOME=/home/eric/.cyberdeck
 Environment=PATH=/home/eric/.bun/bin:/usr/local/bin:/usr/bin:/bin
 Restart=on-failure
 RestartSec=5
 SuccessExitStatus=0
 # exit 64 => "failure" => systemd restarts us: same self-restart trick as launchd
-StandardOutput=append:/home/eric/.steward/logs/daemon.log
-StandardError=append:/home/eric/.steward/logs/daemon.err.log
+StandardOutput=append:/home/eric/.cyberdeck/logs/daemon.log
+StandardError=append:/home/eric/.cyberdeck/logs/daemon.err.log
 TimeoutStopSec=15
 # Hardening kept light in user mode; daemon needs broad $HOME read access by design.
 NoNewPrivileges=true
@@ -404,74 +404,74 @@ Idempotency contracts per artifact:
 | `checkouts/` + `current` | fetch + new worktree + symlink swap if clean; untouched (warn, build-in-place) if dirty |
 | `node_modules` | `bun install` is naturally idempotent |
 | `dist/ui` | rebuilt every run (cheap, ~seconds with vite) |
-| `bin/steward` + `bin/steward-daemon-shim` | overwritten every run (shims are versionless glue) |
-| `env` | created if missing; individual keys patched only for explicit flags / broken `STEWARD_BUN` |
+| `bin/cyberdeck` + `bin/cyberdeck-daemon-shim` | overwritten every run (shims are versionless glue) |
+| `env` | created if missing; individual keys patched only for explicit flags / broken `CYBERDECK_BUN` |
 | plist / unit | rewritten every run, then reload+restart |
 | rc PATH line | appended only if absent (grep guard) |
-| `steward.db`, `identity/`, `blobs/` | **never touched by the installer** |
+| `cyberdeck.db`, `identity/`, `blobs/` | **never touched by the installer** |
 
-`steward update` (§7) is a thin wrapper: it re-runs the checked-in
-`~/.steward/src/install.sh` (post-fetch, so the *new* installer logic applies), giving us
+`cyberdeck update` (§7) is a thin wrapper: it re-runs the checked-in
+`~/.cyberdeck/src/install.sh` (post-fetch, so the *new* installer logic applies), giving us
 one code path for install, repair, and upgrade.
 
 ---
 
 ## 6. Uninstall
 
-`steward uninstall` and `install.sh --uninstall` run the same function:
+`cyberdeck uninstall` and `install.sh --uninstall` run the same function:
 
 ```
-1. launchctl bootout gui/$(id -u)/sh.steward.daemon   (mac)
-   systemctl --user disable --now steward.service      (linux)
-   [system mode: sudo systemctl disable --now steward; sudo rm unit; sudo userdel steward]
-2. rm ~/Library/LaunchAgents/sh.steward.daemon.plist | ~/.config/systemd/user/steward.service
-3. Remove the '# steward' PATH block from rc files (sed on the guard comment).
+1. launchctl bootout gui/$(id -u)/sh.cyberdeck.daemon   (mac)
+   systemctl --user disable --now cyberdeck.service      (linux)
+   [system mode: sudo systemctl disable --now cyberdeck; sudo rm unit; sudo userdel cyberdeck]
+2. rm ~/Library/LaunchAgents/sh.cyberdeck.daemon.plist | ~/.config/systemd/user/cyberdeck.service
+3. Remove the '# cyberdeck' PATH block from rc files (sed on the guard comment).
 4. Data:
-   default            -> keep ~/.steward, print "your data (db, identity, blobs) kept at
-                         ~/.steward — delete with: rm -rf ~/.steward"
-   --purge            -> rm -rf ~/.steward entirely
+   default            -> keep ~/.cyberdeck, print "your data (db, identity, blobs) kept at
+                         ~/.cyberdeck — delete with: rm -rf ~/.cyberdeck"
+   --purge            -> rm -rf ~/.cyberdeck entirely
 ```
 
-Keeping data by default is deliberate: `~/.steward/blobs` may be the only copy of another
+Keeping data by default is deliberate: `~/.cyberdeck/blobs` may be the only copy of another
 machine's backups; deleting it must be an explicit, typed decision. Uninstall never
 touches `~/.bun` (bun may be used by other tools). It also does not revoke the Full Disk
 Access grant (impossible programmatically); print a note pointing at System Settings.
 
 ---
 
-## 7. The `steward` CLI shim
+## 7. The `cyberdeck` CLI shim
 
-`~/.steward/bin/steward` is a ~120-line bash script, overwritten on every install. It is
+`~/.cyberdeck/bin/cyberdeck` is a ~120-line bash script, overwritten on every install. It is
 glue, not logic: anything stateful goes through the daemon's HTTP API on
-`127.0.0.1:$STEWARD_PORT` (auth: the token file `~/.steward/token`, chmod 600, written
+`127.0.0.1:$CYBERDECK_PORT` (auth: the token file `~/.cyberdeck/token`, chmod 600, written
 by the daemon at boot and sent as `Authorization: Bearer` — filesystem permission *is* the
 auth boundary for local CLI; see SECURITY.md §4). Heavy subcommands delegate to
-`$STEWARD_BUN run ~/.steward/current/src/cli/main.ts <args>` so real logic lives in
+`$CYBERDECK_BUN run ~/.cyberdeck/current/src/cli/main.ts <args>` so real logic lives in
 TypeScript.
 
 ```
-steward status      GET /api/system/health + service-manager state. Shows: running/stopped, pid,
+cyberdeck status      GET /api/system/health + service-manager state. Shows: running/stopped, pid,
                     version+commit, uptime, port, node id, paired-node count, index stats.
                     Exit 0 healthy, 1 stopped, 2 unhealthy (for scripting).
-steward start       launchctl kickstart / systemctl --user start
-steward stop        launchctl bootout / systemctl --user stop  (stays down; KeepAlive
+cyberdeck start       launchctl kickstart / systemctl --user start
+cyberdeck stop        launchctl bootout / systemctl --user stop  (stays down; KeepAlive
                     semantics in §4 make this stick until start/reboot… on macOS bootout
                     fully unregisters, so 'start' re-bootstraps the plist first)
-steward restart     POST /api/system/restart (daemon finishes in-flight work, exits 64,
+cyberdeck restart     POST /api/system/restart (daemon finishes in-flight work, exits 64,
                     service manager relaunches). Falls back to kickstart -k if API down.
-steward update      bash ~/.steward/current/install.sh --channel "$STEWARD_CHANNEL"
+cyberdeck update      bash ~/.cyberdeck/current/install.sh --channel "$CYBERDECK_CHANNEL"
                     (after a fetch of checkouts/.repo — so the newest installer runs;
                     see §5). '--check' flag: just print behind-by count.
-steward logs        tail -F ~/.steward/logs/daemon.log; '-e' for err log; '-n N' lines.
-steward setup       delegates to cli/main.ts setup — interactive convergence ("facets",
+cyberdeck logs        tail -F ~/.cyberdeck/logs/daemon.log; '-e' for err log; '-n N' lines.
+cyberdeck setup       delegates to cli/main.ts setup — interactive convergence ("facets",
                     BRIEF promise 9) + macOS permission walkthrough (§8). Safe to run
                     repeatedly.
-steward pair        delegates to cli/main.ts pair — prints this node's short pairing code
-                    + QR (ASCII), or 'steward pair <code|url>' to initiate pairing with a
+cyberdeck pair        delegates to cli/main.ts pair — prints this node's short pairing code
+                    + QR (ASCII), or 'cyberdeck pair <code|url>' to initiate pairing with a
                     peer. Thin veneer over POST /api/nodes/pairing/* (FLEET.md owns the
                     protocol).
-steward uninstall   §6
-steward version     src commit + channel + installer version from install.meta.json
+cyberdeck uninstall   §6
+cyberdeck version     src commit + channel + installer version from install.meta.json
 ```
 
 Unknown subcommands are passed through to `cli/main.ts` verbatim, so new TypeScript
@@ -482,7 +482,7 @@ anyway).
 
 ## 8. macOS permissions (TCC) & daemon boot behavior
 
-Steward's indexer wants to read all of `$HOME`. macOS TCC will hard-block
+Cyberdeck's indexer wants to read all of `$HOME`. macOS TCC will hard-block
 `~/Desktop`, `~/Documents`, `~/Downloads`, and cloud-synced dirs without a grant, and the
 grant target is **the binary**, i.e. `bun` (launchd children get their own TCC identity —
 the grant must go to the bun binary that the LaunchAgent executes).
@@ -491,29 +491,29 @@ Guidance (no way to grant programmatically; we make the manual step trivial):
 
 1. Daemon detects blockage at boot by attempting `readdir` on `~/Desktop`, `~/Documents`,
    `~/Downloads`; EPERM ⇒ sets `tcc.fullDiskAccess=false` in its status.
-2. Web UI shows a persistent (dismissible) banner: "Steward can't see Documents/Desktop.
+2. Web UI shows a persistent (dismissible) banner: "Cyberdeck can't see Documents/Desktop.
    Grant Full Disk Access →" with a button that runs
    `open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllDisks"`
    (server-side `open`, allowed since daemon runs as the user) and step-by-step
    instructions: press `+`, `⌘⇧G`, paste `~/.bun/bin/bun`, enable, then click
-   "Restart Steward" (TCC grants apply on next process launch).
-3. `steward setup` prints the same instructions in the terminal and polls until the
+   "Restart Cyberdeck" (TCC grants apply on next process launch).
+3. `cyberdeck setup` prints the same instructions in the terminal and polls until the
    readdir probe passes, then restarts the daemon itself.
 4. Consequence of granting FDA to bun is documented honestly in the UI: anything run via
    that bun binary inherits FDA. Accepted for a personal machine; revisit if we ever ship
-   a compiled `steward` binary (which would then be the narrow grant target — planned
+   a compiled `cyberdeck` binary (which would then be the narrow grant target — planned
    eventual fix, noted in the plist/unit design as "swap ProgramArguments to the binary").
 
-Without FDA, Steward still runs — it indexes what it can and reports the blind spots as
+Without FDA, Cyberdeck still runs — it indexes what it can and reports the blind spots as
 "unknown redundancy" rather than pretending they're safe.
 
-**Daemon boot port handling:** at boot the daemon binds `127.0.0.1:$STEWARD_PORT`. On
-`EADDRINUSE` it GETs `/api/system/health`; if the responder is a steward with a *different*
-`daemon.json` boot-id, it exits with code 65 ("another steward owns this port") — and both launchd
+**Daemon boot port handling:** at boot the daemon binds `127.0.0.1:$CYBERDECK_PORT`. On
+`EADDRINUSE` it GETs `/api/system/health`; if the responder is a cyberdeck with a *different*
+`daemon.json` boot-id, it exits with code 65 ("another cyberdeck owns this port") — and both launchd
 (`SuccessfulExit=false` only restarts on *failure*, so we add 65 to the daemon's
 clean-exit path by exiting 0 after logging) — concretely: **exit 0 with a loud log line**,
 so the service manager does not crash-loop; if the responder is foreign, likewise log
-`PORT CONFLICT: <first bytes of response>` and exit 0. `steward status` surfaces this as
+`PORT CONFLICT: <first bytes of response>` and exit 0. `cyberdeck status` surfaces this as
 "stopped: port 4777 taken by another process". Exit-code contract: `0` stay down, `64`
 restart me, anything else = crash (restart with throttle).
 
@@ -521,29 +521,29 @@ restart me, anything else = crash (restart with throttle).
 
 ## 9. Headless / server install (backup servers)
 
-`curl -fsSL https://steward.sh/install | bash -s -- --headless` — same as user install,
-minus browser-open, plus `STEWARD_HEADLESS=1` in env (daemon then never calls `open`, and
+`curl -fsSL https://cyberdeck.sh/install | bash -s -- --headless` — same as user install,
+minus browser-open, plus `CYBERDECK_HEADLESS=1` in env (daemon then never calls `open`, and
 the UI drops "open on this machine" affordances for this node).
 
 `--system` (Linux only, requires sudo) for always-on backup boxes where no user session
 should be required and linger is disallowed by policy:
 
 ```
-1. sudo useradd --system --create-home --home-dir /var/lib/steward --shell /usr/sbin/nologin steward
-2. STEWARD_HOME=/var/lib/steward/.steward  (all paths re-rooted; env file records mode)
-3. Clone/build performed as the steward user: sudo -u steward bash -c '...'
-   (bun installed to /var/lib/steward/.bun)
-4. Unit written to /etc/systemd/system/steward.service:
-     [Service] User=steward Group=steward
+1. sudo useradd --system --create-home --home-dir /var/lib/cyberdeck --shell /usr/sbin/nologin cyberdeck
+2. CYBERDECK_HOME=/var/lib/cyberdeck/.cyberdeck  (all paths re-rooted; env file records mode)
+3. Clone/build performed as the cyberdeck user: sudo -u cyberdeck bash -c '...'
+   (bun installed to /var/lib/cyberdeck/.bun)
+4. Unit written to /etc/systemd/system/cyberdeck.service:
+     [Service] User=cyberdeck Group=cyberdeck
      ProtectSystem=full  ProtectHome=read-only   # can index /home read-only,
-     ReadWritePaths=/var/lib/steward             # writes only its own tree
+     ReadWritePaths=/var/lib/cyberdeck             # writes only its own tree
      Restart=on-failure  RestartSec=5
-   sudo systemctl daemon-reload && sudo systemctl enable --now steward
+   sudo systemctl daemon-reload && sudo systemctl enable --now cyberdeck
 5. No PATH edits for interactive users; instead: sudo ln -sf
-   /var/lib/steward/.steward/bin/steward /usr/local/bin/steward
+   /var/lib/cyberdeck/.cyberdeck/bin/cyberdeck /usr/local/bin/cyberdeck
    (the shim reads mode=system from install.meta.json and routes service commands
    through 'sudo systemctl' + runs API calls against the token file it can read only
-   if the invoking user is root or in group 'steward' — add admins to that group.)
+   if the invoking user is root or in group 'cyberdeck' — add admins to that group.)
 ```
 
 macOS has no `--system` mode in v1 (LaunchDaemon + FDA + root-owned files fights the
@@ -559,16 +559,16 @@ authenticated node-to-node channel (BRIEF promise 4), or by SSH port-forwarding
 
 Owned in detail by the self-management design doc; the contract this doc provides:
 
-- `steward update` and the daemon's own "Update & Restart" UI button both execute
-  `bash ~/.steward/current/install.sh` (freshly fetched), i.e. update == reinstall. Both
+- `cyberdeck update` and the daemon's own "Update & Restart" UI button both execute
+  `bash ~/.cyberdeck/current/install.sh` (freshly fetched), i.e. update == reinstall. Both
   paths converge on the same stage → smoke-test → symlink-swap mechanics as the daemon's
   `update` job (ARCHITECTURE.md §9); the installer is the repair/bootstrap entry point.
 - Daemon-initiated update spawns the installer **detached** (`setsid`/`nohup`, output to
   `install.log`) then keeps serving; the installer restarts the daemon at step 7. The UI
   polls `/api/system/health` and shows the version change.
-- Rollback: repoint `~/.steward/current` at the previous checkout and restart — the
+- Rollback: repoint `~/.cyberdeck/current` at the previous checkout and restart — the
   installer records the previous commit in `install.meta.json.previousCommit` for
-  `steward update --rollback`, and a `steward update --to <commit>` flag stages any sha.
+  `cyberdeck update --rollback`, and a `cyberdeck update --to <commit>` flag stages any sha.
   Crash-loop rollback is automatic at the shim level (ARCHITECTURE.md §9.3).
 
 ---
@@ -580,10 +580,10 @@ Owned in detail by the self-management design doc; the contract this doc provide
 | Fresh macOS arm64, no bun, no git | fatal with xcode-select instructions; after CLT, full success |
 | Fresh Ubuntu 22/24 (x64, arm64), user mode | success; survives logout (linger) |
 | Re-run on healthy install | converges, restarts, <15s, zero prompts |
-| Re-run with dirty `~/.steward/src` | warns, builds local code, does not reset |
+| Re-run with dirty `~/.cyberdeck/src` | warns, builds local code, does not reset |
 | Port 4777 held by `python -m http.server` | installer fatal with clear message; `--port 4778` works |
 | Old daemon running, new install fails at build | old daemon untouched and still healthy |
 | `--headless` over SSH, no DISPLAY | no browser attempt, success banner printed |
-| `--system` on Ubuntu | unit under /etc, runs as `steward`, `/usr/local/bin/steward status` works |
+| `--system` on Ubuntu | unit under /etc, runs as `cyberdeck`, `/usr/local/bin/cyberdeck status` works |
 | uninstall / uninstall --purge | service gone, PATH line gone; data kept / removed respectively |
 | curl truncated mid-download | nothing executes (main-on-last-line) |

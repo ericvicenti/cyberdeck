@@ -1,4 +1,4 @@
-# Steward Daemon Architecture
+# Cyberdeck Daemon Architecture
 
 Status: design, implementation-ready. Companion to `docs/BRIEF.md` (authoritative vision).
 This doc covers the daemon process model, codebase layout, storage schema, job system,
@@ -10,14 +10,14 @@ API surface, event bus, logging, self-update, and configuration.
 
 ### 1.1 One daemon, one process
 
-Steward is a **single long-lived Bun process** per node. No worker processes, no sidecar
+Cyberdeck is a **single long-lived Bun process** per node. No worker processes, no sidecar
 services. Concurrency comes from Bun's event loop plus bounded async job workers inside the
 process (§5). CPU-heavy hashing uses `Bun.hash`/`crypto` in-process; if profiling ever shows
 the event loop stalling, we move hashing into `new Worker()` threads — but not before.
 
 ```
 launchd / systemd
-  └── bun ~/.steward/src/src/daemon/main.ts     ("steward-daemon")
+  └── bun ~/.cyberdeck/src/src/daemon/main.ts     ("cyberdeck-daemon")
         ├── Hono HTTP+WS server on 127.0.0.1:4777
         ├── JobRunner (N=4 worker slots, in-process)
         ├── PeerManager (outbound WS connections to paired nodes)
@@ -30,7 +30,7 @@ connection, no busy-loop dances), the event bus is a plain in-memory `EventTarge
 crash recovery is one supervisor restart. The failure domain is the whole daemon, which is
 acceptable because jobs are resumable (§5.4).
 
-There is additionally a thin **CLI** (`~/.steward/bin/steward`) which is not a second
+There is additionally a thin **CLI** (`~/.cyberdeck/bin/cyberdeck`) which is not a second
 daemon: it is an HTTP client of the local daemon (plus a handful of offline subcommands:
 `install`, `doctor`, `daemon run`).
 
@@ -39,33 +39,33 @@ daemon: it is an HTTP client of the local daemon (plus a handful of offline subc
 The installer writes a supervisor unit that runs the **shim**, not `main.ts` directly,
 so that self-update can swap the active checkout without touching the unit (§9).
 
-**macOS — `~/Library/LaunchAgents/sh.steward.daemon.plist`:**
+**macOS — `~/Library/LaunchAgents/sh.cyberdeck.daemon.plist`:**
 
 ```xml
-<key>Label</key><string>sh.steward.daemon</string>
+<key>Label</key><string>sh.cyberdeck.daemon</string>
 <key>ProgramArguments</key>
 <array>
-  <string>/Users/eric/.steward/bin/steward-daemon-shim</string>
+  <string>/Users/eric/.cyberdeck/bin/cyberdeck-daemon-shim</string>
 </array>
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key>
 <dict><key>SuccessfulExit</key><false/></dict>
 <key>ThrottleInterval</key><integer>10</integer>
-<key>StandardOutPath</key><string>/Users/eric/.steward/logs/daemon.out.log</string>
-<key>StandardErrorPath</key><string>/Users/eric/.steward/logs/daemon.err.log</string>
+<key>StandardOutPath</key><string>/Users/eric/.cyberdeck/logs/daemon.out.log</string>
+<key>StandardErrorPath</key><string>/Users/eric/.cyberdeck/logs/daemon.err.log</string>
 <key>EnvironmentVariables</key>
 <dict><key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string></dict>
 ```
 
-**Linux — `~/.config/systemd/user/steward.service`:**
+**Linux — `~/.config/systemd/user/cyberdeck.service`:**
 
 ```ini
 [Unit]
-Description=Steward daemon
+Description=Cyberdeck daemon
 After=network.target
 
 [Service]
-ExecStart=%h/.steward/bin/steward-daemon-shim
+ExecStart=%h/.cyberdeck/bin/cyberdeck-daemon-shim
 Restart=on-failure
 RestartSec=5
 # Give self-update exec-replace a clean signal story:
@@ -76,15 +76,15 @@ TimeoutStopSec=20
 WantedBy=default.target
 ```
 
-`steward-daemon-shim` is a ~15-line bash script:
+`cyberdeck-daemon-shim` is a ~15-line bash script:
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-STEWARD_HOME="${STEWARD_HOME:-$HOME/.steward}"
-CURRENT="$STEWARD_HOME/current"          # symlink -> checkouts/<sha> (see §9)
-[ -f "$STEWARD_HOME/env" ] && . "$STEWARD_HOME/env"   # KEY=VALUE incl. STEWARD_BUN (INSTALL.md §2.1)
-BUN="${STEWARD_BUN:-$HOME/.bun/bin/bun}" # shared bun, absolute path pinned at install
+CYBERDECK_HOME="${CYBERDECK_HOME:-$HOME/.cyberdeck}"
+CURRENT="$CYBERDECK_HOME/current"          # symlink -> checkouts/<sha> (see §9)
+[ -f "$CYBERDECK_HOME/env" ] && . "$CYBERDECK_HOME/env"   # KEY=VALUE incl. CYBERDECK_BUN (INSTALL.md §2.1)
+BUN="${CYBERDECK_BUN:-$HOME/.bun/bin/bun}" # shared bun, absolute path pinned at install
 exec "$BUN" "$CURRENT/src/daemon/main.ts"
 ```
 
@@ -98,19 +98,19 @@ version selection) lives in the shim + daemon + `current` symlink.
 | `SIGTERM` | Graceful: stop accepting jobs, checkpoint running jobs (§5.4), flush WAL, close WS with code 1001, exit 0 within 15s or hard-exit 1. |
 | `SIGINT` | Same as SIGTERM (dev convenience). |
 | `SIGHUP` | Reload `config.json` (watched anyway; HUP forces it). |
-| `SIGUSR2` | Trigger self-update check (used by `steward update`). |
+| `SIGUSR2` | Trigger self-update check (used by `cyberdeck update`). |
 
 Startup sequence (`src/daemon/main.ts`):
 
-1. Acquire singleton lock: `flock` on `~/.steward/daemon.lock`; if held, print the PID from
+1. Acquire singleton lock: `flock` on `~/.cyberdeck/daemon.lock`; if held, print the PID from
    the lockfile and exit 3.
 2. Load + validate config (Zod schema, §10). Invalid config → log fatal, exit 78 (EX_CONFIG)
    so `KeepAlive`'s throttle doesn't spin-loop hot.
 3. Open SQLite, run migrations (§4.1).
-4. Write `~/.steward/daemon.json` runtime manifest: `{pid, version, gitSha, startedAt, port}`.
+4. Write `~/.cyberdeck/daemon.json` runtime manifest: `{pid, version, gitSha, startedAt, port}`.
 5. Mark any `running` jobs from a previous life as `interrupted` → requeue (§5.4).
 6. Start HTTP server, then Watcher, Scheduler, PeerManager.
-7. If launched by an updater (env `STEWARD_UPDATE_FROM` set), run self-test and confirm
+7. If launched by an updater (env `CYBERDECK_UPDATE_FROM` set), run self-test and confirm
    the update (§9.4).
 
 ---
@@ -122,7 +122,7 @@ don't need at this scale). UI is a Vite app whose build output is committed-adja
 (`dist/ui`, gitignored, built by `bun run build`).
 
 ```
-steward/
+cyberdeck/
 ├── package.json
 ├── bunfig.toml
 ├── docs/                      # BRIEF.md, this file, UX.md
@@ -149,10 +149,10 @@ steward/
 │   ├── core/
 │   │   ├── db.ts              # bun:sqlite open, pragmas, migrate(), typed query helpers
 │   │   ├── bus.ts             # EventBus (§7)
-│   │   ├── config.ts          # load/validate/watch ~/.steward/config.json (§10)
+│   │   ├── config.ts          # load/validate/watch ~/.cyberdeck/config.json (§10)
 │   │   ├── log.ts             # logger (§8)
 │   │   ├── ids.ts             # ulid(), short ids
-│   │   └── errors.ts          # StewardError taxonomy → HTTP codes
+│   │   └── errors.ts          # CyberdeckError taxonomy → HTTP codes
 │   ├── jobs/
 │   │   ├── runner.ts          # JobRunner: queue, leases, checkpoints (§5)
 │   │   ├── registry.ts        # jobType → handler map
@@ -162,7 +162,7 @@ steward/
 │   │   ├── sync.ts            # node-to-node blob/db sync
 │   │   └── update.ts          # self-update as a job
 │   ├── fleet/
-│   │   ├── identity.ts        # ed25519 keypair load/create (~/.steward/identity/)
+│   │   ├── identity.ts        # ed25519 keypair load/create (~/.cyberdeck/identity/)
 │   │   ├── pairing.ts         # short-code pairing flow
 │   │   ├── peers.ts           # PeerManager: dial, handshake, heartbeat, reconnect
 │   │   └── tunnel.ts          # request proxying to remote nodes (/api/nodes/:id/proxy)
@@ -171,12 +171,12 @@ steward/
 │   │   ├── gitinfo.ts         # shell-out git helpers (status --porcelain=v2, etc.)
 │   │   └── watcher.ts         # fs.watch roots → debounced rescan enqueue
 │   ├── blobs/
-│   │   ├── store.ts           # CAS: write/read/has/gc at ~/.steward/blobs (§4.3)
+│   │   ├── store.ts           # CAS: write/read/has/gc at ~/.cyberdeck/blobs (§4.3)
 │   │   └── chunker.ts         # FastCDC content-defined chunking for large files
 │   ├── vault/                 # ciphertext-only storage; crypto lives in UI
 │   │   └── store.ts
 │   └── cli/
-│       ├── main.ts            # `steward` CLI: parses argv, calls daemon HTTP API
+│       ├── main.ts            # `cyberdeck` CLI: parses argv, calls daemon HTTP API
 │       └── commands/*.ts
 ├── ui/                        # React + Vite + Tailwind (dark-first, see docs/UX.md)
 │   ├── index.html
@@ -194,10 +194,10 @@ singletons except the logger. This keeps jobs testable with an in-memory SQLite.
 ## 3. Filesystem layout at runtime
 
 ```
-~/.steward/
+~/.cyberdeck/
 ├── config.json                # §10
-├── env                        # KEY=VALUE (STEWARD_BUN, STEWARD_PORT, …), see INSTALL.md §2.1
-├── steward.db  (+ -wal/-shm)
+├── env                        # KEY=VALUE (CYBERDECK_BUN, CYBERDECK_PORT, …), see INSTALL.md §2.1
+├── cyberdeck.db  (+ -wal/-shm)
 ├── daemon.lock
 ├── daemon.json                # runtime manifest {pid, port, version, gitSha}
 ├── token                      # local UI/CLI bearer token, mode 0600
@@ -210,21 +210,21 @@ singletons except the logger. This keeps jobs testable with an in-memory SQLite.
 ├── logs/
 │   ├── daemon.log             # current JSONL log (§8)
 │   └── daemon.log.1.gz …
-├── src -> current             # compat alias per BRIEF ("~/.steward/src/")
+├── src -> current             # compat alias per BRIEF ("~/.cyberdeck/src/")
 ├── current -> checkouts/ab12cd3   # active version symlink (§9)
 ├── checkouts/
 │   ├── ab12cd3/               # git worktree at that sha, with dist/ui built
 │   └── 9f00e21/
 └── bin/
-    ├── steward                # CLI shim (exec $STEWARD_BUN $CURRENT/src/cli/main.ts "$@")
-    └── steward-daemon-shim
+    ├── cyberdeck                # CLI shim (exec $CYBERDECK_BUN $CURRENT/src/cli/main.ts "$@")
+    └── cyberdeck-daemon-shim
 ```
 
 Bun itself is **not** vendored here: it lives at the standard `~/.bun/bin/bun`, with the
-absolute path pinned as `STEWARD_BUN` in `~/.steward/env` (see INSTALL.md §2 — sharing the
+absolute path pinned as `CYBERDECK_BUN` in `~/.cyberdeck/env` (see INSTALL.md §2 — sharing the
 user's bun avoids duplicate runtimes and keeps the macOS Full Disk Access grant on one binary).
 
-Note on BRIEF's `~/.steward/src/`: we keep that path as a symlink to `current` so docs and
+Note on BRIEF's `~/.cyberdeck/src/`: we keep that path as a symlink to `current` so docs and
 muscle memory hold, but the real mechanism is `checkouts/<sha>` + atomic symlink swap,
 which is what makes rollback safe (§9).
 
@@ -257,7 +257,7 @@ CREATE TABLE nodes (
   arch          TEXT NOT NULL,
   roles         TEXT NOT NULL DEFAULT '[]', -- JSON, from {"laptop","desktop","server","backup"}
   endpoints     TEXT NOT NULL DEFAULT '[]', -- JSON mesh addrs: ["192.168.1.10:4778","host.ts.net:4778"]
-  version       TEXT,                       -- steward version last seen
+  version       TEXT,                       -- cyberdeck version last seen
   paired_at     INTEGER NOT NULL,
   last_seen_at  INTEGER,
   status        TEXT NOT NULL DEFAULT 'offline'  -- 'online'|'offline'|'revoked'
@@ -355,7 +355,7 @@ CREATE TABLE dir_stats (
   PRIMARY KEY(node_id, path)
 );
 
--- Content-addressed blob metadata (data lives in ~/.steward/blobs, §4.3).
+-- Content-addressed blob metadata (data lives in ~/.cyberdeck/blobs, §4.3).
 CREATE TABLE blobs (
   hash          TEXT PRIMARY KEY,           -- sha256 hex of chunk
   size          INTEGER NOT NULL,
@@ -448,7 +448,7 @@ plus 1 for the live copy, plus (for git-tracked, pushed files) credit for the re
 
 ### 4.3 Blob store
 
-Content-addressed at `~/.steward/blobs/sha256/<h[0:2]>/<h[2:4]>/<hash>`, written via
+Content-addressed at `~/.cyberdeck/blobs/sha256/<h[0:2]>/<h[2:4]>/<hash>`, written via
 `tmp/` + `rename()` for atomicity. Files > 1 MiB are chunked with FastCDC (min 256 KiB,
 avg 1 MiB, max 4 MiB) so edited large files dedupe; files ≤ 1 MiB are single chunks.
 A snapshot manifest is JSON `{files: [{path, mode, mtime, size, chunks: [hash...]}]}`,
@@ -563,8 +563,8 @@ hashes but scans must be fast (300 project dirs ≈ minutes, not hours).
 - Base: `http://127.0.0.1:4777/api`. UI static assets at `/` (Hono `serveStatic` from
   `$CURRENT/dist/ui`, SPA fallback to `index.html`).
 - Auth, two callers (full design in SECURITY.md §4): **CLI** sends
-  `Authorization: Bearer <token>` where token is the 0600 file `~/.steward/token`;
-  **browser** exchanges that token (via `steward open`) for a 30s one-time ticket, then a
+  `Authorization: Bearer <token>` where token is the 0600 file `~/.cyberdeck/token`;
+  **browser** exchanges that token (via `cyberdeck open`) for a 30s one-time ticket, then a
   `HttpOnly SameSite=Strict` session cookie — the long-lived token never enters the page.
   All requests pass Host/Origin checks (DNS-rebinding/CSRF). Node-to-node requests
   authenticate via the peer channel session (§6.4) — never via the bearer token.
@@ -576,7 +576,7 @@ hashes but scans must be fast (300 project dirs ≈ minutes, not hours).
 
 | Method | Path | Body / params | Returns |
 |---|---|---|---|
-| GET | `/api/system/health` | — | `{app: "steward", ok, version, gitSha, uptimeMs, db: {sizeBytes}, jobs: {queued, running}}` — the `"app":"steward"` marker is how the installer distinguishes an old steward from a foreign listener (INSTALL.md §3/§8) |
+| GET | `/api/system/health` | — | `{app: "cyberdeck", ok, version, gitSha, uptimeMs, db: {sizeBytes}, jobs: {queued, running}}` — the `"app":"cyberdeck"` marker is how the installer distinguishes an old cyberdeck from a foreign listener (INSTALL.md §3/§8) |
 | GET | `/api/system/version` | — | `{version, gitSha, builtAt, channel}` |
 | POST | `/api/system/update` | `{ref?}` | enqueues `update` job → `{jobId}` |
 | POST | `/api/system/restart` | — | daemon finishes in-flight work, exits 64 (supervisor relaunches) |
@@ -659,7 +659,7 @@ Server → client:
 
 Because every event has a monotonic `seq` and is persisted (§7), a reconnecting client
 sends `since` and misses nothing. The UI's data layer is: fetch REST snapshot → subscribe
-with `since = snapshot's seq header` (`X-Steward-Seq` on every REST response) → apply events.
+with `since = snapshot's seq header` (`X-Cyberdeck-Seq` on every REST response) → apply events.
 
 ### 6.4 Node-to-node channel (`/api/peer`)
 
@@ -686,8 +686,8 @@ channel carries multiplexed frames:
 ```ts
 class EventBus {
   emit(topic: string, payload: unknown): number  // returns seq
-  subscribe(pattern: string, fn: (e: StewardEvent) => void): () => void
-  replay(sinceSeq: number, patterns: string[]): StewardEvent[]  // reads events table
+  subscribe(pattern: string, fn: (e: CyberdeckEvent) => void): () => void
+  replay(sinceSeq: number, patterns: string[]): CyberdeckEvent[]  // reads events table
 }
 ```
 
@@ -707,7 +707,7 @@ class EventBus {
 
 ## 8. Logging
 
-- **Format:** JSONL to `~/.steward/logs/daemon.log`:
+- **Format:** JSONL to `~/.cyberdeck/logs/daemon.log`:
   `{"ts":1755500000000,"lvl":"info","mod":"jobs.scan","jobId":"01J…","msg":"walk done","files":48211}`.
 - **Logger:** tiny homegrown (`src/core/log.ts`), no dependency. `log.child({mod, jobId})`
   bindings. Levels trace/debug/info/warn/error; level per-module via config
@@ -727,11 +727,11 @@ version proves itself; the supervisor stays dumb.
 
 ### 9.1 Layout recap
 
-- `~/.steward/checkouts/<shortsha>/` — full git worktrees of the steward repo, each with
+- `~/.cyberdeck/checkouts/<shortsha>/` — full git worktrees of the cyberdeck repo, each with
   `dist/ui` built and `bun install --frozen-lockfile` completed.
-- `~/.steward/current` — symlink to the active checkout. The shim (§1.2) always execs
+- `~/.cyberdeck/current` — symlink to the active checkout. The shim (§1.2) always execs
   through `current`, so a symlink swap + restart = version switch.
-- `~/.steward/checkouts/.repo/` — the bare-ish primary clone (`git fetch` target);
+- `~/.cyberdeck/checkouts/.repo/` — the bare-ish primary clone (`git fetch` target);
   worktrees are created from it (`git worktree add`).
 
 ### 9.2 Update job algorithm (`src/jobs/update.ts`)
@@ -745,7 +745,7 @@ version proves itself; the supervisor stays dumb.
 4. **Smoke test:** `bun checkouts/<sha>/src/daemon/main.ts --selftest` runs in a subprocess:
    loads config, opens the DB **read-only**, checks migrations are applicable
    (additive-only rule §4.1), binds port 0, exits 0. Failure → abort as above.
-5. **Switch:** write `~/.steward/update.json` = `{from: <oldsha>, to: <sha>, at, state: "switching"}`;
+5. **Switch:** write `~/.cyberdeck/update.json` = `{from: <oldsha>, to: <sha>, at, state: "switching"}`;
    atomically repoint symlink (`ln -sfn` via rename of a temp symlink); emit
    `system.updating`; then `process.exit(0)`. Supervisor restarts → shim execs new version.
 6. **Confirm (new version, boot step 7):** if `update.json.state == "switching"`, the new
@@ -759,7 +759,7 @@ version proves itself; the supervisor stays dumb.
 Two layers:
 
 - **Shim-level (handles "won't even boot"):** the shim increments a crash counter in
-  `~/.steward/update.json` each start while `state == "switching"`. If the counter hits 3,
+  `~/.cyberdeck/update.json` each start while `state == "switching"`. If the counter hits 3,
   the shim itself repoints `current` back to `from`, sets `state: "rolled_back"`, and execs
   the old version. This is why rollback logic must live in bash + symlinks, not in the
   possibly-broken new code.
@@ -772,14 +772,14 @@ until a newer sha appears, so we don't crash-loop through the same bad version d
 
 ### 9.4 Dev mode
 
-`steward daemon run --dev` skips the shim/symlink machinery, runs from the working
+`cyberdeck daemon run --dev` skips the shim/symlink machinery, runs from the working
 checkout with `--watch`, uses ports 4779 (HTTP) / 4780 (mesh; 4778 belongs to the real
-daemon) and `~/.steward-dev/` so the real daemon keeps running. Guardrail: self-update
+daemon) and `~/.cyberdeck-dev/` so the real daemon keeps running. Guardrail: self-update
 refuses to run when the active checkout is dirty.
 
 ---
 
-## 10. Configuration — `~/.steward/config.json`
+## 10. Configuration — `~/.cyberdeck/config.json`
 
 Zod-validated (`src/core/config.ts`), watched for changes (debounced 1s, revalidated;
 invalid edits are rejected with a `system.log` warn and the old config stays live).

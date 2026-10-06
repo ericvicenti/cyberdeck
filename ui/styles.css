@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* ---------- Steward HUD theme ----------
+/* ---------- Cyberdeck HUD theme ----------
    One place for the look: the Tailwind palette is retuned here so every view
    (old and new) picks it up, and a handful of utility classes carry the
    game-HUD motifs. Keep views simple: use .hud-card, .hud-label, .led, .neon-*. */

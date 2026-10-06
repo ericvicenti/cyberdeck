@@ -4,17 +4,17 @@ import { homedir } from "os";
 import { join } from "path";
 import { initSchema } from "../src/daemon/db";
 import { createServer } from "../src/daemon/server";
-import type { StewardConfig } from "../src/daemon/config";
+import type { CyberdeckConfig } from "../src/daemon/config";
 
 /** Temp dir INSIDE the home directory (fs ops are home-confined). */
 export function tmpHomeDir(prefix: string): { dir: string; cleanup: () => void } {
-  const dir = mkdtempSync(join(homedir(), `.steward-test-${prefix}-`));
+  const dir = mkdtempSync(join(homedir(), `.cyberdeck-test-${prefix}-`));
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 export const TEST_TOKEN = "test-token-abc";
 
-export function testConfig(overrides: Partial<StewardConfig> = {}): StewardConfig {
+export function testConfig(overrides: Partial<CyberdeckConfig> = {}): CyberdeckConfig {
   return {
     nodeName: "test-node",
     port: 0,
@@ -37,7 +37,7 @@ export interface TestServer {
 }
 
 export function startTestServer(
-  cfg: StewardConfig = testConfig(),
+  cfg: CyberdeckConfig = testConfig(),
   opts: { token?: string; nodeId?: string } = {}
 ): TestServer {
   const token = opts.token ?? TEST_TOKEN;

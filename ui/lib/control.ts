@@ -1,5 +1,5 @@
 // Shared types + helpers for the control views (fed by /api/control/*).
-export type HostStatus = { name: string; kind: string; os: string; roles: string[]; online: boolean | null; steward: { version: string; repos: number; atRisk: number; attention: number; lastScanAt: number | null } | null; note?: string };
+export type HostStatus = { name: string; kind: string; os: string; roles: string[]; online: boolean | null; cyberdeck: { version: string; repos: number; atRisk: number; attention: number; lastScanAt: number | null } | null; note?: string };
 export type FleetStatus = { host: string; time: string; hosts: HostStatus[]; repo: { branch: string; dirty: number; ahead: number; behind: number }; handoffOpen: number; sessionsIndexed: number };
 export type Project = { slug: string; name: string; status: string; depth: number; parent: string | null; repos: string[]; hosts: string[]; links: string[]; body: string; file: string };
 export type Session = { host: string; tool: "cc" | "cx"; id: string; title: string; cwd: string; project?: string; branch?: string; started: string; updated: string; file: string; messages?: number };

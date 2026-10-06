@@ -7,10 +7,10 @@ import { createHash } from "crypto";
 import { existsSync, mkdirSync, statSync, readdirSync, rmSync, createReadStream } from "fs";
 import { join, basename } from "path";
 import type { Subprocess } from "bun";
-import { STEWARD_HOME } from "../config";
+import { CYBERDECK_HOME } from "../config";
 import { resolveSafe, FsError } from "../fsops";
 
-const HLS_ROOT = join(STEWARD_HOME, "cache", "hls");
+const HLS_ROOT = join(CYBERDECK_HOME, "cache", "hls");
 const MAX_CACHE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 type Job = { proc: Subprocess; dir: string; startedAt: number };

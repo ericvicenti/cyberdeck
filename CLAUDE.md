@@ -1,12 +1,12 @@
-# Steward — agent notes
+# Cyberdeck — agent notes
 
 Bun + TypeScript daemon (Hono, bun:sqlite) with a React/Vite/Tailwind UI. No Node, no npm —
 use `bun` for everything.
 
 - `src/daemon/` — the service. Entry: `main.ts`. HTTP+WS on 127.0.0.1:4777, bearer-token
-  auth (`~/.steward/token`). SQLite at `~/.steward/steward.db`.
+  auth (`~/.cyberdeck/token`). SQLite at `~/.cyberdeck/cyberdeck.db`.
 - `src/daemon/indexer/` — fs/git scanning and risk scoring.
-- `src/cli/steward.ts` — CLI; installed as a shim by `install.sh`.
+- `src/cli/cyberdeck.ts` — CLI; installed as a shim by `install.sh`.
 - `ui/` — Vite root; builds to `dist/ui`, served by the daemon.
 - `src/daemon/api/control.ts` — the control module (Projects / Agents / Services views). It never
   parses the private Fleet repo itself: it shells out to `<fleetDir>/bin/fleet.ts … --json` (config
@@ -30,11 +30,11 @@ fleet-wide deploy within the hour, or within ~30s of any UI being open.
 Gotchas:
 - bun:sqlite named params need `$`-prefixed keys at bind time.
 - `~/Code` is itself a stray git repo; the scanner special-cases roots that contain `.git`.
-- The installed service runs from `~/.steward/src` (a clone), not this checkout.
-  Public repo: https://github.com/ericvicenti/steward — both this checkout and
-  `~/.steward/src` track it as origin. Deploy = commit + `git push`, then
-  `git -C ~/.steward/src pull && (cd ~/.steward/src && bun install && bun run build)
-  && steward restart`. Servers install via the curl one-liner in README.md.
+- The installed service runs from `~/.cyberdeck/src` (a clone), not this checkout.
+  Public repo: https://github.com/ericvicenti/cyberdeck — both this checkout and
+  `~/.cyberdeck/src` track it as origin. Deploy = commit + `git push`, then
+  `git -C ~/.cyberdeck/src pull && (cd ~/.cyberdeck/src && bun install && bun run build)
+  && cyberdeck restart`. Servers install via the curl one-liner in README.md.
 - Shell scripts must be pure ASCII (bash parses multibyte chars into variable names under
   `set -u`); tests/install.test.ts enforces this.
 - node-pty does not work under Bun; the web terminal uses `bun-pty`.

@@ -1,11 +1,11 @@
 import { homedir, hostname } from "os";
 import { join } from "path";
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from "fs";
+import { mkdirSync, existsSync, readFileSync, writeFileSync, copyFileSync } from "fs";
 import { randomBytes } from "crypto";
 
-export const STEWARD_HOME = process.env.STEWARD_HOME ?? join(homedir(), ".steward");
+export const CYBERDECK_HOME = process.env.CYBERDECK_HOME ?? join(homedir(), ".cyberdeck");
 
-export interface StewardConfig {
+export interface CyberdeckConfig {
   nodeName: string;
   port: number;
   /** Listen address. 0.0.0.0 enables LAN fleet pairing; the API is token-gated. */
@@ -28,14 +28,14 @@ export interface StewardConfig {
   /** Max directory depth when searching roots for git repos. */
   scanDepth: number;
   /** Checkout of the private Fleet repo (projects, handoff, sessions index, collab queue).
-   *  The control module shells out to its `bin/fleet.ts` CLI. null disables the module. */
+   *  The control module shells out to its `bin/deck.ts` CLI. null disables the module. */
   fleetDir?: string | null;
   /** Autonomous agent collaboration: when `auto` is on, `fleet collab tick` runs every
    *  `intervalMinutes` (skipped while a run is in progress). */
   collab?: { auto: boolean; intervalMinutes: number };
 }
 
-const DEFAULTS: StewardConfig = {
+const DEFAULTS: CyberdeckConfig = {
   nodeName: hostname().replace(/\.local$/, ""),
   port: 4777,
   bind: "0.0.0.0",
@@ -64,13 +64,24 @@ const DEFAULTS: StewardConfig = {
   ],
   skipDirs: [".git", "Library", ".Trash"],
   scanDepth: 3,
-  fleetDir: existsSync(join(homedir(), "Code", "Fleet")) ? join(homedir(), "Code", "Fleet") : null,
+  fleetDir: [join(homedir(), "Code", "Deck"), join(homedir(), "Code", "Fleet")].find((d) => existsSync(d)) ?? null,
   collab: { auto: false, intervalMinutes: 30 },
 };
 
-export function loadConfig(): StewardConfig {
-  mkdirSync(STEWARD_HOME, { recursive: true });
-  const path = join(STEWARD_HOME, "config.json");
+/** One-time migration from the Steward era: copy identity + data into ~/.cyberdeck (the old dir is left for the old service until install.sh re-runs). */
+function migrateFromSteward(): void {
+  const old = join(homedir(), ".steward");
+  if (process.env.CYBERDECK_HOME || !existsSync(old) || existsSync(join(CYBERDECK_HOME, "node-id"))) return;
+  mkdirSync(CYBERDECK_HOME, { recursive: true });
+  const pairs: [string, string][] = [["token", "token"], ["node-id", "node-id"], ["config.json", "config.json"], ["steward.db", "cyberdeck.db"]];
+  for (const [from, to] of pairs) if (existsSync(join(old, from)) && !existsSync(join(CYBERDECK_HOME, to))) copyFileSync(join(old, from), join(CYBERDECK_HOME, to));
+  console.log(`migrated identity and data from ${old} to ${CYBERDECK_HOME}`);
+}
+
+export function loadConfig(): CyberdeckConfig {
+  migrateFromSteward();
+  mkdirSync(CYBERDECK_HOME, { recursive: true });
+  const path = join(CYBERDECK_HOME, "config.json");
   if (!existsSync(path)) {
     writeFileSync(path, JSON.stringify(DEFAULTS, null, 2) + "\n");
     return { ...DEFAULTS };
@@ -80,15 +91,15 @@ export function loadConfig(): StewardConfig {
 }
 
 /** Persist a partial config change (merged over what is on disk, not over defaults). */
-export function saveConfigPatch(patch: Partial<StewardConfig>): void {
-  const path = join(STEWARD_HOME, "config.json");
+export function saveConfigPatch(patch: Partial<CyberdeckConfig>): void {
+  const path = join(CYBERDECK_HOME, "config.json");
   const onDisk = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
   writeFileSync(path, JSON.stringify({ ...onDisk, ...patch }, null, 2) + "\n");
 }
 
 /** Stable node identity, minted on first run. */
 export function loadNodeId(): string {
-  const path = join(STEWARD_HOME, "node-id");
+  const path = join(CYBERDECK_HOME, "node-id");
   if (!existsSync(path)) {
     writeFileSync(path, "stw-" + randomBytes(12).toString("hex"), { mode: 0o600 });
   }
@@ -97,7 +108,7 @@ export function loadNodeId(): string {
 
 /** Bearer token gating the local HTTP API. Created on first run, mode 0600. */
 export function loadToken(): string {
-  const path = join(STEWARD_HOME, "token");
+  const path = join(CYBERDECK_HOME, "token");
   if (!existsSync(path)) {
     writeFileSync(path, randomBytes(24).toString("hex"), { mode: 0o600 });
   }

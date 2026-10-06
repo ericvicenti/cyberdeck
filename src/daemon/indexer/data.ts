@@ -4,7 +4,7 @@
 import { readdirSync, statSync, existsSync } from "fs";
 import { join, basename } from "path";
 import type { Database } from "bun:sqlite";
-import type { StewardConfig } from "../config";
+import type { CyberdeckConfig } from "../config";
 import { bus } from "../events";
 
 async function duBytes(paths: string[]): Promise<Map<string, number>> {
@@ -43,7 +43,7 @@ async function cacheBytes(dir: string, cacheDirs: string[]): Promise<number> {
 let dataScanRunning = false;
 export const isDataScanRunning = () => dataScanRunning;
 
-export async function runDataScan(db: Database, cfg: StewardConfig): Promise<void> {
+export async function runDataScan(db: Database, cfg: CyberdeckConfig): Promise<void> {
   if (dataScanRunning) return;
   dataScanRunning = true;
   bus.emit({ kind: "datascan:start" });

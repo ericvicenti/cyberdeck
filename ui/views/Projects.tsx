@@ -20,7 +20,7 @@ export function Projects({ params, onLocked }: { params: URLSearchParams; onLock
       setErr(null);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) onLocked();
-      else setErr(e instanceof ApiError && e.status === 404 ? "No fleet dir configured on this node (set fleetDir in ~/.steward/config.json)." : String(e instanceof Error ? e.message : e));
+      else setErr(e instanceof ApiError && e.status === 404 ? "No fleet dir configured on this node (set fleetDir in ~/.cyberdeck/config.json)." : String(e instanceof Error ? e.message : e));
     }
   };
   useEffect(() => {

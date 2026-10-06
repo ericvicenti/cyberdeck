@@ -1,6 +1,6 @@
-export type StewardEvent = { kind: string; [key: string]: unknown };
+export type CyberdeckEvent = { kind: string; [key: string]: unknown };
 
-type Listener = (ev: StewardEvent) => void;
+type Listener = (ev: CyberdeckEvent) => void;
 
 class EventBus {
   private listeners = new Set<Listener>();
@@ -10,7 +10,7 @@ class EventBus {
     return () => this.listeners.delete(fn);
   }
 
-  emit(ev: StewardEvent): void {
+  emit(ev: CyberdeckEvent): void {
     for (const fn of this.listeners) {
       try {
         fn(ev);

@@ -3,7 +3,7 @@ import { createBunWebSocket } from "hono/bun";
 import { serveStatic } from "hono/bun";
 import { join } from "path";
 import type { Database } from "bun:sqlite";
-import type { StewardConfig } from "./config";
+import type { CyberdeckConfig } from "./config";
 import { bus } from "./events";
 import { runScan, isScanRunning } from "./indexer/scan";
 import { runDataScan, isDataScanRunning } from "./indexer/data";
@@ -18,7 +18,7 @@ import { currentCommit, checkForUpdate, applyUpdate, isUpdating } from "./update
 const UI_DIST = join(import.meta.dir, "../../dist/ui");
 export const VERSION = "0.4.0";
 
-export function createServer(db: Database, cfg: StewardConfig, token: string, nodeId = "stw-dev") {
+export function createServer(db: Database, cfg: CyberdeckConfig, token: string, nodeId = "stw-dev") {
   cleanupHlsCache();
   const { upgradeWebSocket, websocket } = createBunWebSocket();
   const app = new Hono();

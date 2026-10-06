@@ -581,7 +581,7 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
                     onClick={() => go(c.path)}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => {
-                      const data = e.dataTransfer.getData("application/x-steward-paths");
+                      const data = e.dataTransfer.getData("application/x-cyberdeck-paths");
                       if (data) {
                         e.preventDefault();
                         e.stopPropagation();
@@ -761,7 +761,7 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
                   onClick={(e) => e.stopPropagation()}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
-                    const data = e.dataTransfer.getData("application/x-steward-paths");
+                    const data = e.dataTransfer.getData("application/x-cyberdeck-paths");
                     if (data) {
                       e.preventDefault();
                       doMove(JSON.parse(data), listing.parent!);
@@ -790,7 +790,7 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
                     }}
                     onDragStart={(ev) => {
                       const paths = sel.has(e.name) ? selPaths : [joinPath(listing!.path, e.name)];
-                      ev.dataTransfer.setData("application/x-steward-paths", JSON.stringify(paths));
+                      ev.dataTransfer.setData("application/x-cyberdeck-paths", JSON.stringify(paths));
                       ev.dataTransfer.effectAllowed = "move";
                     }}
                     onDragOver={(ev) => {
@@ -798,7 +798,7 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
                     }}
                     onDrop={(ev) => {
                       if (!isDirLike) return;
-                      const data = ev.dataTransfer.getData("application/x-steward-paths");
+                      const data = ev.dataTransfer.getData("application/x-cyberdeck-paths");
                       if (data) {
                         ev.preventDefault();
                         ev.stopPropagation();

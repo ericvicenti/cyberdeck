@@ -1,7 +1,7 @@
 import { readdirSync, existsSync } from "fs";
 import { join, basename } from "path";
 import type { Database } from "bun:sqlite";
-import type { StewardConfig } from "../config";
+import type { CyberdeckConfig } from "../config";
 import { bus } from "../events";
 
 async function git(repo: string, args: string[]): Promise<string> {
@@ -16,7 +16,7 @@ async function git(repo: string, args: string[]): Promise<string> {
 }
 
 /** Find git repos under the configured roots. A repo ends descent. */
-export function findRepos(cfg: StewardConfig): string[] {
+export function findRepos(cfg: CyberdeckConfig): string[] {
   const repos: string[] = [];
   const walk = (dir: string, depth: number) => {
     let entries;
@@ -73,7 +73,7 @@ async function junkBytes(repo: string, junkDirs: string[]): Promise<number> {
   return kb * 1024;
 }
 
-async function scanRepo(path: string, cfg: StewardConfig) {
+async function scanRepo(path: string, cfg: CyberdeckConfig) {
   const status = await git(path, ["status", "--porcelain=v1", "-b"]);
   const lines = status.split("\n");
   const header = lines[0] ?? "";
@@ -140,7 +140,7 @@ async function scanRepo(path: string, cfg: StewardConfig) {
 
 let scanRunning = false;
 
-export async function runScan(db: Database, cfg: StewardConfig): Promise<void> {
+export async function runScan(db: Database, cfg: CyberdeckConfig): Promise<void> {
   if (scanRunning) return;
   scanRunning = true;
   const scanId = db

@@ -1,17 +1,17 @@
 #!/usr/bin/env bun
-// steward CLI — talks to the local daemon and manages the service.
+// cyberdeck CLI — talks to the local daemon and manages the service.
 import { join } from "path";
 import { readFileSync, existsSync } from "fs";
 import { homedir } from "os";
-import { STEWARD_HOME, loadConfig } from "../daemon/config";
+import { CYBERDECK_HOME, loadConfig } from "../daemon/config";
 
 const cfg = loadConfig();
 const BASE = `http://127.0.0.1:${cfg.port}`;
-const SRC = join(STEWARD_HOME, "src");
+const SRC = join(CYBERDECK_HOME, "src");
 const cmd = process.argv[2] ?? "help";
 
 function token(): string {
-  const p = join(STEWARD_HOME, "token");
+  const p = join(CYBERDECK_HOME, "token");
   return existsSync(p) ? readFileSync(p, "utf8").trim() : "";
 }
 
@@ -30,19 +30,19 @@ async function sh(command: string[]): Promise<number> {
 }
 
 const isMac = process.platform === "darwin";
-const PLIST = join(homedir(), "Library/LaunchAgents/sh.steward.daemon.plist");
+const PLIST = join(homedir(), "Library/LaunchAgents/sh.cyberdeck.daemon.plist");
 const uid = process.getuid?.() ?? 501;
 
 async function serviceRestart() {
-  if (isMac) await sh(["launchctl", "kickstart", "-k", `gui/${uid}/sh.steward.daemon`]);
-  else await sh(["systemctl", "--user", "restart", "steward.service"]);
+  if (isMac) await sh(["launchctl", "kickstart", "-k", `gui/${uid}/sh.cyberdeck.daemon`]);
+  else await sh(["systemctl", "--user", "restart", "cyberdeck.service"]);
 }
 
 switch (cmd) {
   case "status": {
     try {
       const s = await api("/api/status");
-      console.log(`steward ${s.version} — node "${s.nodeName}"`);
+      console.log(`cyberdeck ${s.version} — node "${s.nodeName}"`);
       console.log(`roots: ${s.roots.join(", ")}`);
       console.log(
         `repos: ${s.repos ?? 0}  at-risk: ${s.atRisk ?? 0}  attention: ${s.attention ?? 0}  safe: ${s.safe ?? 0}`
@@ -50,7 +50,7 @@ switch (cmd) {
       console.log(`reclaimable junk: ${((s.junkBytes ?? 0) / 1e9).toFixed(1)} GB`);
       console.log(s.scanning ? "scan in progress…" : `last scan: ${s.lastScanAt ? new Date(s.lastScanAt).toLocaleString() : "never"}`);
     } catch {
-      console.log("daemon not reachable — try: steward restart");
+      console.log("daemon not reachable — try: cyberdeck restart");
       process.exit(1);
     }
     break;
@@ -70,17 +70,17 @@ switch (cmd) {
     break;
   case "stop":
     if (isMac) await sh(["launchctl", "bootout", `gui/${uid}`, PLIST]);
-    else await sh(["systemctl", "--user", "stop", "steward.service"]);
+    else await sh(["systemctl", "--user", "stop", "cyberdeck.service"]);
     break;
   case "start":
     if (isMac) await sh(["launchctl", "bootstrap", `gui/${uid}`, PLIST]);
-    else await sh(["systemctl", "--user", "start", "steward.service"]);
+    else await sh(["systemctl", "--user", "start", "cyberdeck.service"]);
     break;
   case "logs":
-    await sh(["tail", "-f", join(STEWARD_HOME, "logs/daemon.log"), join(STEWARD_HOME, "logs/daemon.err.log")]);
+    await sh(["tail", "-f", join(CYBERDECK_HOME, "logs/daemon.log"), join(CYBERDECK_HOME, "logs/daemon.err.log")]);
     break;
   case "update": {
-    // Steward manages its own source: pull, rebuild, restart.
+    // Cyberdeck manages its own source: pull, rebuild, restart.
     console.log("updating source…");
     if ((await sh(["git", "-C", SRC, "pull", "--ff-only"])) !== 0) process.exit(1);
     for (const step of [["bun", "install"], ["bun", "run", "build"]]) {
@@ -92,9 +92,9 @@ switch (cmd) {
     break;
   }
   default:
-    console.log(`steward — fleet-and-data guardian
+    console.log(`cyberdeck — fleet-and-data guardian
 
-usage: steward <command>
+usage: cyberdeck <command>
 
   status     daemon health and data summary
   open       open the web UI (authenticated)

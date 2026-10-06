@@ -1,4 +1,4 @@
-# Steward — Security & Secrets Vault Design
+# Cyberdeck — Security & Secrets Vault Design
 
 Status: implementation-ready design. Companion to `docs/BRIEF.md` (authoritative vision).
 Scope: threat model, node identity & mutual auth, browser↔daemon auth on localhost,
@@ -8,14 +8,14 @@ the encrypted secrets vault (crypto, schemas, sync, flows), and explicit non-goa
 
 ## 1. Threat model
 
-Steward is single-user, multi-machine, LAN-first. We defend against these concrete
+Cyberdeck is single-user, multi-machine, LAN-first. We defend against these concrete
 adversaries, in priority order:
 
 | # | Threat | Defended? | How |
 |---|--------|-----------|-----|
 | T1 | **Stolen laptop / stolen disk** (attacker has the powered-off machine or a disk image) | Yes | Vault items are ciphertext at rest; key derived from master password via argon2id, never stored. Node identity key is stored plaintext (0600) — a stolen node's identity must be revoked from another node (§3.6). |
 | T2 | **Malicious LAN peer** (attacker on the same network: sniffing, spoofing, MITM, port scanning) | Yes | Daemon HTTP binds `127.0.0.1` only. Node-to-node traffic is a mutually-authenticated encrypted channel (§3). Unpaired peers get nothing past the handshake. Pairing requires a short-lived code with MAC proof (§3.5). |
-| T3 | **Other local users / processes on the same machine (non-root, different UID)** | Yes | API requires a bearer session minted from a 0600 token file only our UID can read (§4). Identity, DB, and token files are 0600 in a 0700 `~/.steward`. |
+| T3 | **Other local users / processes on the same machine (non-root, different UID)** | Yes | API requires a bearer session minted from a 0600 token file only our UID can read (§4). Identity, DB, and token files are 0600 in a 0700 `~/.cyberdeck`. |
 | T4 | **Compromised remote node** (attacker fully owns one machine in the fleet) | Partially | It can read/modify anything that node legitimately syncs, and can serve its own UI. It **cannot** decrypt vault items (it only ever holds ciphertext) and cannot impersonate other nodes (no access to their private keys). Blast radius = that node's own data + garbage writes, which version vectors make detectable/recoverable (§6). Revocation flow in §3.6. |
 | T5 | **Same-UID malware / root on the box** | **No** | Explicit non-goal, see §8. Root reads memory, patches the binary, keylogs the master password. |
 | T6 | **Malicious daemon serving trojaned UI JS to steal the master password** | **No** (acknowledged) | "Client-side encryption" is only as honest as the JS the daemon serves. A compromised daemon on the node you type your master password into can exfiltrate it. Mitigation is T4 hygiene: type the master password only on machines you trust, which is the normal 1Password/Bitwarden posture too. |
@@ -59,12 +59,12 @@ encrypted WS channel.
 ### 3.1 Identity files
 
 ```
-~/.steward/                     mode 0700
+~/.cyberdeck/                     mode 0700
   identity/
     node.key                    mode 0600   ← ed25519 seed; the node's soul; never syncs
     node.pub                                ← public key (also cached in DB)
   token                         mode 0600   ← local browser/CLI auth (§4)
-  steward.db                    mode 0600
+  cyberdeck.db                    mode 0600
 ```
 
 - `nodeId` = `"stw1" + base32nopad(ed25519 publicKey)` (FLEET.md §2.2 is normative) —
@@ -115,7 +115,7 @@ Initiator (I)                          Responder (R)
 Key schedule (HKDF-SHA-256):
 
 ```
-prk        = HKDF-Extract(salt = "steward/hs/v1", ikm = ss ‖ th)
+prk        = HKDF-Extract(salt = "cyberdeck/hs/v1", ikm = ss ‖ th)
 k_i2r      = HKDF-Expand(prk, "i2r", 32)     # initiator→responder AEAD key
 k_r2i      = HKDF-Expand(prk, "r2i", 32)     # responder→initiator AEAD key
 session_id = HKDF-Expand(prk, "sid", 16)     # log correlation, not secret
@@ -164,7 +164,7 @@ normative** for the two flows; the security shape:
 
 ### 3.6 Revocation (stolen laptop)
 
-From any surviving node: `steward node revoke <nodeId>` sets `revoked_at`, and the
+From any surviving node: `cyberdeck node revoke <nodeId>` sets `revoked_at`, and the
 revocation is gossiped to all reachable peers as a signed statement
 `ed25519_sign(sk_revoker, "stw-revoke-v1" ‖ nodeId_revoked ‖ timestamp)` which peers
 verify and apply. Revoked nodes fail every future handshake at m2/m3. Because the vault
@@ -181,10 +181,10 @@ Cookies/DNS-rebinding/other-UID access must all fail closed.
 
 ### 4.1 Bootstrap token
 
-- First run: daemon writes 32 random bytes (base64url) to `~/.steward/token`,
+- First run: daemon writes 32 random bytes (base64url) to `~/.cyberdeck/token`,
   mode 0600. Possession of this file ⇒ same UID ⇒ authorized (this is the same trust
   model as the Docker socket or `~/.ssh`).
-- `steward open` (and the installer's final step) reads the token and opens
+- `cyberdeck open` (and the installer's final step) reads the token and opens
   `http://127.0.0.1:4777/#/login?ott=<one-time-ticket>` — the CLI first exchanges the
   file token for a **one-time ticket** via `POST /api/auth/ticket`
   (header `Authorization: Bearer <file-token>`), so the long-lived token never appears
@@ -196,7 +196,7 @@ Cookies/DNS-rebinding/other-UID access must all fail closed.
 `POST /api/auth/session` with `{ "ott": "…" }` (the SPA does this on load when it sees
 `ott` in the URL fragment — fragments are never sent to servers or logged):
 
-- Sets `steward_session=<32B random>; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000`
+- Sets `cyberdeck_session=<32B random>; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000`
   (30 days, sliding). No `Secure` flag — the origin is plain-http loopback; the wire is
   the kernel. Session ids live in SQLite:
 
@@ -217,12 +217,12 @@ CREATE TABLE ui_sessions (
    — kills DNS-rebinding, which is otherwise fatal on localhost servers.
 3. **Origin check** on every non-GET and every WS upgrade: absent (CLI) or exactly the
    loopback origin — kills CSRF from arbitrary websites even before SameSite.
-4. Custom header `X-Steward-Csrf: 1` required on mutating routes (a cross-origin form
+4. Custom header `X-Cyberdeck-Csrf: 1` required on mutating routes (a cross-origin form
    can't set custom headers).
 5. Routes: everything under `/api/*` (including the `/api/ws` upgrade) requires a valid session cookie
    **or** `Authorization: Bearer <file-token>` (CLI path). Static assets and
    `/api/auth/*` are the only exceptions.
-6. `steward auth reset` rotates the token file and deletes all `ui_sessions`.
+6. `cyberdeck auth reset` rotates the token file and deletes all `ui_sessions`.
 
 ---
 
@@ -269,7 +269,7 @@ CREATE TABLE vault_header (          -- exactly one row per vault; synced
   kdf             TEXT NOT NULL,    -- JSON: {"alg":"argon2id","mem":67108864,"ops":3,"par":1,"salt":"<b64url>"}
   key_generation  INTEGER NOT NULL, -- bumped on password rotation
   wrapped_vault_key BLOB NOT NULL,  -- XChaCha20-Poly1305(KEK, VaultKey), 24B nonce ‖ ct ‖ tag
-  verifier        BLOB NOT NULL,    -- seal(VaultKey, "steward-vault-verifier-v1") — unlock check
+  verifier        BLOB NOT NULL,    -- seal(VaultKey, "cyberdeck-vault-verifier-v1") — unlock check
   updated_at      INTEGER NOT NULL,
   updated_by      TEXT NOT NULL     -- nodeId
 );
@@ -358,7 +358,7 @@ There is deliberately **no** `/api/vault/unlock` — the daemon cannot unlock an
   (configurable 1 min–1 h, or "on tab hide"). Worker self-terminates; UI flips to the
   lock screen via the worker's `close` event.
 - Also locks on: tab `visibilitychange` → hidden for > 60 s (configurable), explicit
-  `⌘L`, and `steward vault lock` (broadcast over `/api/ws` so every open tab locks).
+  `⌘L`, and `cyberdeck vault lock` (broadcast over `/api/ws` so every open tab locks).
 - The session cookie (§4) is unaffected — auto-lock is about vault keys, not UI auth.
 
 ### 5.7 Password generator (entirely client-side)
@@ -437,7 +437,7 @@ ciphertext does offline cracking anyway — argon2id is the real defense).
 4. Single `PUT /api/vault/header` + batched item PUTs; header generation bump
    propagates by §6.2.
 
-Rotating after a device theft: also `steward node revoke` the stolen node (§3.6).
+Rotating after a device theft: also `cyberdeck node revoke` the stolen node (§3.6).
 
 ### 7.4 Change a secret / add item
 
@@ -458,7 +458,7 @@ Written down so nobody oversells this later:
 3. **Clipboard**: copied secrets go to the OS clipboard; we auto-clear after 30 s via
    the Clipboard API where allowed, but clipboard managers may retain history.
 4. **Swap/hibernation files** possibly containing key bytes from browser memory —
-   use FileVault/LUKS (Steward's convergence facets should nag about this).
+   use FileVault/LUKS (Cyberdeck's convergence facets should nag about this).
 5. **Traffic analysis** on the peer channel: item counts, sizes, and timing are visible
    to a LAN observer even though contents are not.
 

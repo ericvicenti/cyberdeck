@@ -1,4 +1,4 @@
-# Steward — Roadmap
+# Cyberdeck — Roadmap
 
 Milestone plan from empty repo to the full BRIEF. Each milestone is shippable on its own,
 runs on Eric's real fleet, and ends with a concrete acceptance test. Design references
@@ -25,11 +25,11 @@ something true.
    sequence (lock, config, migrations, server), `src/core/` (db, bus, config, log, ids,
    errors), `migrations/0001_init.sql` with the canonical schema (ARCHITECTURE §4.2).
 2. `install.sh` (INSTALL §3): bash-3.2, main-on-last-line, flags `--headless --port
-   --channel --repo --no-start --uninstall`; bun resolution + `STEWARD_BUN` pinning in
-   `~/.steward/env`; clone → `checkouts/<sha>` worktree → build → selfcheck → `current`
-   symlink swap; launchd plist + systemd user unit running `bin/steward-daemon-shim`;
+   --channel --repo --no-start --uninstall`; bun resolution + `CYBERDECK_BUN` pinning in
+   `~/.cyberdeck/env`; clone → `checkouts/<sha>` worktree → build → selfcheck → `current`
+   symlink swap; launchd plist + systemd user unit running `bin/cyberdeck-daemon-shim`;
    port-conflict probe against `/api/system/health`; idempotent re-run as the repair path.
-3. `steward` CLI shim + `src/cli/main.ts`: `status`, `start`, `stop`, `restart`
+3. `cyberdeck` CLI shim + `src/cli/main.ts`: `status`, `start`, `stop`, `restart`
    (exit-64 contract), `logs`, `version`, `update` (re-run installer), `open`.
 4. Self-update job (ARCHITECTURE §9): stage worktree, offline smoke test, symlink swap,
    120s probation, shim crash-counter rollback, sha blocklist.
@@ -40,23 +40,23 @@ something true.
    seed, `repo_audit` job (status/stash/ahead/remote → `risk`), `dir_stats` aggregation.
    Stat-pass incremental rescans; watcher + dirhash tiers may slip to M2.
 7. Event bus + `/api/ws` (ARCHITECTURE §6.3, §7): persisted events, seq replay,
-   `X-Steward-Seq` on REST responses.
+   `X-Cyberdeck-Seq` on REST responses.
 8. API subset: `system/*`, `config`, `roots`, `scans`, `repos` (read + audit), `files`,
    `files/tree`, `jobs`, `events`. Browser auth: token → ticket → session cookie +
    Host/Origin/CSRF middleware (SECURITY §4).
 9. UI shell (UX §2–§5, §8): tokens, nav rail, TopBar, DataTable/Badge/StatusDot
    primitives, `/dev/states` route; **Fleet dashboard** (verdict hero, at-risk table,
    single node card, activity feed), **Repos board** (read-only glyph clusters), **Files
-   browser** (list view), **Steward self view** (version, update button, log tail).
+   browser** (list view), **Cyberdeck self view** (version, update button, log tail).
    Live-updating over WS, skeleton/empty/error states.
-10. macOS FDA detection + banner + `steward setup` TCC walkthrough (INSTALL §8).
+10. macOS FDA detection + banner + `cyberdeck setup` TCC walkthrough (INSTALL §8).
 
 **Acceptance test:** On a fresh macOS machine, Eric runs the curl one-liner; within two
 minutes a browser opens showing the Fleet dashboard. After the first scan completes he
 can see every repo under `~/Code` ranked by risk — dirty, unpushed, and remote-less repos
 flagged with true counts — browse files with novel/derivable classification and a
 reclaimable-junk byte total, watch a live rescan stream into the UI without refreshing,
-run `steward update` and watch the daemon swap versions and come back healthy, and
+run `cyberdeck update` and watch the daemon swap versions and come back healthy, and
 `kill -9` the daemon to see launchd restart it with all interrupted jobs resumed.
 
 ---
@@ -68,12 +68,12 @@ feature inherits the channel.
 
 **Deliverables**
 
-1. Node identity (FLEET §2): ed25519 keypair at `~/.steward/identity/`, `stw1…` nodeId,
+1. Node identity (FLEET §2): ed25519 keypair at `~/.cyberdeck/identity/`, `stw1…` nodeId,
    perm checks.
 2. Mesh listener on 4778 + Noise-XX handshake + secretstream framing + channels
    (FLEET §4), heartbeat/reconnect, mDNS discovery, deterministic dialing.
 3. Pairing flows (FLEET §3): URL/QR offer + 6-digit code with transcript-bound MAC;
-   roster import; revocation tombstones; `steward pair`, UI pairing dialog.
+   roster import; revocation tombstones; `cyberdeck pair`, UI pairing dialog.
 4. RPC frames + method registry (FLEET §5), `dst` routing, `/api/nodes/:id/proxy/*`
    forwarding; 1-hop relay.
 5. Gossip: signed peer records, digest anti-entropy, fleet KV with HLC-LWW (FLEET §7–8).
@@ -141,14 +141,14 @@ from "17 things need attention" toward zero, each remaining item explaining its 
 secret, unlocks the same vault on the tower's UI via master password and copies the live
 TOTP code there; edits the same item on both machines while the tower is offline and,
 after reconnect, finds both versions preserved (one as a "(conflict from …)" item, no
-silent loss); confirms `sqlite3 steward.db` on any node shows only ciphertext — titles
+silent loss); confirms `sqlite3 cyberdeck.db` on any node shows only ciphertext — titles
 included — and that lock wipes the UI instantly.
 
 ---
 
 ## M4 — Convergence facets
 
-**Goal:** `steward setup` makes a fresh machine his machine; drift stays visible forever
+**Goal:** `cyberdeck setup` makes a fresh machine his machine; drift stays visible forever
 after.
 
 **Deliverables**
@@ -156,7 +156,7 @@ after.
 1. Facet framework (CONVERGENCE §2, §4): types, runner subprocess with NDJSON protocol,
    brokered vault socket, structural differ, overlay merge, toposorted serial apply with
    recapture verify.
-2. Profile repo: `steward profile init` bootstrap (brew leaves, curated defaults,
+2. Profile repo: `cyberdeck profile init` bootstrap (brew leaves, curated defaults,
    dotfile allowlist move+symlink, ssh keys → vault), machines.json, profile sync.
 3. Builtin facet library tier 1: homebrew, dotfiles, git-config, macos-defaults,
    ssh-keys, runtime-versions, vscode, apt-packages (CONVERGENCE §10); remainder follows.
@@ -164,12 +164,12 @@ after.
    gossip → fleet badge; sudo honesty (`--pending` terminal bundle) and the manual
    checklist.
 5. Setup UI (UX §11): facets × machines matrix, DriftDrawer with **Apply / Adopt /
-   Ignore**, per-machine checklist with live converge log; CLI `steward plan|apply|
+   Ignore**, per-machine checklist with live converge log; CLI `cyberdeck plan|apply|
    capture|adopt|drift`.
 
-**Acceptance test:** Eric runs `steward profile init` on his configured laptop and gets a
+**Acceptance test:** Eric runs `cyberdeck profile init` on his configured laptop and gets a
 committed profile repo capturing his brew leaves, dotfiles, and key macOS defaults; on a
-factory-fresh Mac he runs the installer + `steward setup`, and in one sitting (one sudo
+factory-fresh Mac he runs the installer + `cyberdeck setup`, and in one sitting (one sudo
 prompt, one master password, a short manual checklist) the machine has his packages,
 dotfiles, git config, and SSH keys; a week later he `brew install`s something by hand and
 the Setup matrix shows the drift, which he **Adopts** into the profile from the UI.
@@ -195,7 +195,7 @@ the Setup matrix shows the drift, which he **Adopts** into the profile from the 
 **Acceptance test:** Eric opens Docker with "All nodes" scope and sees every container on
 laptop and tower with live state; tails a server container's logs and opens a shell into
 it from his laptop; brings a compose project up and down from its card; runs the prune
-plan accepting the "safe" tier to reclaim dangling images — while verifying Steward
+plan accepting the "safe" tier to reclaim dangling images — while verifying Cyberdeck
 never offers bulk volume deletion and an unused volume requires typing its name.
 
 ---
@@ -207,15 +207,15 @@ redundancy.
 
 **Deliverables**
 
-1. Repo identity (`steward.repoid` + root-commit correlation, DOCKER-CI §2.2) and the
+1. Repo identity (`cyberdeck.repoid` + root-commit correlation, DOCKER-CI §2.2) and the
    `repo_identity`/`repo_mirror`/`repo_sync_policy` tables.
-2. Bare mirrors under `~/.steward/mirrors/`; git smart-HTTP at
+2. Bare mirrors under `~/.cyberdeck/mirrors/`; git smart-HTTP at
    `/git/:nodeId/:repoId.git` via `git http-backend`, proxied to peers over the node
-   channel; auto-written `steward` remote in checkouts (§2.3).
+   channel; auto-written `cyberdeck` remote in checkouts (§2.3).
 3. Auto-push policies (off/on-commit/interval/manual), replication-factor placement,
    forced-refspec push with the multi-checkout divergence guard (§2.4).
 4. Mirror health in the redundancy score (committed-data vs dirty-file numbers kept
-   distinct) and mirror management UI + `steward repo` CLI (§2.5).
+   distinct) and mirror management UI + `cyberdeck repo` CLI (§2.5).
 
 **Acceptance test:** Eric enables on-commit sync for a remote-less repo with replication
 factor 2; within a minute of committing, the history exists as mirrors on two other
@@ -231,7 +231,7 @@ history back with no GitHub and no credentials anywhere.
 
 **Deliverables**
 
-1. `.steward/ci.yml` parsing (jobs, needs, image, steps, artifacts — deliberately no
+1. `.cyberdeck/ci.yml` parsing (jobs, needs, image, steps, artifacts — deliberately no
    matrices/marketplace, DOCKER-CI §3.2).
 2. Trigger pipeline: post-receive hooks in mirrors → deterministic coordinator (lowest
    mirror-hosting nodeId) → `ci_run`/`ci_job` rows (§3.3).

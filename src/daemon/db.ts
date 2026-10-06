@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { join } from "path";
-import { STEWARD_HOME } from "./config";
+import { CYBERDECK_HOME } from "./config";
 
 export type RepoRow = {
   id: number;
@@ -23,7 +23,7 @@ export type RepoRow = {
 };
 
 export function openDb(): Database {
-  const db = new Database(join(STEWARD_HOME, "steward.db"), { create: true });
+  const db = new Database(join(CYBERDECK_HOME, "cyberdeck.db"), { create: true });
   db.exec("PRAGMA journal_mode = WAL;");
   initSchema(db);
   return db;
