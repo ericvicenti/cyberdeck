@@ -8,6 +8,11 @@ use `bun` for everything.
 - `src/daemon/indexer/` — fs/git scanning and risk scoring.
 - `src/cli/steward.ts` — CLI; installed as a shim by `install.sh`.
 - `ui/` — Vite root; builds to `dist/ui`, served by the daemon.
+- `src/daemon/api/control.ts` — the control module (Projects / Agents / Services views). It never
+  parses the private Fleet repo itself: it shells out to `<fleetDir>/bin/fleet.ts … --json` (config
+  `fleetDir`, default `~/Code/Fleet`), caches reads 20 s, probes services every 5 min, serves collab run
+  logs from `~/.fleet/runs/<id>/`, and (when `collab.auto` is on) runs `fleet collab tick` on a timer.
+  The JSON contract lives with the CLI; tests use the stub in `tests/fixtures/fleet/bin/fleet.ts`.
 - `docs/` — the knowledgebase. `docs/BRIEF.md` is the authoritative vision;
   `docs/ARCHITECTURE.md` is canonical for schema/API; `docs/ROADMAP.md` tracks milestones.
   Keep docs in sync when changing schema or routes.

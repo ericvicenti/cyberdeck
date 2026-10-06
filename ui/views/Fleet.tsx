@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, post, navigate, setActiveNode, fmtBytes, fmtAgo, ApiError } from "../lib/api";
 import { ServerIcon, FolderIcon, TerminalIcon, GitIcon } from "../lib/icons";
+import type { Overview } from "../lib/control";
 
 type NodeStatus = {
   nodeName: string;
@@ -41,7 +42,7 @@ function NodeCard(props: {
 }) {
   const s = props.status;
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+    <div className="hud-card p-4">
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2.5">
           <div className={`rounded-lg p-2 ${props.online ? "bg-emerald-500/10 text-emerald-400" : "bg-zinc-800 text-zinc-500"}`}>
@@ -62,8 +63,8 @@ function NodeCard(props: {
             </div>
           </div>
         </div>
-        <span className={`mt-1 flex items-center gap-1.5 text-[11px] ${props.online ? "text-emerald-400" : "text-zinc-500"}`}>
-          <span className={`h-1.5 w-1.5 rounded-full ${props.online ? "bg-emerald-400" : "bg-zinc-600"}`} />
+        <span className={`hud-badge mt-1 flex items-center gap-1.5 ${props.online ? "neon-green" : "text-zinc-500"}`}>
+          <span className={`led ${props.online ? "led-on" : "led-off"}`} />
           {props.online ? "online" : "offline"}
         </span>
       </div>
@@ -76,9 +77,9 @@ function NodeCard(props: {
             ["attention", s.attention ?? 0, s.attention ? "text-amber-400" : "text-emerald-400"],
             ["junk", s.junkBytes ? fmtBytes(s.junkBytes) : "0", "text-zinc-400"],
           ].map(([label, value, cls]) => (
-            <div key={String(label)} className="rounded-lg bg-zinc-900/80 px-1 py-2">
-              <div className={`text-sm font-semibold tabular-nums ${cls}`}>{String(value)}</div>
-              <div className="text-[9px] uppercase tracking-wider text-zinc-600">{String(label)}</div>
+            <div key={String(label)} className="rounded-sm bg-zinc-950/70 px-1 py-2">
+              <div className={`hud-stat ${cls}`}>{String(value)}</div>
+              <div className="hud-label mt-1">{String(label)}</div>
             </div>
           ))}
         </div>
@@ -113,6 +114,7 @@ function NodeCard(props: {
 export function Fleet({ onLocked }: { onLocked: () => void }) {
   const [info, setInfo] = useState<FleetInfo | null>(null);
   const [selfStatus, setSelfStatus] = useState<NodeStatus | null>(null);
+  const [control, setControl] = useState<Overview | null>(null);
   const [code, setCode] = useState<PairingCode | null>(null);
   const [peerUrl, setPeerUrl] = useState("");
   const [peerCode, setPeerCode] = useState("");
@@ -124,6 +126,7 @@ export function Fleet({ onLocked }: { onLocked: () => void }) {
       const [f, s] = await Promise.all([api<FleetInfo>("/api/fleet/nodes"), api<NodeStatus>("/api/status")]);
       setInfo(f);
       setSelfStatus(s);
+      api<Overview>("/api/control/overview").then(setControl).catch(() => setControl(null));
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) onLocked();
     }
@@ -159,7 +162,7 @@ export function Fleet({ onLocked }: { onLocked: () => void }) {
   return (
     <div className="h-full overflow-auto">
       <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
-        <h1 className="text-lg font-semibold text-zinc-100">Fleet</h1>
+        <h1 className="neon text-lg font-semibold uppercase tracking-[0.15em]">Fleet</h1>
         <p className="mt-0.5 text-xs text-zinc-500">Every machine running Steward. Pair them and manage any node from any other.</p>
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -191,17 +194,39 @@ export function Fleet({ onLocked }: { onLocked: () => void }) {
           ))}
         </div>
 
+        {control && (
+          <div className="mt-5 hud-card p-4" data-testid="control-card">
+            <div className="flex items-center justify-between">
+              <div className="hud-label neon">Control</div>
+              <span className="text-[11px] text-zinc-500">fleet repo {control.status?.repo.branch ?? ""}{control.status?.repo.dirty ? ` · ${control.status.repo.dirty} dirty` : ""}</span>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+              {[
+                ["projects", control.projects.length, "projects", "text-zinc-200"],
+                ["handoff", control.status?.handoffOpen ?? 0, "projects", "text-amber-400"],
+                ["tasks open · running", `${control.collab.tasks.filter((t) => t.status === "open").length} · ${control.collab.runs.filter((r) => r.status === "running").length}`, "agents", "text-sky-400"],
+                ["services down", control.services ? control.services.rows.filter((r) => r.ok === false).length : "—", "services", control.services?.rows.some((r) => r.ok === false) ? "text-red-400" : "text-emerald-400"],
+              ].map(([label, value, view, cls]) => (
+                <button key={String(label)} onClick={() => navigate(String(view))} className="hud-row rounded-sm bg-zinc-950/70 px-1 py-2">
+                  <div className={`hud-stat ${cls}`}>{String(value)}</div>
+                  <div className="hud-label mt-1">{String(label)}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* pairing */}
-        <h2 className="mt-8 text-sm font-semibold text-zinc-200">Add a machine</h2>
+        <h2 className="hud-label neon-magenta mt-8">Add a machine</h2>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
-            <div className="text-[13px] font-medium text-zinc-200">On this machine</div>
+          <div className="hud-card p-4">
+            <div className="hud-label neon">On this machine</div>
             <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
               Generate a pairing code, then enter it (with one of the addresses below) on the other machine's Fleet page.
             </p>
             {code ? (
               <div className="mt-3">
-                <div className="text-center font-mono text-3xl font-bold tracking-[0.3em] text-emerald-400" data-testid="pairing-code">
+                <div className="neon-green text-center font-mono text-3xl font-bold tracking-[0.3em]" data-testid="pairing-code">
                   {code.code}
                 </div>
                 <div className="mt-2 text-center text-[11px] text-zinc-500">
@@ -220,8 +245,8 @@ export function Fleet({ onLocked }: { onLocked: () => void }) {
             )}
           </div>
 
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
-            <div className="text-[13px] font-medium text-zinc-200">Pair with another machine</div>
+          <div className="hud-card p-4">
+            <div className="hud-label neon">Pair with another machine</div>
             <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
               Enter the other machine's address and the code shown on its Fleet page.
             </p>

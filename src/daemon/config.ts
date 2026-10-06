@@ -27,6 +27,12 @@ export interface StewardConfig {
   skipDirs: string[];
   /** Max directory depth when searching roots for git repos. */
   scanDepth: number;
+  /** Checkout of the private Fleet repo (projects, handoff, sessions index, collab queue).
+   *  The control module shells out to its `bin/fleet.ts` CLI. null disables the module. */
+  fleetDir?: string | null;
+  /** Autonomous agent collaboration: when `auto` is on, `fleet collab tick` runs every
+   *  `intervalMinutes` (skipped while a run is in progress). */
+  collab?: { auto: boolean; intervalMinutes: number };
 }
 
 const DEFAULTS: StewardConfig = {
@@ -58,6 +64,8 @@ const DEFAULTS: StewardConfig = {
   ],
   skipDirs: [".git", "Library", ".Trash"],
   scanDepth: 3,
+  fleetDir: existsSync(join(homedir(), "Code", "Fleet")) ? join(homedir(), "Code", "Fleet") : null,
+  collab: { auto: false, intervalMinutes: 30 },
 };
 
 export function loadConfig(): StewardConfig {
@@ -68,7 +76,14 @@ export function loadConfig(): StewardConfig {
     return { ...DEFAULTS };
   }
   const onDisk = JSON.parse(readFileSync(path, "utf8"));
-  return { ...DEFAULTS, ...onDisk };
+  return { ...DEFAULTS, ...onDisk, collab: { ...DEFAULTS.collab!, ...(onDisk.collab ?? {}) } };
+}
+
+/** Persist a partial config change (merged over what is on disk, not over defaults). */
+export function saveConfigPatch(patch: Partial<StewardConfig>): void {
+  const path = join(STEWARD_HOME, "config.json");
+  const onDisk = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+  writeFileSync(path, JSON.stringify({ ...onDisk, ...patch }, null, 2) + "\n");
 }
 
 /** Stable node identity, minted on first run. */
