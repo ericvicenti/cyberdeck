@@ -615,6 +615,15 @@ hashes but scans must be fast (300 project dirs ≈ minutes, not hours).
 | WS | `/api/sessions/:id/attach` | `?cols=&rows=` | attach: `{t:"hello", session}` then the backlog as `{t:"data", replay:true}`, then live `{t:"data"}`; client sends `{t:"input"}` / `{t:"resize"}`; `{t:"exit", code}` when the shell ends (an exited session replays its last screen and closes) |
 | WS | `/api/nodes/:id/sessions/:sid/attach` | — | same, piped to a peer (REST goes through `/api/nodes/:id/proxy/sessions…`) |
 | GET | `/api/harness/caps` | `?refresh=1` | `{cc, cx, tmux, cmux}`: what this node's login shell can run; feeds the auto harness selector |
+| GET | `/api/browser/profiles` | | Remote browser: `{available, reason?, profiles:[{name, open, exists, url?}]}`; one persistent headless Chromium per profile under `~/.cyberdeck/browser/<profile>` |
+| GET | `/api/browser/:profile/state` | | `{url, title, loading, open}` |
+| POST | `/api/browser/:profile/open` | `{url}` | Launches the profile if needed and navigates (http/https only) |
+| POST | `/api/browser/:profile/close` | | Closes that profile's Chromium (cookies stay on disk) |
+| WS | `/api/browser/:profile/stream` | | CDP screencast viewer: `{t:"frame", data(base64 jpeg), w, h}` / `{t:"state", url, title}` / `{t:"error"}` out; validated `{t:"mouse"|"key"|"wheel"|"nav"|"back"|"forward"|"reload"|"resize"}` in. Proxied for peers at `/api/nodes/:id/browser/:profile/stream` |
+| GET | `/api/cloud` | | Cloud AI archive status per provider (`chatgpt`, `claude`): `{status: ok|needs_login|unavailable|never, lastSync, lastError, conversations, syncing, profileExists, browserOpen}` |
+| POST | `/api/cloud/:provider/sync` | | Pulls every conversation through the logged-in browser profile into `<fleetDir>/cloud/<provider>/<id>.md` + `cloud/index-<provider>.jsonl` (runs in the background; also every 6 h) |
+| GET | `/api/cloud/:provider/conversations` | `?q=` | Archived conversations (index rows, same shape as the Deck session index plus `url`) |
+| GET | `/api/cloud/:provider/conversations/:id` | | `{frontmatter, markdown}` of one archived conversation |
 | POST | `/api/mcp` | JSON-RPC (MCP Streamable HTTP, stateless; GET/DELETE answer 405) | the MCP tool server for Seed Agents and other MCP clients: `status`, `fleet_status`, `hosts`, `projects`, `todo`, `handoff`, `sessions`, `repos`, `services`, `collab_tasks`, `collab_add`, `collab_run`, `run_log`, `note`, `scan` (docs/AGENTS.md); same auth as every `/api` route |
 | GET | `/api/roots` | — | scan roots with last-scan summaries |
 | POST | `/api/roots` | `{path}` | adds root (also persisted to config) |

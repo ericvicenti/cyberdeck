@@ -57,6 +57,7 @@ Gotchas:
 - Playwright e2e needs `bunx playwright install chromium` once per machine.
 
 cmux: `src/daemon/api/cmux.ts` drives Eric's cmux terminal multiplexer through its CLI (`/Applications/cmux.app/Contents/Resources/bin/cmux` or PATH) with validated argv only; `ui/views/Cmux.tsx` is the view.
+Cloud AI: `src/daemon/browser.ts` runs persistent headless Chromium profiles (playwright, `~/.cyberdeck/browser/<profile>`) streamed to `ui/views/RemoteBrowser.tsx` over CDP; `src/daemon/cloud.ts` archives chatgpt.com / claude.ai conversations through those logged-in profiles into `<fleetDir>/cloud/` (format in `renderMarkdown`); `ui/views/Cloud.tsx` is the view. Unofficial site endpoints: keep fetchers defensive.
 
 Live sessions + prompt bar: a terminal is a daemon-owned session (`src/daemon/sessions.ts`, routes in
 `src/daemon/api/sessions.ts`: `/api/sessions`, WS `/api/sessions/:id/attach`, `/api/harness/caps`), not a

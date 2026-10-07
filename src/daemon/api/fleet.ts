@@ -250,5 +250,7 @@ export function registerFleetRoutes(
     });
   // Ephemeral terminal on a peer (/api/term) and attach to a peer's live session.
   app.get("/api/nodes/:id/term", proxyWs((c, node) => { const cwd = c.req.query("cwd"); return `/api/term?token=${encodeURIComponent(node.token)}${cwd ? `&cwd=${encodeURIComponent(cwd)}` : ""}`; }));
+  // Remote browser screencast on a peer (frames and input are JSON text frames, so the string pipe is enough).
+  app.get("/api/nodes/:id/browser/:profile/stream", proxyWs((c, node) => `/api/browser/${encodeURIComponent(c.req.param("profile"))}/stream?token=${encodeURIComponent(node.token)}`));
   app.get("/api/nodes/:id/sessions/:sid/attach", proxyWs((c, node) => { const q = new URLSearchParams({ token: node.token }); for (const k of ["cols", "rows"]) { const v = c.req.query(k); if (v) q.set(k, v); } return `/api/sessions/${encodeURIComponent(c.req.param("sid"))}/attach?${q}`; }));
 }
