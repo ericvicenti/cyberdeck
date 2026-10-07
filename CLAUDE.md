@@ -13,6 +13,12 @@ use `bun` for everything.
   `fleetDir`, default `~/Code/Fleet`), caches reads 20 s, probes services every 5 min, serves collab run
   logs from `~/.fleet/runs/<id>/`, and (when `collab.auto` is on) runs `fleet collab tick` on a timer.
   The JSON contract lives with the CLI; tests use the stub in `tests/fixtures/fleet/bin/fleet.ts`.
+  Projects ⇄ services: a project's `services: [host/name, …]` frontmatter (`*` = one segment) is matched against probe
+  rows client-side (`ui/lib/control.ts`: `serviceMatches`, `servicesForProject`, `projectsForService`); the Projects
+  view lists a project's services, the Services view tags each row and host with its projects. `ui/lib/hosts.ts`
+  (`openOnHost`) runs a command on any fleet host: natively on this node or a paired online node, else `ssh <alias>`
+  from here (the alias comes from `status.hosts[].ssh`). Service log/restart commands per type: `serviceLogCmd`,
+  `serviceRestartCmd`. Tests: `tests/control-links.test.ts`.
 - `src/daemon/api/mcp.ts` — the MCP server (`POST /api/mcp`, Streamable HTTP, a fresh
   McpServer per request) that makes the node and the deck callable from Seed Agents. It reuses
   the `Control` handle `registerControlRoutes` returns; tool names stay short because Seed

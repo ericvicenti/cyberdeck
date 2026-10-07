@@ -89,7 +89,7 @@ export function App() {
       {route.view === "fleet" && <Fleet onLocked={lock} key={`fleet-${nodeGen}`} />}
       {route.view === "projects" && <Projects params={route.params} onLocked={lock} key={`projects-${nodeGen}-${nodeId}`} />}
       {route.view === "agents" && <Agents params={route.params} onLocked={lock} key={`agents-${nodeGen}-${nodeId}`} />}
-      {route.view === "services" && <Services onLocked={lock} key={`services-${nodeGen}-${nodeId}`} />}
+      {route.view === "services" && <Services params={route.params} onLocked={lock} key={`services-${nodeGen}-${nodeId}`} />}
       {route.view === "data" && <Data onLocked={lock} key={`data-${nodeGen}-${nodeId}`} />}
       {route.view === "files" && <Files params={route.params} onLocked={lock} key={`files-${nodeGen}-${nodeId}`} />}
       {route.view === "edit" && <Editor params={route.params} onLocked={lock} key={`edit-${nodeGen}-${nodeId}`} />}

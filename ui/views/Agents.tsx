@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, post, wsUrl, activeNode, activeNodeName, ApiError } from "../lib/api";
+import { api, post, wsUrl, navigate, activeNode, activeNodeName, ApiError } from "../lib/api";
 import { openTerminal, launchCmd, resumeCmd, shq } from "../lib/terms";
-import { type Overview, type Session, type Run, type Task, pill, isoAgo, duration } from "../lib/control";
+import { type Overview, type Session, type Run, type Task, pill, isoAgo, duration, fleetPath, homePath } from "../lib/control";
+import { useFleetNodes, openOnHost } from "../lib/hosts";
 import { Markdown } from "./Markdown";
-import { Panel, Row, Empty } from "./Projects";
+import { Panel, Row, Empty, HostLink, Action } from "./Projects";
 
 type Collab = { tasks: Task[]; runs: Run[]; auto: boolean; intervalMinutes?: number };
 const LOGS = ["worker.log", "reviewer.log", "result.md"] as const;
@@ -15,31 +16,28 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
   const [msg, setMsg] = useState<string | null>(null);
   const [showHandoff, setShowHandoff] = useState(false);
   const [runId, setRunId] = useState<string>(params.get("run") ?? "");
+  const focusTask = params.get("task") ?? "";
   const [logFile, setLogFile] = useState<(typeof LOGS)[number]>("worker.log");
   const [log, setLog] = useState<{ text: string; size: number }>({ text: "", size: 0 });
   const [follow, setFollow] = useState(true);
   const logRef = useRef<HTMLPreElement>(null);
   // sessions
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(params.get("q") ?? "");
   const [host, setHost] = useState("");
   const [tool, setTool] = useState("");
   const [sessions, setSessions] = useState<Session[]>([]);
   const [pulling, setPulling] = useState<string | null>(null);
   // add task form
-  const [form, setForm] = useState({ title: "", project: "", host: "", worker: "cx", body: "" });
+  const [form, setForm] = useState({ title: "", project: params.get("project") ?? "", host: "", worker: "cx", body: "" });
   // launch an agent in a terminal
-  const [nodes, setNodes] = useState<{ id: string; name: string; online: boolean }[]>([]);
+  const nodes = useFleetNodes();
   const [launch, setLaunch] = useState({ node: activeNode(), cwd: "", tool: "cc" as "cc" | "cx", prompt: "" });
-  useEffect(() => { fetch("/api/fleet/nodes", { headers: { authorization: `Bearer ${localStorage.getItem("cyberdeck-token") ?? ""}` } }).then((r) => r.json()).then((f) => setNodes(f.nodes ?? [])).catch(() => {}); }, []);
   const home = ov ? ov.fleetDir.replace(/\/Code\/[^/]+$/, "") : "";
   const dirs = useMemo(() => { const d = new Set<string>(); if (home) d.add(`${home}/Code`); for (const p of ov?.projects ?? []) for (const g of p.repos) if (!g.includes("*") && home) d.add(`${home}/Code/${g}`); return [...d]; }, [ov, home]);
-  /** Node id for a fleet host name ("" = this node). */
-  const nodeFor = (hostName: string) => (hostName.toLowerCase() === (ov?.status?.host ?? "").toLowerCase() ? { id: "", name: hostName } : nodes.find((n) => n.name.toLowerCase() === hostName.toLowerCase()));
+  /** Run a command in a terminal on a fleet host: natively when it is this node or a paired node, else over ssh. */
   const openOn = (hostName: string, cwd: string, cmd: string, title: string) => {
-    const n = nodeFor(hostName);
-    if (!n) { setMsg(`${hostName} is not a paired node`); return; }
-    if (n.id && !nodes.find((x) => x.id === n.id)?.online) { setMsg(`${hostName} is offline`); return; }
-    openTerminal({ node: n.id, nodeName: n.name, cwd, cmd, title });
+    const e = openOnHost({ host: hostName, me: ov?.status?.host ?? "", hosts: ov?.status?.hosts ?? [], nodes, cwd, cmd, title });
+    if (e) setMsg(e);
   };
 
   const load = async () => {
@@ -74,6 +72,12 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
   const runs = collab?.runs ?? [];
   const run = runs.find((r) => r.id === runId) ?? runs[0];
   useEffect(() => { if (run && run.id !== runId) setRunId(run.id); }, [run?.id]);
+  useEffect(() => {
+    if (!focusTask || !collab) return;
+    const r = runs.find((x) => x.task === focusTask);
+    if (r && !params.get("run")) setRunId(r.id);
+    document.getElementById(`task-${focusTask}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [focusTask, collab?.tasks.length]);
   useEffect(() => {
     if (!run) return;
     let alive = true;
@@ -118,7 +122,7 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
                   {ov.handoff.map((h) => (
                     <div key={h.file} className="rounded-lg bg-zinc-950/60 p-3">
-                      <div className="mb-1 flex items-center gap-2 text-[11px] text-zinc-400"><span className="font-mono text-zinc-200">{h.host}</span><span className={`rounded px-1 text-[10px] ${h.agent === "cc" ? "bg-orange-500/15 text-orange-300" : "bg-sky-500/15 text-sky-300"}`}>{h.agent}</span><span className="ml-auto font-mono text-[10px] text-zinc-600">{h.file}</span></div>
+                      <div className="mb-1 flex items-center gap-2 text-[11px] text-zinc-400"><span className="font-mono text-zinc-200"><HostLink host={h.host} /></span><span className={`rounded px-1 text-[10px] ${h.agent === "cc" ? "bg-orange-500/15 text-orange-300" : "bg-sky-500/15 text-sky-300"}`}>{h.agent}</span><button onClick={() => navigate("edit", { path: fleetPath(ov.fleetDir, h.file) })} className="ml-auto font-mono text-[10px] text-zinc-600 hover:text-sky-400" title="edit this note">{h.file} ✎</button></div>
                       <Markdown text={h.text} />
                     </div>
                   ))}
@@ -162,19 +166,24 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
               }
             >
               {(collab?.tasks ?? []).length === 0 && <Empty>No tasks in the queue. Add one below; the worker agent does it, the reviewer checks it, and you see both logs here.</Empty>}
-              {(collab?.tasks ?? []).map((t) => (
-                <Row key={t.id}>
-                  <span className={`w-16 rounded px-1.5 py-0.5 text-center text-[9px] uppercase ${pill(t.status)}`}>{t.status}</span>
-                  <span className="hidden w-20 shrink-0 font-mono text-[10px] text-zinc-500 sm:inline">{t.id}</span>
-                  <span className="min-w-0 flex-1 truncate text-[12px] text-zinc-200" title={t.body}>{t.title}</span>
-                  <span className="hidden w-40 truncate text-[10px] text-zinc-500 sm:inline">{t.project}</span>
-                  <span className="hidden w-16 text-[10px] text-zinc-500 sm:inline">{t.host}</span>
-                  <span className="hidden w-14 text-[10px] text-zinc-500 sm:inline">{t.worker}→{t.reviewer}</span>
-                  {t.status === "open" && (
-                    <button onClick={() => act(`Run ${t.id}`, () => post("/api/control/collab/run", { id: t.id }))} className="rounded border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800">Run</button>
-                  )}
-                </Row>
-              ))}
+              {(collab?.tasks ?? []).map((t) => {
+                const tr = runs.find((r) => r.task === t.id);
+                const proj = ov.projects.find((p) => p.slug === t.project);
+                return (
+                  <Row key={t.id} id={`task-${t.id}`} active={focusTask === t.id} onClick={tr ? () => setRunId(tr.id) : undefined}>
+                    <span className={`w-16 rounded px-1.5 py-0.5 text-center text-[9px] uppercase ${pill(t.status)}`}>{t.status}</span>
+                    <span className="hidden w-20 shrink-0 font-mono text-[10px] text-zinc-500 sm:inline">{t.id}</span>
+                    <span className="min-w-0 flex-1 truncate text-[12px] text-zinc-200" title={t.body || (tr ? `run ${tr.id}: ${tr.status}` : undefined)}>{t.title}</span>
+                    {t.project && <button onClick={(e) => { e.stopPropagation(); navigate("projects", { p: t.project }); }} className="hidden w-40 truncate text-left text-[10px] text-zinc-500 hover:text-sky-400 sm:inline" title="open project" data-testid={`task-project-${t.id}`}>{proj?.name ?? t.project}</button>}
+                    <span className="hidden w-16 text-[10px] text-zinc-500 sm:inline"><HostLink host={t.host} /></span>
+                    <span className="hidden w-14 text-[10px] text-zinc-500 sm:inline">{t.worker}→{t.reviewer}</span>
+                    {tr && <span className={`led shrink-0 ${tr.status === "running" ? "led-run" : tr.status === "done" ? "led-on" : "led-err"}`} title={`run ${tr.id}: ${tr.status} (click row to open the log)`} />}
+                    {t.status === "open" && (
+                      <Action onClick={() => act(`Run ${t.id}`, () => post("/api/control/collab/run", { id: t.id }))}>Run</Action>
+                    )}
+                  </Row>
+                );
+              })}
               <form
                 className="mt-3 grid gap-2 sm:grid-cols-[1fr_160px_110px_70px_auto]"
                 onSubmit={(e) => {
@@ -211,7 +220,7 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
                       <span className={`led shrink-0 ${r.status === "running" ? "led-run" : r.status === "done" ? "led-on" : "led-err"}`} />
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-[12px] text-zinc-200">{r.title}</div>
-                        <div className="truncate text-[10px] text-zinc-500">{r.host} · {r.step} · {duration(r.startedAt, r.finishedAt)} · {isoAgo(r.startedAt)}{r.verdict ? ` · ${r.verdict}` : ""}</div>
+                        <div className="truncate text-[10px] text-zinc-500"><HostLink host={r.host} /> · {r.step} · {duration(r.startedAt, r.finishedAt)} · {isoAgo(r.startedAt)}{r.verdict ? ` · ${r.verdict}` : ""}</div>
                         {r.status === "running" && <div className="hud-progress mt-1"><span /></div>}
                       </div>
                     </Row>
@@ -251,13 +260,15 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
               {sessions.length === 0 && <Empty>No sessions match.</Empty>}
               {sessions.slice(0, 80).map((s) => (
                 <Row key={`${s.host}-${s.id}`}>
-                  <span className="w-16 shrink-0 text-[11px] text-zinc-400">{s.host}</span>
+                  <span className="w-16 shrink-0 text-[11px] text-zinc-400"><HostLink host={s.host} /></span>
                   <span className={`shrink-0 rounded px-1 text-[10px] ${s.tool === "cc" ? "bg-orange-500/15 text-orange-300" : "bg-sky-500/15 text-sky-300"}`}>{s.tool}</span>
                   <span className="w-14 shrink-0 text-[10px] text-zinc-500">{isoAgo(s.updated)}</span>
                   <span className="min-w-0 flex-1 truncate text-[12px] text-zinc-200" title={s.title}>{s.title}</span>
-                  <span className="hidden w-44 truncate font-mono text-[10px] text-zinc-600 md:inline">{s.cwd.replace(/^\/(Users|home)\/[^/]+/, "~")}</span>
+                  {s.host.toLowerCase() === me.toLowerCase() ? (
+                    <button onClick={() => navigate("files", { path: s.cwd })} className="hidden w-44 truncate text-left font-mono text-[10px] text-zinc-600 hover:text-sky-400 md:inline" title="browse this directory">{homePath(s.cwd)}</button>
+                  ) : <span className="hidden w-44 truncate font-mono text-[10px] text-zinc-600 md:inline">{homePath(s.cwd)}</span>}
                   <span className="hidden w-24 truncate font-mono text-[10px] text-zinc-700 lg:inline">{s.id}</span>
-                  <button onClick={() => openOn(s.host, s.cwd, resumeCmd(s.tool, s.id), `${s.tool} ${s.title.slice(0, 18)}`)} className="shrink-0 rounded border border-sky-500/30 px-2 py-0.5 text-[10px] text-sky-300 hover:bg-sky-500/10" title={s.host === me ? "resume in a terminal here" : `resume in a terminal on ${s.host}`}>{s.host === me ? "Resume here" : "Resume there"}</button>
+                  <button onClick={() => openOn(s.host, s.cwd, resumeCmd(s.tool, s.id), `${s.tool} ${s.title.slice(0, 18)}`)} className="shrink-0 rounded border border-sky-500/30 px-2 py-0.5 text-[10px] text-sky-300 hover:bg-sky-500/10" title={s.host === me ? "resume in a terminal here" : `resume in a terminal on ${s.host} (natively on a paired node, else over ssh)`}>{s.host === me ? "Resume here" : "Resume there"}</button>
                   {s.host !== me && (
                     <button disabled={pulling === s.id} onClick={() => { setPulling(s.id); act(`Pull ${s.id.slice(0, 8)}`, () => post("/api/control/sessions/pull", { id: s.id })).finally(() => setPulling(null)); }} className="shrink-0 rounded border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-40">{pulling === s.id ? "…" : "Pull here"}</button>
                   )}

@@ -591,7 +591,7 @@ hashes but scans must be fast (300 project dirs ≈ minutes, not hours).
 | ANY | `/api/nodes/:id/proxy/*` | any | transparently forwards the request to that node's API over the authenticated WS tunnel; this is how "administer every node from any node" works — remote UIs reuse the same routes |
 | GET | `/api/auth/whoami` | — | `{method:"token"\|"tailscale"\|"none", login?, node?}`: how this caller is authenticated (never 401; see SECURITY §4.5) |
 | POST | `/api/fleet/pair-direct` | `{url}` | pair with a tailnet peer without a code (the peer trusts us as its owner via `tailscale whois`) |
-| GET | `/api/control/overview` | — | fleet dashboard: `{fleetDir, status, projects, todo, handoff, collab:{tasks,runs,auto}, services}` from the Fleet repo's CLI (20 s cache); 404 `no fleet dir` when `fleetDir` is unset |
+| GET | `/api/control/overview` | — | fleet dashboard: `{fleetDir, status, projects, todo, handoff, collab:{tasks,runs,auto}, services}` from the Fleet repo's CLI (20 s cache; `projects[].services` are `host/name` patterns the UI matches against `services.rows`, `status.hosts[].ssh` is the alias the UI uses to run commands on unpaired hosts); 404 `no fleet dir` when `fleetDir` is unset |
 | GET | `/api/control/sessions` | `?q=&host=&tool=` | cross-host agent session index (`fleet sessions --json`) |
 | POST | `/api/control/sessions/pull` | `{id}` | copies a transcript from its host so it can be resumed here |
 | GET/POST | `/api/control/services[/probe]` | — | last service probe / probe now (also every 5 min; emits `services` event) |
