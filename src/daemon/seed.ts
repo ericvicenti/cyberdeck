@@ -10,7 +10,7 @@ import * as cbor from "@seed-hypermedia/client/cbor";
 import { CYBERDECK_HOME, type SeedConfig } from "./config";
 
 /** Persisted in `${CYBERDECK_HOME}/seed.json`. */
-export type SeedState = { agentId?: string; sessionId?: string; mcpRegisteredAt?: number; lastCallAt?: number };
+export type SeedState = { agentId?: string; sessionId?: string; mcpRegisteredAt?: number; lastCallAt?: number; dogfoodTriggerId?: string };
 
 export type SeedHealth = { ok: boolean; voice?: boolean; protocol?: number; version?: string; error?: string; checkedAt: number };
 
@@ -25,7 +25,13 @@ export type SeedStatus = {
   health?: SeedHealth;
   mcpRegisteredAt?: number;
   lastCallAt?: number;
+  /** The daily fleet check-in trigger (`dogfood()`), read back from the agents server; absent when none. */
+  dogfood?: DogfoodStatus;
 };
+
+export type DogfoodStatus = { triggerId: string; name: string; enabled: boolean; lastFiredAt?: number; lastError?: string; nextSummary?: string };
+export type DogfoodOptions = { timezone?: string; timeOfDay?: string };
+type TriggerInfo = { id: string; name: string; enabled: boolean; source: any; lastFiredAt?: number; lastError?: string; createdAt?: number };
 
 export type VoiceSession = { sessionId: string; url: string; token: string; room: string; identity: string; expiresAt: number };
 
@@ -55,6 +61,24 @@ export class SeedError extends Error {
 
 export const COMPANION_FILE = join(homedir(), "Library", "Application Support", "CaseworkSeed", "companion.json");
 const MCP_SERVER_NAME = "cyberdeck";
+export const DOGFOOD_TRIGGER_NAME = "cyberdeck-fleet-checkin";
+export const DOGFOOD_PROMPT =
+  "Daily fleet check-in. Use your cyberdeck tools only (no guessing): call cyberdeck__fleet_status and cyberdeck__services (probe: true) for every host, then cyberdeck__repos and cyberdeck__todo. Write ONE note with cyberdeck__note, under 400 characters, in this shape: 'fleet check-in: <hosts up/down>, <services down or all up>, <repos with unpushed work>, <oldest TODO item worth attention>'. If a tool fails, say which in the note. Do not start any other work.";
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/** Human summary of a schedule source, like the agents server's own trigger pages. */
+function scheduleSummary(source: any): string | undefined {
+  if (source?.type !== "schedule" || !source.schedule) return undefined;
+  const sc = source.schedule;
+  if (sc.kind === "interval") return `every ${sc.every} ${sc.unit}`;
+  if (sc.kind === "once") return `once at ${new Date(sc.runAt).toISOString()}`;
+  if (sc.kind === "weekly") {
+    const days: number[] = Array.isArray(sc.daysOfWeek) ? sc.daysOfWeek : [];
+    const label = days.length === 7 ? "daily" : days.map((d) => DAY_NAMES[d] ?? String(d)).join(", ");
+    return `${label} at ${sc.timeOfDay} ${sc.timezone}`;
+  }
+  return undefined;
+}
 const MCP_SECRET_NAME = "cyberdeck-mcp-token";
 const HEALTH_TTL_MS = 10_000;
 const HEALTH_TIMEOUT_MS = 3_000;
@@ -105,6 +129,7 @@ export class SeedBridge {
   #signerLoading: Promise<Signer | null> | null = null;
   #health: SeedHealth | null = null;
   #healthInFlight: Promise<SeedHealth> | null = null;
+  #dogfood: { value: DogfoodStatus | undefined; checkedAt: number; agentId: string } | null = null;
   #agentName: string | undefined;
 
   constructor(opts: SeedBridgeOptions) {
@@ -243,7 +268,68 @@ export class SeedBridge {
     else if (!health.voice) s.reason = `agents server ${this.config.agentsUrl} has no voice pipeline`;
     else if (!this.#state.agentId) s.reason = "no agent set up yet: run `cyberdeck seed setup`";
     else s.configured = true;
+    if (signer && health.ok && this.#state.agentId) {
+      const dogfood = await this.#dogfoodStatus().catch(() => undefined);
+      if (dogfood) s.dogfood = dogfood;
+    }
     return s;
+  }
+
+  /** The check-in trigger as the agents server has it; cached 10 s like health. */
+  async #dogfoodStatus(): Promise<DogfoodStatus | undefined> {
+    const agentId = this.#state.agentId;
+    if (!agentId) return undefined;
+    if (this.#dogfood && this.#dogfood.agentId === agentId && Date.now() - this.#dogfood.checkedAt < HEALTH_TTL_MS) return this.#dogfood.value;
+    const found = await this.#findDogfoodTrigger(agentId);
+    const value = found ? this.#toDogfood(found) : undefined;
+    this.#dogfood = { value, checkedAt: Date.now(), agentId };
+    return value;
+  }
+
+  async #findDogfoodTrigger(agentId: string): Promise<TriggerInfo | undefined> {
+    const res = await this.action<{ triggers?: TriggerInfo[] }>({ _: "ListAgentTriggers", agentId });
+    const triggers = (res.triggers ?? []).filter((t) => t && t.name === DOGFOOD_TRIGGER_NAME);
+    // Prefer the id we recorded; else the newest by name.
+    return triggers.find((t) => t.id === this.#state.dogfoodTriggerId) ?? triggers.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0];
+  }
+
+  #toDogfood(t: TriggerInfo): DogfoodStatus {
+    const summary = scheduleSummary(t.source);
+    return { triggerId: t.id, name: t.name, enabled: t.enabled !== false, ...(t.lastFiredAt ? { lastFiredAt: t.lastFiredAt } : {}), ...(t.lastError ? { lastError: t.lastError } : {}), ...(summary ? { nextSummary: summary } : {}) };
+  }
+
+  /**
+   * Make sure the daily fleet check-in schedule trigger exists on the agent (idempotent: reused by
+   * name). The agent runs it with the cyberdeck MCP tools and leaves one note in the Deck inbox.
+   */
+  async dogfood(opts: DogfoodOptions = {}): Promise<DogfoodStatus & { created: boolean }> {
+    const agentId = this.#state.agentId;
+    if (!agentId) throw new SeedError("no agent set up: run `cyberdeck seed setup`");
+    const timeOfDay = opts.timeOfDay?.trim() || "07:00";
+    if (!/^\d{2}:\d{2}$/.test(timeOfDay)) throw new SeedError(`timeOfDay must be HH:MM, got "${timeOfDay}"`);
+    const timezone = opts.timezone?.trim() || "Europe/Madrid";
+    const existing = await this.#findDogfoodTrigger(agentId);
+    let trigger = existing;
+    let created = false;
+    if (!trigger) {
+      const res = await this.action<{ trigger: TriggerInfo }>({
+        _: "CreateAgentTrigger",
+        agentId,
+        trigger: {
+          name: DOGFOOD_TRIGGER_NAME,
+          enabled: true,
+          source: { type: "schedule", schedule: { kind: "weekly", daysOfWeek: [0, 1, 2, 3, 4, 5, 6], timeOfDay, timezone } },
+          prompt: DOGFOOD_PROMPT,
+          continuation: { kind: "newThread" },
+        },
+      });
+      trigger = res.trigger;
+      created = true;
+    }
+    if (this.#state.dogfoodTriggerId !== trigger.id) { this.#state.dogfoodTriggerId = trigger.id; this.#save(); }
+    const value = this.#toDogfood(trigger);
+    this.#dogfood = { value, checkedAt: Date.now(), agentId };
+    return { ...value, created };
   }
 
   /** The shape the Casework app and `/api/state` expect. */

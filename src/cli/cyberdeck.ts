@@ -130,6 +130,7 @@ switch (cmd) {
       console.log(`agent:         ${s.agent ? `${s.agent.name ?? "?"} (${s.agent.id})` : "not set up"}`);
       console.log(`session:       ${s.sessionId ?? "none"}`);
       console.log(`mcp registered: ${when(s.mcpRegisteredAt)}   last call: ${when(s.lastCallAt)}`);
+      if (s.dogfood) console.log(`dogfood:       ${s.dogfood.name} (${s.dogfood.triggerId}) ${s.dogfood.enabled ? "enabled" : "disabled"}, ${s.dogfood.nextSummary ?? ""}; last fired ${when(s.dogfood.lastFiredAt)}${s.dogfood.lastError ? `; last error: ${s.dogfood.lastError}` : ""}`);
       console.log(s.configured ? "voice: ready (provider livekit)" : `voice: not configured — ${s.reason}`);
       if (!s.configured) process.exit(1);
     } else if (sub === "setup") {
@@ -147,12 +148,20 @@ switch (cmd) {
       const r = await api("/api/voice/livekit", { method: "POST" }).catch(fail);
       const { token: _t, ...rest } = r;
       console.log(JSON.stringify({ ...rest, token: "<withheld>", expiresIn: `${Math.max(0, Math.round((r.expiresAt - Date.now()) / 1000))}s` }, null, 2));
+    } else if (sub === "dogfood") {
+      // Daily fleet check-in trigger on the agent: --tz <IANA zone> --at HH:MM (defaults Europe/Madrid 07:00).
+      const tz = flags.includes("--tz") ? flags[flags.indexOf("--tz") + 1] : undefined;
+      const at = flags.includes("--at") ? flags[flags.indexOf("--at") + 1] : undefined;
+      const r = await api("/api/voice/dogfood", { method: "POST", body: JSON.stringify({ ...(tz ? { timezone: tz } : {}), ...(at ? { timeOfDay: at } : {}) }) }).catch(fail);
+      console.log(`${r.created ? "created" : "already present"}: ${r.name} (${r.triggerId}) ${r.enabled ? "enabled" : "disabled"}, ${r.nextSummary ?? ""}`);
+      if (r.lastFiredAt) console.log(`last fired: ${when(r.lastFiredAt)}`);
+      if (r.lastError) console.log(`last error: ${r.lastError}`);
     } else if (sub === "transcript") {
       const r = await api(`/api/voice/transcript?limit=${encodeURIComponent(flags[0] ?? "20")}`).catch(fail);
       for (const m of r.messages ?? []) console.log(`[${new Date(m.at).toLocaleTimeString()}] ${m.role}: ${m.text}`);
       if (!r.messages?.length) console.log("(no messages)");
     } else {
-      console.log("usage: cyberdeck seed status | setup [--new] [--no-adopt] [--name <agent>] | reset-session | call | transcript [n]");
+      console.log("usage: cyberdeck seed status | setup [--new] [--no-adopt] [--name <agent>] | reset-session | call | transcript [n] | dogfood [--tz <zone>] [--at HH:MM]");
       process.exit(1);
     }
     break;
@@ -176,6 +185,6 @@ usage: cyberdeck <command>
   update     pull own source, rebuild, restart
   serve      expose the UI as https://<node>.<tailnet> via tailscale serve (serve off: stop)
   mcp        connection details for MCP clients such as Seed Agents (--json)
-  seed       voice bridge to the Seed agents server: status | setup [--new] | reset-session | call | transcript
+  seed       voice bridge to the Seed agents server: status | setup [--new] | reset-session | call | transcript | dogfood
   whoami     how the local daemon sees this caller`);
 }

@@ -51,6 +51,18 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
     catch (e) { return c.json({ supported: true, messages: [], ...errorBody(e) }, errorStatus(e)); }
   });
 
+  // Daily fleet check-in schedule trigger on the agent (idempotent). Node token only.
+  app.post("/api/voice/dogfood", async (c) => {
+    if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      return c.json(await bridge.dogfood({ timezone: typeof body?.timezone === "string" ? body.timezone : undefined, timeOfDay: typeof body?.timeOfDay === "string" ? body.timeOfDay : undefined }));
+    } catch (e) {
+      console.error("voice: dogfood failed:", e instanceof Error ? e.message : e);
+      return c.json(errorBody(e), errorStatus(e));
+    }
+  });
+
   // Registers this daemon's MCP server with the agents server and picks (or creates) the agent.
   app.post("/api/voice/setup", async (c) => {
     if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);

@@ -11,6 +11,7 @@ import { initSchema } from "../src/daemon/db";
 import { createServer } from "../src/daemon/server";
 import { seedConfig } from "../src/daemon/config";
 import { caseworkAllows } from "../src/daemon/api/casework";
+import { DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME } from "../src/daemon/seed";
 import { testConfig, TEST_TOKEN, tmpHomeDir } from "./helpers";
 
 // Deterministic signer; the bridge builds the keypair from this instead of opening the Seed vault.
@@ -29,6 +30,7 @@ function fakeAgents(opts: { voice: boolean }) {
   const sessions = new Map<string, { agentId: string; continuedTo?: string }>();
   const secrets = new Map<string, Uint8Array>();
   const mcp = new Map<string, Record<string, any>>();
+  const triggers = new Map<string, Record<string, any>[]>();
   let n = 0;
   const err = (status: number, message: string) => new Response(cbor.encode({ _: "Error", message }) as unknown as BodyInit, { status, headers: { "content-type": "application/cbor" } });
   const ok = (body: unknown) => new Response(cbor.encode(body) as unknown as BodyInit, { headers: { "content-type": "application/cbor" } });
@@ -66,6 +68,16 @@ function fakeAgents(opts: { voice: boolean }) {
           ];
           return ok({ _: "GetSessionResponse", session: { id: a.sessionId, agentId: s.agentId, status: "idle", ...(s.continuedTo ? { continuedTo: { continuationId: "c", sessionId: s.continuedTo, reason: "context", createdAt: 1 } } : {}) }, events: events.slice(-(a.limit ?? events.length)), systemPromptMarkdown: "" });
         }
+        case "ListAgentTriggers": return ok({ _: "ListAgentTriggersResponse", triggers: triggers.get(a.agentId) ?? [] });
+        case "CreateAgentTrigger": {
+          if (!agents.has(a.agentId)) return err(404, "Agent not found");
+          const sc = a.trigger?.source?.schedule;
+          if (a.trigger?.source?.type !== "schedule" || sc?.kind !== "weekly" || !Array.isArray(sc.daysOfWeek) || !sc.daysOfWeek.every((d: unknown) => Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 6) || !/^\d{2}:\d{2}$/.test(sc.timeOfDay) || typeof sc.timezone !== "string") return err(400, "Schedule is invalid");
+          if (typeof a.trigger.prompt !== "string" || !a.trigger.name) return err(400, "Trigger prompt is required");
+          const t = { id: `trigger-${++n}`, account: "x", agentId: a.agentId, name: a.trigger.name, enabled: a.trigger.enabled !== false, source: a.trigger.source, prompt: a.trigger.prompt, continuation: a.trigger.continuation, createdAt: Date.now(), updatedAt: Date.now() };
+          triggers.set(a.agentId, [...(triggers.get(a.agentId) ?? []), t]);
+          return ok({ _: "CreateAgentTriggerResponse", trigger: t });
+        }
         case "CreateVoiceSession": {
           if (!opts.voice) return err(501, "Voice is not available on this server");
           if (!sessions.has(a.sessionId)) return err(404, "Session not found");
@@ -75,7 +87,7 @@ function fakeAgents(opts: { voice: boolean }) {
       }
     },
   });
-  return { url: `http://127.0.0.1:${server.port}`, actions, agents, sessions, secrets, mcp, stop: () => void server.stop(true) };
+  return { url: `http://127.0.0.1:${server.port}`, actions, agents, sessions, secrets, mcp, triggers, stop: () => void server.stop(true) };
 }
 
 type Node = { base: string; wsBase: string; home: string; stop: () => void; cleanup: () => void };
@@ -127,6 +139,7 @@ describe("seed config", () => {
     expect(caseworkAllows("GET", "/api/voice/transcript")).toBe(true);
     expect(caseworkAllows("POST", "/api/voice/session/reset")).toBe(true);
     expect(caseworkAllows("POST", "/api/voice/setup")).toBe(false);
+    expect(caseworkAllows("POST", "/api/voice/dogfood")).toBe(false);
     expect(caseworkAllows("POST", "/api/voice/config")).toBe(false);
   });
 });
@@ -217,6 +230,32 @@ describe("configured node", () => {
     const t = await (await req(a, KEY, "/api/voice/transcript?limit=5")).json();
     expect(t.supported).toBe(true);
     expect(t.messages.map((m: any) => [m.role, m.text])).toEqual([["user", "Hi"], ["assistant", "Hello from the fleet."]]);
+  });
+  test("dogfood creates the daily check-in trigger once and status reports it", async () => {
+    expect((await req(a, KEY, "/api/voice/dogfood", { method: "POST" })).status).toBe(403);
+    expect((await (await req(a, TEST_TOKEN, "/api/voice/status")).json()).dogfood).toBeUndefined();
+
+    const r1 = await req(a, TEST_TOKEN, "/api/voice/dogfood", { method: "POST", body: JSON.stringify({}) });
+    expect(r1.status).toBe(200);
+    const j1 = await r1.json();
+    expect(j1).toMatchObject({ created: true, name: DOGFOOD_TRIGGER_NAME, enabled: true, nextSummary: "daily at 07:00 Europe/Madrid" });
+    const stored = voiced.triggers.get(COMPANION_ID)!;
+    expect(stored.length).toBe(1);
+    expect(stored[0].source).toEqual({ type: "schedule", schedule: { kind: "weekly", daysOfWeek: [0, 1, 2, 3, 4, 5, 6], timeOfDay: "07:00", timezone: "Europe/Madrid" } });
+    expect(stored[0].prompt).toBe(DOGFOOD_PROMPT);
+    expect(stored[0].continuation).toEqual({ kind: "newThread" });
+    expect(JSON.parse(readFileSync(join(a.home, "seed.json"), "utf8")).dogfoodTriggerId).toBe(j1.triggerId);
+
+    // Idempotent: a second call (even with other options) reuses the trigger by name.
+    const j2 = await (await req(a, TEST_TOKEN, "/api/voice/dogfood", { method: "POST", body: JSON.stringify({ timezone: "UTC", timeOfDay: "08:30" }) })).json();
+    expect(j2.created).toBe(false);
+    expect(j2.triggerId).toBe(j1.triggerId);
+    expect(voiced.triggers.get(COMPANION_ID)!.length).toBe(1);
+    expect(voiced.actions.filter((x) => x._ === "CreateAgentTrigger").length).toBe(1);
+
+    const s = await (await req(a, TEST_TOKEN, "/api/voice/status")).json();
+    expect(s.dogfood).toMatchObject({ triggerId: j1.triggerId, name: DOGFOOD_TRIGGER_NAME, enabled: true, nextSummary: "daily at 07:00 Europe/Madrid" });
+    expect((await req(a, TEST_TOKEN, "/api/voice/dogfood", { method: "POST", body: JSON.stringify({ timeOfDay: "7am" }) })).status).toBe(502);
   });
   test("calls follow a continued session and reset mints a new one", async () => {
     const current = JSON.parse(readFileSync(join(a.home, "seed.json"), "utf8")).sessionId as string;

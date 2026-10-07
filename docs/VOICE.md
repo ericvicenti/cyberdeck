@@ -109,7 +109,11 @@ the node token (`~/.cyberdeck/token`) requires a re-run so the secret on the age
 | `GET /api/voice/status` | pairing | `{configured, reason?, agentsUrl, identity: {name, available, principal?, error?}, agent?: {id, name?}, sessionId?, health: {ok, voice, protocol, version, error?, checkedAt}, mcpRegisteredAt?, lastCallAt?}` |
 | `POST /api/voice/session/reset` | pairing | `{sessionId, previous?}`: a new session for the next call |
 | `GET /api/voice/transcript?limit=` | pairing | `{supported: true, sessionId?, messages: [{seq, role, text, at}], hasMoreBefore}`: user/assistant text of the current session (`GetSession`'s tail, cheap) |
+| `POST /api/voice/dogfood` | node token | `{triggerId, name, enabled, lastFiredAt?, lastError?, nextSummary?, created}`: the daily fleet check-in trigger (below); body `{timezone?, timeOfDay?}` |
 | `POST /api/voice/setup` | node token | the setup result above (`{agent: {id, name?, origin: kept\|adopted\|created}, sessionId, mcp: {name, url, state, tools?, error?}, warnings}`); body `{new?, adopt?, name?}` |
+
+`status` also carries `dogfood: {triggerId, name, enabled, lastFiredAt?, lastError?, nextSummary?}`
+once the check-in trigger exists (read back from `ListAgentTriggers`, cached 10 s).
 
 `configured` is true when the identity loads, the agents server answers `/api/health` with
 `voice: true` (probed with a 3 s timeout, cached 10 s), and an agent is set up. The same summary
@@ -126,7 +130,18 @@ cyberdeck seed setup [--new]   # see above
 cyberdeck seed reset-session   # next call starts a fresh session
 cyberdeck seed call            # smoke test: mint a room and print it (token withheld); nothing joins it
 cyberdeck seed transcript [n]  # last n user/assistant messages
+cyberdeck seed dogfood [--tz Europe/Madrid] [--at 07:00]   # daily fleet check-in trigger (idempotent)
 ```
+
+## Dogfood: the daily fleet check-in
+
+`cyberdeck seed dogfood` makes sure a schedule trigger named `cyberdeck-fleet-checkin` exists on the
+agent (`ListAgentTriggers` by name, else `CreateAgentTrigger`; the id is kept in `seed.json`). It is
+weekly on all seven days at 07:00 Europe/Madrid by default (`{kind: 'weekly', daysOfWeek: [0..6],
+timeOfDay, timezone}`, Sunday = 0), continuation `newThread`, and its prompt tells the agent to use
+only the cyberdeck tools (`fleet_status`, `services` with a probe, `repos`, `todo`) and leave one
+note under 400 characters in the Deck inbox via `cyberdeck__note`. Options only apply when the
+trigger is created; edit it in the agent's Triggers tab afterwards.
 
 All of these go through the local daemon's HTTP API with the node token, like the other commands.
 
