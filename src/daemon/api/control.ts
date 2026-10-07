@@ -81,7 +81,25 @@ function readRunMetas(): Record<string, string> {
   return out;
 }
 
-export function registerControlRoutes(app: Hono, cfg: CyberdeckConfig) {
+/** What the control module knows, for other modules (the MCP server) to reuse without a second CLI layer. */
+export type Control = {
+  /** Checkout of the Deck repo, or null when the module is disabled. */
+  fleetDir: () => string | null;
+  /** A cached `deck <args> --json` read (20 s). Returns `fallback` when the module is disabled or the output does not parse. */
+  cached: <T>(key: string, args: string[], fallback: T) => Promise<T>;
+  /** An uncached `deck <args>` run. */
+  cli: (args: string[], timeoutMs?: number) => Promise<CliResult | null>;
+  invalidate: (...keys: string[]) => void;
+  lastProbe: () => ServiceProbe | null;
+  probe: () => Promise<ServiceProbe | null>;
+  runs: () => Promise<CollabRun[]>;
+  tasks: () => Promise<unknown[]>;
+  startCollab: (args: string[], runId?: string) => { started: boolean; log: string } | null;
+  /** Tail of a collab run log; null for an unknown file name. */
+  runLog: (id: string, file: string, tail: number) => { text: string; size: number } | null;
+};
+
+export function registerControlRoutes(app: Hono, cfg: CyberdeckConfig): Control {
   const fleetDir = () => (cfg.fleetDir && existsSync(join(cfg.fleetDir, "bin", "deck.ts")) ? cfg.fleetDir : null);
 
   // ---- cached CLI reads ----
@@ -264,4 +282,22 @@ export function registerControlRoutes(app: Hono, cfg: CyberdeckConfig) {
     cache.clear();
     return c.json({ ok: r.code === 0, output: (r.out + r.err).trim() });
   });
+
+  return {
+    fleetDir,
+    cached,
+    cli: async (args, timeoutMs) => { const dir = fleetDir(); return dir ? fleetCli(dir, args, timeoutMs) : null; },
+    invalidate,
+    lastProbe: () => lastProbe,
+    probe,
+    runs,
+    tasks,
+    startCollab,
+    runLog: (id, file, tail) => {
+      if (!/^[\w.-]+$/.test(id) || !LOG_FILES.has(file)) return null;
+      const path = join(RUNS_DIR, id, file);
+      if (!existsSync(path)) return { text: "", size: 0 };
+      return readTail(path, Math.min(2_000_000, Math.max(1000, tail || 20_000)));
+    },
+  };
 }

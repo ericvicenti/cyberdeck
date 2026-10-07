@@ -15,9 +15,11 @@
     "test:e2e": "bun test tests/e2e.test.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
     "bun-pty": "^0.4.10",
     "hono": "^4.6.0",
-    "video.js": "^8.24.0"
+    "video.js": "^8.24.0",
+    "zod": "3.25.76"
   },
   "devDependencies": {
     "@codemirror/commands": "^6.11.0",

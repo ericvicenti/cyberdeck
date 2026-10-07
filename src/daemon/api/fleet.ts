@@ -41,7 +41,7 @@ export function lanUrls(port: number): string[] {
   return urls;
 }
 
-async function peerFetch(node: NodeRow, path: string, init?: RequestInit): Promise<Response> {
+export async function peerFetch(node: NodeRow, path: string, init?: RequestInit): Promise<Response> {
   return fetch(`${node.url}${path}`, {
     ...init,
     headers: { ...(init?.headers as Record<string, string>), authorization: `Bearer ${node.token}` },

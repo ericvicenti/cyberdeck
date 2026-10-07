@@ -13,6 +13,11 @@ use `bun` for everything.
   `fleetDir`, default `~/Code/Fleet`), caches reads 20 s, probes services every 5 min, serves collab run
   logs from `~/.fleet/runs/<id>/`, and (when `collab.auto` is on) runs `fleet collab tick` on a timer.
   The JSON contract lives with the CLI; tests use the stub in `tests/fixtures/fleet/bin/fleet.ts`.
+- `src/daemon/api/mcp.ts` — the MCP server (`POST /api/mcp`, Streamable HTTP, a fresh
+  McpServer per request) that makes the node and the deck callable from Seed Agents. It reuses
+  the `Control` handle `registerControlRoutes` returns; tool names stay short because Seed
+  prefixes them (`cyberdeck__status`). Tests drive it with the real MCP client (`tests/mcp.test.ts`).
+  Keep `docs/AGENTS.md` in sync when adding a tool.
 - `docs/` — the knowledgebase. `docs/BRIEF.md` is the authoritative vision;
   `docs/ARCHITECTURE.md` is canonical for schema/API; `docs/ROADMAP.md` tracks milestones.
   Keep docs in sync when changing schema or routes.

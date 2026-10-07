@@ -105,6 +105,18 @@ switch (cmd) {
     console.log(self ? `serving https://${self.dnsName}` : "serving (run `tailscale status` for the hostname)");
     break;
   }
+  case "mcp": {
+    // Connection details for an MCP client (Seed Agents: Tools tab -> Add server).
+    const self = await new Tailscale().self().catch(() => null);
+    const urls = [`${BASE}/api/mcp`];
+    if (self?.dnsName) urls.push(`https://${self.dnsName}/api/mcp (tailnet, needs \`cyberdeck serve\`)`);
+    if (process.argv[3] === "--json") { console.log(JSON.stringify({ urls: [urls[0], ...(self?.dnsName ? [`https://${self.dnsName}/api/mcp`] : [])], headers: { Authorization: `Bearer ${token()}` }, transport: "http" })); break; }
+    console.log(`Cyberdeck MCP server (Streamable HTTP, stateless)\n`);
+    for (const u of urls) console.log(`  url:        ${u}`);
+    console.log(`  header:     Authorization: Bearer ${token()}`);
+    console.log(`  transport:  http\n\nIn Seed Agents: Tools tab -> MCP servers -> Add server, paste the url and the header; name it "cyberdeck".\nSee docs/AGENTS.md for reachability (a hosted agents server needs a public route to this node).`);
+    break;
+  }
   case "whoami": {
     const res = await fetch(`${BASE}/api/auth/whoami`, { headers: { authorization: `Bearer ${token()}` } });
     console.log(JSON.stringify(await res.json()));
@@ -123,5 +135,6 @@ usage: cyberdeck <command>
   logs       tail daemon logs
   update     pull own source, rebuild, restart
   serve      expose the UI as https://<node>.<tailnet> via tailscale serve (serve off: stop)
+  mcp        connection details for MCP clients such as Seed Agents (--json)
   whoami     how the local daemon sees this caller`);
 }

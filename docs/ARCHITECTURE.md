@@ -599,6 +599,7 @@ hashes but scans must be fast (300 project dirs ≈ minutes, not hours).
 | POST | `/api/control/collab/tick`, `/run`, `/add`, `/auto` | `{id}` / task fields / `{auto}` | start the next or a given collab run (detached `fleet collab …`), add a task, toggle the auto scheduler (persisted) |
 | GET | `/api/control/collab/runs/:id/log` | `?file=worker.log\|reviewer.log\|result.md&tail=` | `{text, size}` tail of a run log under `~/.fleet/runs/<id>/` |
 | POST | `/api/control/sync` | — | runs `fleet sync` |
+| POST | `/api/mcp` | JSON-RPC (MCP Streamable HTTP, stateless; GET/DELETE answer 405) | the MCP tool server for Seed Agents and other MCP clients: `status`, `fleet_status`, `hosts`, `projects`, `todo`, `handoff`, `sessions`, `repos`, `services`, `collab_tasks`, `collab_add`, `collab_run`, `run_log`, `note`, `scan` (docs/AGENTS.md); same auth as every `/api` route |
 | GET | `/api/roots` | — | scan roots with last-scan summaries |
 | POST | `/api/roots` | `{path}` | adds root (also persisted to config) |
 | POST | `/api/roots/:id/scan` | `{full?: bool}` | `{jobId}` |

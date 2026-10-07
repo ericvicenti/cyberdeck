@@ -40,6 +40,14 @@ bun run build      # build UI into dist/ui (daemon serves it)
 `cyberdeck update` pulls Cyberdeck's own source, rebuilds, and restarts the service —
 Cyberdeck manages itself.
 
+## Agents
+
+Cyberdeck is an MCP server for [Seed Agents](https://hyper.media) and any other MCP client:
+`POST /api/mcp` (Streamable HTTP, bearer token). Its tools expose the node and the deck: repo
+risk, hosts and services, the project tree, the agents' handoff, the cross-host session index,
+and the cc/cx collab queue, so a hosted agent can see every machine and hand work to a laptop
+agent. `cyberdeck mcp` prints what to paste into the agent's Tools tab. Details: [docs/AGENTS.md](docs/AGENTS.md).
+
 ## Docs
 
 Start at [docs/OVERVIEW.md](docs/OVERVIEW.md). The vision is in

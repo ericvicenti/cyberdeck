@@ -16,7 +16,9 @@ import { registerFleetRoutes } from "./api/fleet";
 import { registerMediaRoutes, cleanupHlsCache } from "./api/media";
 import { registerControlRoutes } from "./api/control";
 import { registerCmuxRoutes } from "./api/cmux";
-import { currentCommit, checkForUpdate, applyUpdate, isUpdating } from "./updater";
+import { registerMcpRoutes } from "./api/mcp";
+import { nodeStatus } from "./status";
+import { currentCommit, checkForUpdate, applyUpdate } from "./updater";
 
 const UI_DIST = join(import.meta.dir, "../../dist/ui");
 export const VERSION = "0.4.0";
@@ -118,35 +120,8 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   let commitCache = "";
   currentCommit().then((c) => (commitCache = c));
 
-  app.get("/api/status", (c) => {
-    const counts = db
-      .query(
-        `SELECT
-           COUNT(*) AS repos,
-           SUM(risk = 'at-risk') AS atRisk,
-           SUM(risk = 'attention') AS attention,
-           SUM(risk = 'safe') AS safe,
-           SUM(junk_bytes) AS junkBytes,
-           MAX(scanned_at) AS lastScanAt
-         FROM repos`
-      )
-      .get() as Record<string, number | null>;
-    const data = db
-      .query(`SELECT SUM(size_bytes) AS dataBytes, SUM(cache_bytes) AS dataCacheBytes FROM data_dirs`)
-      .get() as Record<string, number | null>;
-    return c.json({
-      nodeName: cfg.nodeName,
-      version: VERSION,
-      commit: commitCache,
-      updating: isUpdating(),
-      roots: cfg.roots,
-      scanning: isScanRunning(),
-      dataScanning: isDataScanRunning(),
-      watching: cfg.watch,
-      ...counts,
-      ...data,
-    });
-  });
+  const status = () => nodeStatus(db, cfg, { version: VERSION, commit: commitCache });
+  app.get("/api/status", (c) => c.json(status()));
 
   // Self-update: ?check=1 reports drift from origin; otherwise pull, rebuild,
   // and restart (the supervisor relaunches us on the new code). Fleet peers
@@ -191,8 +166,9 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   registerFsRoutes(app);
   registerMediaRoutes(app, token);
   registerFleetRoutes(app, db, cfg, nodeId, token, upgradeWebSocket, { tailscale: ts, authedViaTailscale });
-  registerControlRoutes(app, cfg);
+  const control = registerControlRoutes(app, cfg);
   registerCmuxRoutes(app);
+  registerMcpRoutes(app, db, cfg, control, { status, version: VERSION });
 
   app.get(
     "/api/term",
