@@ -44,6 +44,9 @@ export async function applyUpdate(): Promise<{ ok: boolean; detail: string }> {
   updating = true;
   bus.emit({ kind: "update:start" });
   try {
+    // `bun install` rewrites bun.lock in place on some bun versions, and a dirty lockfile makes
+    // `git pull` refuse; the lockfile is regenerated right after the pull anyway.
+    await run(["git", "checkout", "--", "bun.lock"]);
     const pull = await run(["git", "pull", "--ff-only", "--quiet", "origin", "main"]);
     if (pull.code !== 0) throw new Error(`git pull failed: ${pull.err.slice(0, 300)}`);
     // The service's PATH (launchd/systemd) may not include bun; we ARE bun.
