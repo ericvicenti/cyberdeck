@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { parseHash, navigate, api, activeNode, activeNodeName, setActiveNode, type Route } from "./lib/api";
-import { ShieldIcon, ServerIcon, FolderIcon, TerminalIcon, GitIcon, LayersIcon, BotIcon, PulseIcon, GridIcon, CloudIcon } from "./lib/icons";
+import { ShieldIcon, ServerIcon, FolderIcon, TerminalIcon, GitIcon, LayersIcon, BotIcon, PulseIcon, GridIcon, CloudIcon, MicIcon } from "./lib/icons";
 import { Cloud } from "./views/Cloud";
 import { Home } from "./views/Home";
+import { Desk } from "./views/Desk";
 import type { Overview } from "./lib/control";
 import { Projects } from "./views/Projects";
 import { Agents } from "./views/Agents";
@@ -17,6 +18,7 @@ import { PromptBar } from "./components/PromptBar";
 
 const NAV = [
   { view: "fleet", label: "Home", icon: ServerIcon },
+  { view: "desk", label: "Desk", icon: MicIcon },
   { view: "projects", label: "Projects", icon: LayersIcon },
   { view: "agents", label: "Agents", icon: BotIcon },
   { view: "services", label: "Services", icon: PulseIcon },
@@ -89,6 +91,7 @@ export function App() {
   const view = (
     <>
       {route.view === "fleet" && <Home onLocked={lock} key={`fleet-${nodeGen}`} />}
+      {route.view === "desk" && <Desk onLocked={lock} key={`desk-${nodeGen}-${nodeId}`} />}
       {route.view === "projects" && <Projects params={route.params} onLocked={lock} key={`projects-${nodeGen}-${nodeId}`} />}
       {route.view === "agents" && <Agents params={route.params} onLocked={lock} key={`agents-${nodeGen}-${nodeId}`} />}
       {route.view === "services" && <Services params={route.params} onLocked={lock} key={`services-${nodeGen}-${nodeId}`} />}

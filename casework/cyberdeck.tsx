@@ -1,7 +1,7 @@
 // Cyberdeck experience for the Casework Desk app. Compiled by src/daemon/api/casework.ts
 // (Bun.build, CommonJS, native modules external) and served at /api/modules/cyberdeck.
 // Only modules from the app's native registry may be imported here.
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useRuntime } from '@remote/runtime';
 
@@ -31,7 +31,7 @@ const ago = (iso?: string) => { if (!iso) return ''; const s = Math.max(0, (Date
 
 export default function Cyberdeck() {
   const { connection, status } = useRuntime();
-  const [tab, setTab] = useState<'fleet' | 'agents' | 'sessions' | 'run'>('fleet');
+  const [tab, setTab] = useState<'talk' | 'fleet' | 'agents' | 'sessions' | 'run'>('talk');
   const [nodes, setNodes] = useState<Node[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [busy, setBusy] = useState(false);
@@ -48,7 +48,7 @@ export default function Cyberdeck() {
 
   const tasks = overview?.collab?.tasks ?? [], runs = overview?.collab?.runs ?? [];
   const servicesDown = overview?.services?.rows.filter((r) => r.ok === false).length ?? 0;
-  const tabs: [typeof tab, string][] = [['fleet', 'Fleet'], ['agents', 'Agents'], ['sessions', 'Sessions'], ['run', 'Run']];
+  const tabs: [typeof tab, string][] = [['talk', 'Talk'], ['fleet', 'Fleet'], ['agents', 'Agents'], ['sessions', 'Sessions'], ['run', 'Run']];
   return <View style={{ gap: 14, backgroundColor: C.bg }}>
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
       <Led on={status === 'connected'} /><Text style={{ color: C.text, fontWeight: '700', letterSpacing: 3 }}>CYBERDECK</Text>
@@ -58,10 +58,124 @@ export default function Cyberdeck() {
     </View>
     <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>{tabs.map(([key, label]) => <Pressable key={key} onPress={() => setTab(key)} style={{ paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: tab === key ? '#102a33' : 'transparent', borderWidth: 1, borderColor: tab === key ? C.cyan : C.line }}><Text style={{ color: tab === key ? C.cyan : C.dim, fontSize: 12, letterSpacing: 1, fontWeight: '700' }}>{label.toUpperCase()}</Text></Pressable>)}</View>
     {error ? <Text style={{ color: C.red }}>{error}</Text> : null}
+    {tab === 'talk' ? <TalkTab json={json} /> : null}
     {tab === 'fleet' ? <FleetTab nodes={nodes} overview={overview} servicesDown={servicesDown} tasks={tasks} /> : null}
     {tab === 'agents' ? <AgentsTab tasks={tasks} runs={runs} json={json} refresh={refresh} /> : null}
     {tab === 'sessions' ? <SessionsTab json={json} /> : null}
     {tab === 'run' ? <RunTab json={json} /> : null}
+  </View>;
+}
+
+// ---- Talk: the same big button as the web Desk, driving the app's native call.
+// The app owns the LiveKit room (voice.start / call.stop / call.mute); it mirrors the
+// worker's `lk.agent.state` into call.agentState and emits `voice.transcript` per segment
+// (text + speaker identity: the local speaker is the identity the daemon minted, the
+// agent is everyone else). The app also sends "Hi" on lk.chat on join, so the agent greets.
+type TalkLine = { id: number; who: 'me' | 'agent'; text: string };
+type VoiceConfig = { configured: boolean; provider?: string; reason?: string; agentId?: string; sessionId?: string };
+type VoiceStatus = { configured: boolean; reason?: string; agent?: { id: string; name?: string }; sessionId?: string; health?: unknown };
+const healthOk = (h: unknown): boolean | null => h == null ? null : typeof h === 'boolean' ? h : typeof h === 'string' ? /^(ok|up|healthy|ready)$/i.test(h) : typeof h === 'object' ? (typeof (h as any).ok === 'boolean' ? (h as any).ok : typeof (h as any).status === 'string' ? /^(ok|up|healthy|ready)$/i.test((h as any).status) : (h as any).error ? false : null) : null;
+
+function TalkTab({ json }: { json: <T,>(p: string, i?: RequestInit) => Promise<T> }) {
+  const { call, log, run, status, voiceConfigured } = useRuntime();
+  const [config, setConfig] = useState<VoiceConfig | null>(null);
+  const [vstatus, setVstatus] = useState<VoiceStatus | null>(null);
+  const [lines, setLines] = useState<TalkLine[]>([]);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const toggling = useRef(false);
+  const seen = useRef<object | undefined>(undefined);
+  const nextId = useRef(1);
+  const active = ['connected', 'connecting', 'reconnecting'].includes(call.status);
+  const connecting = call.status === 'connecting' || call.status === 'reconnecting';
+
+  const refresh = useCallback(async () => {
+    try { setConfig(await json<VoiceConfig>('/api/voice/config')); } catch (e) { setConfig({ configured: false, reason: String(e) }); }
+    try { setVstatus(await json<VoiceStatus>('/api/voice/status')); } catch { setVstatus(null); }
+  }, [json]);
+  useEffect(() => { void refresh(); }, [refresh, voiceConfigured]);
+
+  // Each voice.transcript event carries the latest text for one segment of one speaker.
+  // Interim segments grow in place: when the newest line for that speaker is a prefix of the
+  // new text (or vice versa) replace it, otherwise start a new line.
+  useEffect(() => {
+    const event = log.find((item) => item.name === 'voice.transcript');
+    if (!event || seen.current === event) return;
+    seen.current = event;
+    const text = typeof event.data?.text === 'string' ? event.data.text.trim() : '';
+    if (!text) return;
+    const speaker = typeof event.data?.speaker === 'string' ? event.data.speaker : '';
+    // The agents server mints the local speaker as user-<accountId>; the worker is anyone else.
+    const who: TalkLine['who'] = !speaker || speaker.startsWith('user-') ? 'me' : 'agent';
+    setLines((prev) => {
+      const last = prev[prev.length - 1];
+      if (last && last.who === who && (text.startsWith(last.text) || last.text.startsWith(text))) return [...prev.slice(0, -1), { ...last, text }];
+      return [...prev, { id: nextId.current++, who, text }].slice(-120);
+    });
+  }, [log]);
+
+  async function toggle() {
+    if (toggling.current) return;
+    toggling.current = true; setBusy(true); setError('');
+    try { await run({ name: active ? 'call.stop' : 'voice.start' }); }
+    catch (cause) { setError(String(cause)); }
+    finally { toggling.current = false; setBusy(false); }
+  }
+  async function resetSession() {
+    if (active) await run({ name: 'call.stop' }).catch(() => {});
+    setNote('…');
+    try { const r = await json<{ sessionId?: string }>('/api/voice/session/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); setLines([]); setNote(r.sessionId ? `new session ${r.sessionId.slice(0, 8)}` : 'new session'); }
+    catch (e) { setNote(String(e)); }
+    await refresh();
+  }
+
+  const agentState = call.agentState?.toLowerCase();
+  const phase = call.error || error ? 'error' : !active ? 'idle' : connecting ? 'connecting' : call.muted ? 'muted' : agentState === 'speaking' ? 'speaking' : agentState === 'thinking' ? 'thinking' : 'listening';
+  const color = { idle: C.dim, connecting: C.amber, muted: C.amber, listening: C.green, thinking: C.magenta, speaking: C.cyan, error: C.red }[phase];
+  const label = { idle: 'tap to talk', connecting: 'connecting', muted: 'muted', listening: 'listening', thinking: 'thinking', speaking: 'speaking', error: call.error || error }[phase];
+  const configured = config?.configured === true;
+  const agentName = vstatus?.agent?.name ?? vstatus?.agent?.id ?? config?.agentId;
+  const sessionId = vstatus?.sessionId ?? config?.sessionId;
+  const health = healthOk(vstatus?.health);
+  const size = phase === 'speaking' ? 150 : phase === 'thinking' ? 120 : phase === 'listening' ? 132 : 126;
+
+  return <View style={{ gap: 12 }}>
+    {config && !configured ? <View style={{ ...panel, borderColor: C.magenta }}>
+      <Label color={C.magenta}>Voice not configured</Label>
+      <Text style={{ color: C.text }}>{config.reason ?? 'This node has no Seed agents bridge yet.'}</Text>
+      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+        <Button label="run setup" color={C.magenta} onPress={() => { setNote('running setup…'); void json<{ message?: string; error?: string }>('/api/voice/setup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then((r) => setNote(r.message ?? r.error ?? 'setup complete')).catch((e) => setNote(String(e))).then(refresh); }} />
+        <Button label="recheck" color={C.dim} onPress={() => void refresh()} />
+      </View>
+      {note ? <Text style={{ color: C.dim, fontSize: 12 }}>{note}</Text> : null}
+    </View> : null}
+
+    <View style={{ ...panel, alignItems: 'center', paddingVertical: 28, gap: 16 }}>
+      <Pressable accessibilityRole="button" accessibilityLabel={active ? 'End call' : 'Start call'} disabled={busy || (!active && (status !== 'connected' || !configured))} onPress={() => void toggle()}
+        style={{ width: 200, height: 200, borderRadius: 100, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0e1119', borderWidth: active ? 3 : 2, borderColor: color, opacity: busy || (!active && (status !== 'connected' || !configured)) ? 0.45 : 1, shadowColor: color, shadowOpacity: active ? 0.55 : 0, shadowRadius: phase === 'speaking' ? 34 : 20 }}>
+        <View style={{ width: size, height: size, borderRadius: size / 2, borderWidth: 1, borderColor: color, opacity: active ? 0.5 : 0.15, position: 'absolute' }} />
+        <Text style={{ color, fontSize: 26, fontWeight: '700', letterSpacing: 6, fontFamily: 'Menlo' }}>{active ? 'END' : 'TALK'}</Text>
+      </Pressable>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><Led on={phase === 'error' ? false : active ? true : null} warn={phase === 'connecting' || phase === 'muted'} /><Text style={{ color, fontSize: 12, letterSpacing: 2, fontWeight: '700' }}>{String(label).toUpperCase()}</Text></View>
+      {active ? <Button label={call.muted ? 'unmute' : 'mute'} color={call.muted ? C.amber : C.cyan} onPress={() => void run({ name: 'call.mute', args: { muted: !call.muted } }).catch((cause) => setError(String(cause)))} /> : null}
+    </View>
+
+    <View style={panel}>
+      <Label>Bridge</Label>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 14, alignItems: 'center' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><Led on={health} /><Text style={{ color: C.dim, fontSize: 12 }}>agents {health == null ? '?' : health ? 'up' : 'down'}</Text></View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><Led on={agentName ? true : null} /><Text style={{ color: C.dim, fontSize: 12 }}>agent {agentName ?? '—'}</Text></View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><Led on={sessionId ? true : null} /><Text style={{ color: C.dim, fontSize: 12, fontFamily: 'Menlo' }}>session {sessionId ? sessionId.slice(0, 8) : '—'}</Text></View>
+        {configured ? <Button label="new session" color={C.dim} onPress={() => void resetSession()} /> : null}
+      </View>
+      {configured && note ? <Text style={{ color: C.dim, fontSize: 12 }}>{note}</Text> : null}
+    </View>
+
+    <View style={panel}>
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}><Label color={C.magenta}>Transcript</Label><View style={{ flex: 1 }} />{lines.length ? <Button label="clear" color={C.dim} onPress={() => setLines([])} /> : null}</View>
+      {lines.length ? lines.map((l) => <View key={l.id} style={{ alignSelf: l.who === 'me' ? 'flex-end' : 'flex-start', maxWidth: '88%', borderWidth: 1, borderColor: l.who === 'me' ? '#164e63' : '#4a1d5e', backgroundColor: l.who === 'me' ? '#0b1a21' : '#180b21', borderRadius: 10, paddingVertical: 6, paddingHorizontal: 10 }}><Text style={{ color: l.who === 'me' ? C.cyan : C.magenta, fontSize: 10, letterSpacing: 1 }}>{l.who === 'me' ? 'ME' : (agentName ?? 'AGENT').toUpperCase()}</Text><Text style={{ color: C.text }}>{l.text}</Text></View>) : <Text style={{ color: C.dim }}>{configured ? 'Nothing said yet. Tap TALK and speak.' : 'The conversation shows up here once voice is set up.'}</Text>}
+    </View>
   </View>;
 }
 

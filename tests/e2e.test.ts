@@ -107,6 +107,23 @@ test("shell renders: title bar, activity bar, home dashboard", async () => {
   expect(await page.textContent('[data-testid="widget-activity"]')).toContain("cc");
 });
 
+test("desk view: talk button and the not-configured card render", async () => {
+  // the test daemon has no Seed agents bridge, so voice reports unconfigured
+  await page.goto(`${BASE}/#/desk`);
+  await page.waitForSelector('[data-testid="talk-button"]');
+  expect(await page.textContent('[data-testid="talk-button"]')).toMatch(/talk/i);
+  expect(await page.isVisible('[data-testid="nav-desk"]')).toBe(true);
+  await page.waitForSelector('[data-testid="voice-unconfigured"]');
+  const card = await page.textContent('[data-testid="voice-unconfigured"]');
+  expect(card).toContain("not configured");
+  expect(await page.isVisible('[data-testid="voice-setup"]')).toBe(true);
+  // nothing to talk to: the button is inert and the state label says so
+  expect(await page.isDisabled('[data-testid="talk-button"]')).toBe(true);
+  expect(await page.textContent('[data-testid="voice-state"]')).toContain("tap to talk");
+  expect(await page.textContent('[data-testid="voice-status"]')).toContain("e2e-node");
+  expect(await page.textContent('[data-testid="voice-transcript"]')).toContain("transcript");
+});
+
 test("data view: user data inventory + repos table", async () => {
   await page.click('[data-testid="nav-data"]');
   await page.waitForSelector("text=Repositories");
