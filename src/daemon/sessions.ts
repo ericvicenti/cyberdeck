@@ -60,7 +60,9 @@ let capsCache: { at: number; caps: Caps } | null = null;
 export async function detectCaps(force = false): Promise<Caps> {
   if (!force && capsCache && Date.now() - capsCache.at < 10 * 60_000) return capsCache.caps;
   const r = await sh([loginShell(), "-ilc", "for b in claude codex tmux; do if command -v $b >/dev/null 2>&1; then echo yes; else echo no; fi; done"], 15_000);
-  const [cc, cx, tmux] = r.out.trim().split("\n").map((l) => l.trim() === "yes");
+  const [cc, cx, tmuxFound] = r.out.trim().split("\n").map((l) => l.trim() === "yes");
+  // CYBERDECK_SESSIONS_TMUX=0 forces the pty runner (tests, or a node where tmux should stay untouched).
+  const tmux = tmuxFound && process.env.CYBERDECK_SESSIONS_TMUX !== "0";
   const cmux = ["/Applications/cmux.app/Contents/Resources/bin/cmux", "/usr/local/bin/cmux", "/opt/homebrew/bin/cmux"].some((p) => existsSync(p));
   const caps: Caps = { cc: !!cc, cx: !!cx, tmux: !!tmux, cmux };
   capsCache = { at: Date.now(), caps };
@@ -97,6 +99,7 @@ export class SessionManager {
 
   private async tmux(args: string[], timeoutMs = 8000) {
     if (this.tmuxBin === undefined) {
+      if (process.env.CYBERDECK_SESSIONS_TMUX === "0") return { code: 127, out: "", err: "tmux disabled" };
       const r = await sh([loginShell(), "-ilc", "command -v tmux"], 10_000);
       this.tmuxBin = r.code === 0 && r.out.trim() ? r.out.trim().split("\n").pop()! : null;
     }

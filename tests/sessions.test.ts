@@ -104,7 +104,15 @@ test("attach without a token gets no shell output", async () => {
   await srv.api(`/api/sessions/${s.id}`, { method: "DELETE" });
 });
 
-test("capabilities endpoint reports booleans", async () => {
+test("capabilities endpoint reports booleans; tmux can be disabled by env", async () => {
   const caps = await (await srv.api("/api/harness/caps")).json();
   for (const k of ["cc", "cx", "tmux", "cmux"]) expect(typeof caps[k]).toBe("boolean");
+  process.env.CYBERDECK_SESSIONS_TMUX = "0";
+  try {
+    expect((await (await srv.api("/api/harness/caps?refresh=1")).json()).tmux).toBe(false);
+    // asking for tmux while it is disabled falls back to a pty session instead of failing
+    const s = await create({ cmd: "echo fallback_ok", runner: "tmux" });
+    expect(s.runner).toBe("pty");
+    await srv.api(`/api/sessions/${s.id}`, { method: "DELETE" });
+  } finally { delete process.env.CYBERDECK_SESSIONS_TMUX; }
 }, 20000);

@@ -65,7 +65,8 @@ beforeAll(async () => {
   writeFileSync(join(play, "userdata", "Caches", "junk"), "cache bytes");
 
   daemon = Bun.spawn(["bun", "run", join(ROOT, "src/daemon/main.ts")], {
-    env: { ...process.env, CYBERDECK_HOME: cyberdeckHome },
+    // pty runner only: a tmux-backed session would outlive this sandboxed daemon
+    env: { ...process.env, CYBERDECK_HOME: cyberdeckHome, CYBERDECK_SESSIONS_TMUX: "0" },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -362,7 +363,7 @@ test("fleet: pair a second node via the UI and browse it", async () => {
     JSON.stringify({ nodeName: "second-box", port: 4796, bind: "127.0.0.1", roots: [], dataRoots: [], watch: false, autoUpdate: false, junkDirs: [], skipDirs: [], scanDepth: 1 , fleetDir: null })
   );
   daemon2 = Bun.spawn(["bun", "run", join(ROOT, "src/daemon/main.ts")], {
-    env: { ...process.env, CYBERDECK_HOME: home2 },
+    env: { ...process.env, CYBERDECK_HOME: home2, CYBERDECK_SESSIONS_TMUX: "0" },
     stdout: "pipe",
     stderr: "pipe",
   });
