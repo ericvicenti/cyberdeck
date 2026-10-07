@@ -1,10 +1,19 @@
 // cmux remote control: read and drive the cmux terminal multiplexer on this node through its CLI.
 // Every argument is validated and passed as argv (no shell), so nothing from the browser can be injected.
+import { CYBERDECK_HOME } from "../config";
+import { join } from "path";
 import type { Hono } from "hono";
-import { existsSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 
 const CANDIDATES = ["/Applications/cmux.app/Contents/Resources/bin/cmux", "/usr/local/bin/cmux", "/opt/homebrew/bin/cmux"];
 let binCache: string | null | undefined;
+// cmux's socket is "cmuxOnly" by default (only processes started inside cmux may connect).
+// With socketControlMode "password" in ~/.config/cmux/cmux.json, the same secret stored at
+// ~/.cyberdeck/cmux-password (mode 0600) lets the daemon drive it.
+function cmuxPasswordEnv(): Record<string, string> {
+  try { const f = join(CYBERDECK_HOME, "cmux-password"); if (existsSync(f)) return { CMUX_SOCKET_PASSWORD: readFileSync(f, "utf8").trim() }; } catch {}
+  return {};
+}
 export function cmuxBin(): string | null {
   if (binCache !== undefined) return binCache;
   for (const p of CANDIDATES) if (existsSync(p)) return (binCache = p);
@@ -19,7 +28,7 @@ const KEY = /^[a-z0-9+_-]{1,32}$/i;
 export async function cmux(args: string[], timeoutMs = 10_000): Promise<{ code: number; out: string; err: string }> {
   const bin = cmuxBin();
   if (!bin) return { code: 127, out: "", err: "cmux not installed" };
-  const p = Bun.spawn([bin, ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe", env: { ...process.env, CMUX_QUIET: "1" } });
+  const p = Bun.spawn([bin, ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe", env: { ...process.env, CMUX_QUIET: "1", ...cmuxPasswordEnv() } });
   const t = setTimeout(() => p.kill(), timeoutMs);
   const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
   clearTimeout(t);
