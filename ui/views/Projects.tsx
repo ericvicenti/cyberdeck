@@ -4,7 +4,6 @@ import { type Overview, type Project, type Session, type ServiceRow, pill, isoAg
 import { openTerminal, launchCmd, resumeCmd } from "../lib/terms";
 import { useFleetNodes, openOnHost } from "../lib/hosts";
 import { Markdown } from "./Markdown";
-import { openTerminal } from "../lib/terms";
 
 const UNASSIGNED = "_repos";
 
@@ -41,9 +40,9 @@ export function Projects({ params, onLocked }: { params: URLSearchParams; onLock
   }, [ov?.fleetDir]);
 
   const projects = ov?.projects ?? [];
-  const parent = useMemo(() => (current?.parent ? projects.find((p) => p.slug === current.parent) : undefined), [projects, current]);
   const showUnassigned = selected === UNASSIGNED;
   const current: Project | undefined = showUnassigned ? undefined : projects.find((p) => p.slug === selected) ?? projects[0];
+  const parent = useMemo(() => (current?.parent ? projects.find((p) => p.slug === current.parent) : undefined), [projects, current]);
   // Every indexed checkout that no project claims: the long tail Eric still thinks of as projects.
   const unassigned = useMemo(() => repos.filter((r) => !projects.some((p) => p.repos.some((g) => globMatches(g, r.path)))).sort((a, b) => (b.last_commit_at ?? 0) - (a.last_commit_at ?? 0)), [repos, projects]);
   const unassignedShown = useMemo(() => { const q = repoQ.trim().toLowerCase(); return q ? unassigned.filter((r) => r.path.toLowerCase().includes(q)) : unassigned; }, [unassigned, repoQ]);
