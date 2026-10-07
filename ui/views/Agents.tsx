@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, post, wsUrl, activeNode, activeNodeName, ApiError } from "../lib/api";
+import { openTerminal, launchCmd, resumeCmd, shq } from "../lib/terms";
 import { type Overview, type Session, type Run, type Task, pill, isoAgo, duration } from "../lib/control";
 import { Markdown } from "./Markdown";
 import { Panel, Row, Empty } from "./Projects";
@@ -26,6 +27,20 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
   const [pulling, setPulling] = useState<string | null>(null);
   // add task form
   const [form, setForm] = useState({ title: "", project: "", host: "", worker: "cx", body: "" });
+  // launch an agent in a terminal
+  const [nodes, setNodes] = useState<{ id: string; name: string; online: boolean }[]>([]);
+  const [launch, setLaunch] = useState({ node: activeNode(), cwd: "", tool: "cc" as "cc" | "cx", prompt: "" });
+  useEffect(() => { fetch("/api/fleet/nodes", { headers: { authorization: `Bearer ${localStorage.getItem("cyberdeck-token") ?? ""}` } }).then((r) => r.json()).then((f) => setNodes(f.nodes ?? [])).catch(() => {}); }, []);
+  const home = ov ? ov.fleetDir.replace(/\/Code\/[^/]+$/, "") : "";
+  const dirs = useMemo(() => { const d = new Set<string>(); if (home) d.add(`${home}/Code`); for (const p of ov?.projects ?? []) for (const g of p.repos) if (!g.includes("*") && home) d.add(`${home}/Code/${g}`); return [...d]; }, [ov, home]);
+  /** Node id for a fleet host name ("" = this node). */
+  const nodeFor = (hostName: string) => (hostName.toLowerCase() === (ov?.status?.host ?? "").toLowerCase() ? { id: "", name: hostName } : nodes.find((n) => n.name.toLowerCase() === hostName.toLowerCase()));
+  const openOn = (hostName: string, cwd: string, cmd: string, title: string) => {
+    const n = nodeFor(hostName);
+    if (!n) { setMsg(`${hostName} is not a paired node`); return; }
+    if (n.id && !nodes.find((x) => x.id === n.id)?.online) { setMsg(`${hostName} is offline`); return; }
+    openTerminal({ node: n.id, nodeName: n.name, cwd, cmd, title });
+  };
 
   const load = async () => {
     try {
@@ -112,6 +127,27 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
               )}
             </div>
 
+            {/* launch cc / cx */}
+            <Panel title="Launch an agent">
+              <form className="grid gap-2 sm:grid-cols-[150px_1fr_90px_1fr_auto]" onSubmit={(e) => { e.preventDefault(); const n = launch.node ? nodes.find((x) => x.id === launch.node) : null; openTerminal({ node: launch.node, nodeName: n?.name ?? "node", cwd: launch.cwd, cmd: launchCmd(launch.tool, launch.prompt.trim() || undefined), title: `${launch.tool} ${launch.cwd.split("/").pop() || "~"}` }); }}>
+                <select value={launch.node} onChange={(e) => setLaunch({ ...launch, node: e.target.value })} data-testid="launch-node" className="rounded-sm border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-300">
+                  <option value="">{ov.status?.host ?? "this machine"} (local)</option>
+                  {nodes.map((n) => <option key={n.id} value={n.id} disabled={!n.online}>{n.name}{n.online ? "" : " (offline)"}</option>)}
+                </select>
+                <input list="launch-dirs" value={launch.cwd} onChange={(e) => setLaunch({ ...launch, cwd: e.target.value })} placeholder="working directory (project repo)" data-testid="launch-cwd" className="rounded-sm border border-zinc-700 bg-zinc-950 px-3 py-1.5 font-mono text-xs text-zinc-100 outline-none focus:border-sky-500/60" />
+                <datalist id="launch-dirs">{dirs.map((d) => <option key={d} value={d} />)}</datalist>
+                <select value={launch.tool} onChange={(e) => setLaunch({ ...launch, tool: e.target.value as "cc" | "cx" })} className="rounded-sm border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-300">
+                  <option value="cc">cc · Claude</option>
+                  <option value="cx">cx · Codex</option>
+                </select>
+                <input value={launch.prompt} onChange={(e) => setLaunch({ ...launch, prompt: e.target.value })} placeholder="first prompt (optional)" className="rounded-sm border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-100 outline-none focus:border-sky-500/60" />
+                <button data-testid="launch-go" className="hud-badge neon-green px-3 py-1.5 hover:bg-lime-500/10">Launch in terminal</button>
+              </form>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {dirs.slice(0, 8).map((d) => <button key={d} onClick={() => setLaunch({ ...launch, cwd: d })} className="rounded-sm border border-zinc-800 px-2 py-0.5 font-mono text-[10px] text-zinc-400 hover:text-zinc-100">{d.replace(home, "~")}</button>)}
+              </div>
+            </Panel>
+
             {/* collaboration */}
             <Panel
               title="Collaboration"
@@ -189,6 +225,7 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
                       ))}
                       <span className="ml-auto text-[10px] text-zinc-600">{run.id} · {(log.size / 1024).toFixed(0)} KB</span>
                       <label className="ml-2 flex items-center gap-1 text-[10px] text-zinc-500"><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />follow</label>
+                      <button onClick={() => openOn(run.host, run.dir, `tail -n 200 -f ${shq(`${run.dir}/${logFile === "result.md" ? "result.md" : logFile}`)}`, `log ${run.task}`)} className="ml-2 rounded border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800" title="tail this log in a terminal on the run's host">Open in terminal</button>
                     </div>
                     {logFile === "result.md" ? (
                       <div className="mt-2 max-h-[380px] overflow-auto rounded-lg bg-zinc-950 p-3"><Markdown text={log.text || "(no result yet)"} /></div>
@@ -220,6 +257,7 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
                   <span className="min-w-0 flex-1 truncate text-[12px] text-zinc-200" title={s.title}>{s.title}</span>
                   <span className="hidden w-44 truncate font-mono text-[10px] text-zinc-600 md:inline">{s.cwd.replace(/^\/(Users|home)\/[^/]+/, "~")}</span>
                   <span className="hidden w-24 truncate font-mono text-[10px] text-zinc-700 lg:inline">{s.id}</span>
+                  <button onClick={() => openOn(s.host, s.cwd, resumeCmd(s.tool, s.id), `${s.tool} ${s.title.slice(0, 18)}`)} className="shrink-0 rounded border border-sky-500/30 px-2 py-0.5 text-[10px] text-sky-300 hover:bg-sky-500/10" title={s.host === me ? "resume in a terminal here" : `resume in a terminal on ${s.host}`}>{s.host === me ? "Resume here" : "Resume there"}</button>
                   {s.host !== me && (
                     <button disabled={pulling === s.id} onClick={() => { setPulling(s.id); act(`Pull ${s.id.slice(0, 8)}`, () => post("/api/control/sessions/pull", { id: s.id })).finally(() => setPulling(null)); }} className="shrink-0 rounded border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-40">{pulling === s.id ? "…" : "Pull here"}</button>
                   )}

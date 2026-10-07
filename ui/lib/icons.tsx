@@ -130,3 +130,9 @@ export const PulseIcon = (p: P) => (
     <path d="M3 12h4l2-6 4 12 2-6h6" />
   </svg>
 );
+
+export const GridIcon = (p: P) => (
+  <svg {...base(p)}>
+    <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
+  </svg>
+);

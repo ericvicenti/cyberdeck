@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { parseHash, navigate, api, activeNode, activeNodeName, setActiveNode, type Route } from "./lib/api";
-import { ShieldIcon, ServerIcon, FolderIcon, TerminalIcon, GitIcon, LayersIcon, BotIcon, PulseIcon } from "./lib/icons";
+import { ShieldIcon, ServerIcon, FolderIcon, TerminalIcon, GitIcon, LayersIcon, BotIcon, PulseIcon, GridIcon } from "./lib/icons";
 import { Fleet } from "./views/Fleet";
 import type { Overview } from "./lib/control";
 import { Projects } from "./views/Projects";
@@ -10,6 +10,7 @@ import { Data } from "./views/Data";
 import { Files } from "./views/Files";
 import { Editor } from "./views/Editor";
 import { Term } from "./views/Term";
+import { Cmux } from "./views/Cmux";
 import { TokenGate } from "./views/TokenGate";
 
 const NAV = [
@@ -20,6 +21,7 @@ const NAV = [
   { view: "data", label: "Data", icon: GitIcon },
   { view: "files", label: "Files", icon: FolderIcon },
   { view: "term", label: "Terminal", icon: TerminalIcon },
+  { view: "cmux", label: "cmux", icon: GridIcon },
 ];
 
 type FleetSummary = { self: { nodeId: string; name: string; commit?: string }; nodes: { id: string; name: string; online: boolean }[] };
@@ -30,6 +32,7 @@ export function App() {
   const [fleet, setFleet] = useState<FleetSummary | null>(null);
   const [nodeGen, setNodeGen] = useState(0); // bump to remount views on node switch
   const [hud, setHud] = useState<{ tasks: number; running: number; down: number | null; handoff: number } | null>(null);
+  const [cmuxCount, setCmuxCount] = useState<number | null>(null);
 
   useEffect(() => {
     const onHash = () => setRoute(parseHash());
@@ -53,6 +56,10 @@ export function App() {
         const o = await api<Overview>("/api/control/overview");
         if (alive) setHud({ tasks: o.collab.tasks.filter((t) => t.status === "open").length, running: o.collab.runs.filter((r) => r.status === "running").length, down: o.services ? o.services.rows.filter((r) => r.ok === false).length : null, handoff: o.status?.handoffOpen ?? 0 });
       } catch { if (alive) setHud(null); }
+      try {
+        const t = await api<{ available: boolean; running?: boolean; tree: { kind: string; children: any[] }[] }>("/api/cmux/tree");
+        if (alive) setCmuxCount(t.available && t.running ? t.tree.reduce((n, w) => n + w.children.length, 0) : null);
+      } catch { if (alive) setCmuxCount(null); }
     };
     poll();
     const iv = setInterval(poll, 30_000);
@@ -86,6 +93,7 @@ export function App() {
       {route.view === "files" && <Files params={route.params} onLocked={lock} key={`files-${nodeGen}-${nodeId}`} />}
       {route.view === "edit" && <Editor params={route.params} onLocked={lock} key={`edit-${nodeGen}-${nodeId}`} />}
       {route.view === "term" && <Term params={route.params} key={`term-${nodeGen}-${nodeId}`} />}
+      {route.view === "cmux" && <Cmux onLocked={lock} key={`cmux-${nodeGen}-${nodeId}`} />}
     </>
   );
 
@@ -101,6 +109,7 @@ export function App() {
           <span className="hud-chip text-zinc-300"><span className={`led ${onlineCount === (fleet?.nodes.length ?? 0) ? "led-on" : "led-warn"}`} />fleet {onlineCount}/{fleet?.nodes.length ?? 0}</span>
           <button className="hud-chip text-zinc-300 hover:text-zinc-100" onClick={() => navigate("agents")}><span className={`led ${hud?.running ? "led-run" : "led-off"}`} />tasks {hud ? `${hud.tasks} open` : "—"}{hud?.running ? ` · ${hud.running} run` : ""}</button>
           <button className={`hud-chip ${hud?.down ? "neon-red" : "text-zinc-300"} hover:text-zinc-100`} onClick={() => navigate("services")}><span className={`led ${hud?.down ? "led-err" : hud?.down === 0 ? "led-on" : "led-off"}`} />svc {hud?.down == null ? "—" : hud.down ? `${hud.down} down` : "ok"}</button>
+          {cmuxCount != null && <button className="hud-chip text-zinc-300 hover:text-zinc-100" onClick={() => navigate("cmux")}><span className="led led-on" />cmux {cmuxCount}</button>}
         </div>
         <div className="flex-1" />
         <select

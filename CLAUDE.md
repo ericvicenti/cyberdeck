@@ -39,3 +39,5 @@ Gotchas:
   `set -u`); tests/install.test.ts enforces this.
 - node-pty does not work under Bun; the web terminal uses `bun-pty`.
 - Playwright e2e needs `bunx playwright install chromium` once per machine.
+
+cmux: `src/daemon/api/cmux.ts` drives Eric's cmux terminal multiplexer through its CLI (`/Applications/cmux.app/Contents/Resources/bin/cmux` or PATH) with validated argv only; `ui/views/Cmux.tsx` is the view. Terminal tabs + agent launch live in `ui/lib/terms.ts`, `ui/views/Term.tsx`, `ui/views/Agents.tsx`.

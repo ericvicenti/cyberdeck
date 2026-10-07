@@ -15,6 +15,7 @@ import { createTermHandlers } from "./api/term";
 import { registerFleetRoutes } from "./api/fleet";
 import { registerMediaRoutes, cleanupHlsCache } from "./api/media";
 import { registerControlRoutes } from "./api/control";
+import { registerCmuxRoutes } from "./api/cmux";
 import { currentCommit, checkForUpdate, applyUpdate, isUpdating } from "./updater";
 
 const UI_DIST = join(import.meta.dir, "../../dist/ui");
@@ -179,6 +180,7 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   registerMediaRoutes(app, token);
   registerFleetRoutes(app, db, cfg, nodeId, token, upgradeWebSocket, { tailscale: ts, authedViaTailscale });
   registerControlRoutes(app, cfg);
+  registerCmuxRoutes(app);
 
   app.get(
     "/api/term",
