@@ -8,8 +8,13 @@ export const CYBERDECK_HOME = process.env.CYBERDECK_HOME ?? join(homedir(), ".cy
 export interface CyberdeckConfig {
   nodeName: string;
   port: number;
-  /** Listen address. 0.0.0.0 enables LAN fleet pairing; the API is token-gated. */
+  /** Who may reach the daemon: "tailscale" (default) listens on all interfaces but only
+   *  accepts loopback and tailnet source addresses; "lan" accepts anything (token-gated);
+   *  an explicit IP binds just that address. */
   bind: string;
+  /** Tailscale login (e.g. you@example.com) whose tailnet devices are trusted without a
+   *  token. null = detect from `tailscale status` at boot and persist. */
+  tailscaleOwner?: string | null;
   /** Directories scanned for repos and novel data. */
   roots: string[];
   /** User-data locations inventoried by the data scan (sizes, cache split). */
@@ -38,7 +43,8 @@ export interface CyberdeckConfig {
 const DEFAULTS: CyberdeckConfig = {
   nodeName: hostname().replace(/\.local$/, ""),
   port: 4777,
-  bind: "0.0.0.0",
+  bind: "tailscale",
+  tailscaleOwner: null,
   roots: [join(homedir(), "Code")],
   dataRoots: [
     join(homedir(), "Desktop"),
@@ -87,6 +93,13 @@ export function loadConfig(): CyberdeckConfig {
     return { ...DEFAULTS };
   }
   const onDisk = JSON.parse(readFileSync(path, "utf8"));
+  if (onDisk.bind === "0.0.0.0") {
+    // The pre-tailscale default was written to every config on first run; it meant
+    // "reachable on the LAN". Tighten to the tailnet; set bind to "lan" to opt back in.
+    onDisk.bind = "tailscale";
+    writeFileSync(path, JSON.stringify(onDisk, null, 2) + "\n");
+    console.log('config: bind "0.0.0.0" migrated to "tailscale" (set "lan" to allow LAN clients)');
+  }
   return { ...DEFAULTS, ...onDisk, collab: { ...DEFAULTS.collab!, ...(onDisk.collab ?? {}) } };
 }
 

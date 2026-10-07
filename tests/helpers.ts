@@ -19,6 +19,7 @@ export function testConfig(overrides: Partial<CyberdeckConfig> = {}): CyberdeckC
     nodeName: "test-node",
     port: 0,
     bind: "127.0.0.1",
+    tailscaleOwner: "test-owner@example.com", // set, so the daemon never probes the real tailscale CLI or writes config
     autoUpdate: false,
     roots: [],
     junkDirs: ["node_modules", "dist"],

@@ -112,7 +112,7 @@ route just serves the file from the `main` branch). The script sets `set -euo pi
 (with a bash-3.2-safe pipefail guard), defines everything in functions, and calls
 `main "$@"` on the **last line** so a truncated curl download executes nothing.
 
-Flags (parsed from `$@`, which works with `curl | bash -s -- --flag`):
+Flags (parsed from `$@`, which works with `curl | bash -s -- --flag`; `--owner <tailscale login>` is implemented today and writes `tailscaleOwner` into config.json):
 
 ```
 --headless          no browser open, implies non-interactive

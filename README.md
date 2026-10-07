@@ -18,6 +18,12 @@ This installs bun if needed, clones the source to `~/.cyberdeck/src`, builds the
 a launchd (macOS) or systemd (Linux) service, and opens the web UI at
 `http://127.0.0.1:4777`.
 
+From other devices use the tailnet: the daemon only answers tailnet and loopback addresses, and a
+device logged in as the node's owner needs no token. For HTTPS (phones, PWAs) run
+`cyberdeck serve` once per node and open `https://<node>.<your-tailnet>.ts.net`. Pair nodes from
+one machine with `curl -X POST .../api/fleet/pair-direct -d '{"url":"http://<peer>.<tailnet>:4777"}'`.
+Pass `--owner you@example.com` to the installer to pin the trusted Tailscale login up front.
+
 ## Develop
 
 ```sh
