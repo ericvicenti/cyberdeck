@@ -24,6 +24,11 @@ use `bun` for everything.
   the `Control` handle `registerControlRoutes` returns; tool names stay short because Seed
   prefixes them (`cyberdeck__status`). Tests drive it with the real MCP client (`tests/mcp.test.ts`).
   Keep `docs/AGENTS.md` in sync when adding a tool.
+- `src/daemon/api/dashboard.ts` — `GET /api/dashboard`, the home page's widgets: Claude Code and Codex
+  rate limits read with the CLIs' own sign-ins (keychain / `~/.claude/.credentials.json`, `~/.codex/auth.json`;
+  Codex falls back to the newest transcript's `rate_limits`), disks, system, prompts-per-day, repo redundancy
+  and the backup placeholder (`config.backup`, ROADMAP M2). 60 s usage cache; `CYBERDECK_USAGE_NET=0` keeps
+  tests off the keychain and the network. UI: `ui/views/Home.tsx` + `ui/components/Widgets.tsx`.
 - `docs/` — the knowledgebase. `docs/BRIEF.md` is the authoritative vision;
   `docs/ARCHITECTURE.md` is canonical for schema/API; `docs/ROADMAP.md` tracks milestones.
   Keep docs in sync when changing schema or routes.

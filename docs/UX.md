@@ -798,3 +798,15 @@ State rules: server state lives exclusively in TanStack Query (WS-invalidated); 
 - **Agents → Launch an agent**: node + cwd + agent (cc = `claude --dangerously-skip-permissions`, cx = `codex --yolo`) + optional first prompt → opens a terminal tab on that node running the agent. Sessions rows have **Resume here / Resume there** (opens a terminal running `--resume <id>` / `codex --yolo resume <id>` on the session's host); runs have **Open in terminal** (tails the selected log on the run's host).
 - **cmux** view (`/api/cmux/*`): the live window → workspace → pane → surface tree from `cmux tree --all`, the selected surface's screen (`read-screen`, polled every 1.5 s, optional scrollback), a send line (`send` + Enter), quick keys (`send-key`), Focus in cmux (`select-workspace`), New workspace (`new-workspace --cwd --command`), Close. Refs are validated against `^(window|workspace|pane|surface|tab):\d+$` or a UUID and passed as argv, never through a shell. Node-aware through the proxy, so it drives the other laptop's cmux too. The title bar shows a `cmux N` chip when cmux is running on the active node.
 - **TokenGate** asks `/api/auth/whoami` first and skips the token prompt when the request is authenticated by Tailscale identity.
+
+## Home dashboard (2026-10-07)
+
+`#/fleet` is the home page: a widget grid (`ui/views/Home.tsx`, primitives in `ui/components/Widgets.tsx`) fed by `GET /api/dashboard` (60 s poll) plus the existing `/api/fleet/nodes`, `/api/status` and `/api/control/overview` (15 s). Every widget title navigates to the view that owns the data; previous values are held on refetch (no skeleton flash). Widgets, in order:
+
+- **Claude Code** and **Codex**: one `Meter` per rate limit (session, weekly, per-model weekly for Claude; the 5-hour / weekly windows and credit balance for Codex) with the reset countdown; the limit currently in effect carries a running LED; the plan badge comes from the sign-in. A node without a sign-in shows empty tracks and the reason. Meter fill is severity (green < 60 %, amber < 85 %, red) and the track is a lighter step of the same color; text always uses text tokens.
+- **Backup** (magenta until configured): configured/not, targets with last snapshot, protected vs exposed bytes and the single-copy repo count (remote-less + unpushed). The engine is ROADMAP M2; the widget is wired to `config.backup.targets` so it lights up when it lands.
+- **Storage**: one meter per volume on this node and every online peer (peers through `/api/nodes/:id/proxy/dashboard`), free of total; amber at 80 %, red at 92 %.
+- **Repo safety**: stacked safe/attention/at-risk bar with counts, remote-less / dirty / unpushed stats, user data vs caches.
+- **Agent activity**: 14-day grouped bars of cc (cyan) and cx (magenta) prompts from the CLIs' history files; hover a day for its numbers; totals in the header.
+- **Control**, **Services** (an LED per probed service, grouped by host, each leading to the service), **Handoff** (the newest four TODO entries), **System** (load vs cpus, available memory, uptime).
+- Below the grid: the **Machines** cards (unchanged NodeCard) and **Add a machine** pairing.

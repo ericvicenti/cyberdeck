@@ -19,6 +19,7 @@ import { registerCmuxRoutes } from "./api/cmux";
 import { registerMcpRoutes } from "./api/mcp";
 import { nodeStatus } from "./status";
 import { registerSessionRoutes } from "./api/sessions";
+import { registerDashboardRoutes } from "./api/dashboard";
 import { SessionManager } from "./sessions";
 import { currentCommit, checkForUpdate, applyUpdate, setUpdateGuard } from "./updater";
 
@@ -170,6 +171,7 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   registerFleetRoutes(app, db, cfg, nodeId, token, upgradeWebSocket, { tailscale: ts, authedViaTailscale });
   const control = registerControlRoutes(app, cfg);
   registerCmuxRoutes(app);
+  registerDashboardRoutes(app, db, cfg);
   registerMcpRoutes(app, db, cfg, control, { status, version: VERSION });
 
   // Live sessions (daemon-owned PTYs). tmux-backed ones survive restarts; a

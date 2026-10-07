@@ -66,7 +66,7 @@ beforeAll(async () => {
 
   daemon = Bun.spawn(["bun", "run", join(ROOT, "src/daemon/main.ts")], {
     // pty runner only: a tmux-backed session would outlive this sandboxed daemon
-    env: { ...process.env, CYBERDECK_HOME: cyberdeckHome, CYBERDECK_SESSIONS_TMUX: "0" },
+    env: { ...process.env, CYBERDECK_HOME: cyberdeckHome, CYBERDECK_SESSIONS_TMUX: "0", CYBERDECK_USAGE_NET: "0" },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -95,10 +95,16 @@ afterAll(async () => {
   rmSync(play, { recursive: true, force: true });
 });
 
-test("shell renders: title bar, activity bar, fleet home", async () => {
+test("shell renders: title bar, activity bar, home dashboard", async () => {
   expect(await page.textContent("header")).toContain("Cyberdeck");
   expect(await page.isVisible('[data-testid="nav-files"]')).toBe(true);
   expect(await page.textContent("main")).toContain("this machine");
+  // the dashboard widgets render from /api/dashboard (usage lookups are offline in e2e)
+  await page.waitForSelector('[data-testid="widget-storage"]');
+  await waitFor(async () => (await page.textContent('[data-testid="widget-storage"]'))?.includes("free") ?? false);
+  expect(await page.textContent('[data-testid="widget-claude"]')).toContain("session");
+  expect(await page.textContent('[data-testid="widget-backup"]')).toContain("not configured");
+  expect(await page.textContent('[data-testid="widget-activity"]')).toContain("cc");
 });
 
 test("data view: user data inventory + repos table", async () => {
@@ -363,7 +369,7 @@ test("fleet: pair a second node via the UI and browse it", async () => {
     JSON.stringify({ nodeName: "second-box", port: 4796, bind: "127.0.0.1", roots: [], dataRoots: [], watch: false, autoUpdate: false, junkDirs: [], skipDirs: [], scanDepth: 1 , fleetDir: null })
   );
   daemon2 = Bun.spawn(["bun", "run", join(ROOT, "src/daemon/main.ts")], {
-    env: { ...process.env, CYBERDECK_HOME: home2, CYBERDECK_SESSIONS_TMUX: "0" },
+    env: { ...process.env, CYBERDECK_HOME: home2, CYBERDECK_SESSIONS_TMUX: "0", CYBERDECK_USAGE_NET: "0" },
     stdout: "pipe",
     stderr: "pipe",
   });

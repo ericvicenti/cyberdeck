@@ -13,6 +13,8 @@ export function tmpHomeDir(prefix: string): { dir: string; cleanup: () => void }
 }
 
 export const TEST_TOKEN = "test-token-abc";
+// The dashboard never touches the keychain or the usage APIs under test.
+process.env.CYBERDECK_USAGE_NET = "0";
 
 export function testConfig(overrides: Partial<CyberdeckConfig> = {}): CyberdeckConfig {
   return {

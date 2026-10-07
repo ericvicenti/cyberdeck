@@ -38,6 +38,9 @@ export interface CyberdeckConfig {
   /** Autonomous agent collaboration: when `auto` is on, `fleet collab tick` runs every
    *  `intervalMinutes` (skipped while a run is in progress). */
   collab?: { auto: boolean; intervalMinutes: number };
+  /** Backup replication (ROADMAP M2, not built yet). `targets` are fleet node names that
+   *  should hold a copy of this node's novel data; the home dashboard reads it. */
+  backup?: { targets: string[] };
 }
 
 const DEFAULTS: CyberdeckConfig = {
