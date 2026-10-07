@@ -77,6 +77,7 @@ export function planHarness(input: PlanInput): Plan {
   let shellCmd: string | null = null;
   let node: PlanNode | null = null;
   let project: PlanProject | null = null;
+  let repo: string | null = null; // a specific repo named in the prompt
   let cwd: string | null = null;
 
   // ---- explicit syntax ----
@@ -94,6 +95,7 @@ export function planHarness(input: PlanInput): Plan {
     const p = input.projects.find((x) => x.slug.toLowerCase() === tag.toLowerCase() || x.name.toLowerCase() === tag.toLowerCase() || x.repos.some((r) => repoName(r).toLowerCase() === tag.toLowerCase()));
     if (!p) return m;
     project = p; reasons.push(`#${tag}: project ${p.name}`);
+    repo = p.repos.map(repoName).find((r) => r.toLowerCase() === tag.toLowerCase()) ?? null;
     return sp;
   });
   text = text.replace(/\s{2,}/g, " ").trim();
@@ -108,14 +110,15 @@ export function planHarness(input: PlanInput): Plan {
     for (const n of nodes) if (n.name.length >= 3 && wordRe(n.name).test(text)) { node = n; reasons.push(`mentions ${n.name}`); break; }
   }
   if (!project && text) {
-    let best: { p: PlanProject; len: number } | null = null;
+    let best: { p: PlanProject; len: number; repo: string | null } | null = null;
     for (const p of input.projects) {
-      for (const needle of [p.name, p.slug.split("/").pop() ?? p.slug, ...p.repos.map(repoName)]) {
+      const names: [string, string | null][] = [[p.name, null], [p.slug.split("/").pop() ?? p.slug, null], ...p.repos.map(repoName).map((r): [string, string | null] => [r, r])];
+      for (const [needle, r] of names) {
         if (needle.length < 3 || /\*/.test(needle)) continue;
-        if (wordRe(needle).test(text) && (!best || needle.length > best.len)) best = { p, len: needle.length };
+        if (wordRe(needle).test(text) && (!best || needle.length > best.len)) best = { p, len: needle.length, repo: r };
       }
     }
-    if (best) { project = best.p; reasons.push(`mentions ${best.p.name}`); }
+    if (best) { project = best.p; repo = best.repo; reasons.push(best.repo ? `mentions ${best.repo} (${best.p.name})` : `mentions ${best.p.name}`); }
   }
 
   // ---- context fallbacks ----
@@ -123,7 +126,7 @@ export function planHarness(input: PlanInput): Plan {
     const p = input.projects.find((x) => x.slug === input.context.project);
     if (p) { project = p; reasons.push(`current project ${p.name}`); }
   }
-  const projRepo = project ? (project as PlanProject).repos.map(repoName).find((r) => r && !r.includes("*")) : null;
+  const projRepo = repo ?? (project ? (project as PlanProject).repos.map(repoName).find((r) => r && !r.includes("*")) : null);
 
   // ---- node ----
   if (ov.node !== undefined) { node = nodes.find((n) => n.id === ov.node) ?? self; pinned.push("node"); }
@@ -162,6 +165,8 @@ export function planHarness(input: PlanInput): Plan {
   else if (caps && caps.tmux) { runner = "tmux"; reasons.push("tmux: survives daemon restarts"); }
   else { runner = "pty"; if (caps) reasons.push("no tmux: session ends if the daemon restarts"); }
 
+  // Tool pinned to shell (or chosen by caps) with no `$` prefix: the text itself is the command.
+  if (tool === "shell" && shellCmd === null && text) { shellCmd = text; text = ""; reasons.push("shell: the text runs as a command"); }
   const prompt = text;
   const cmd = tool === "shell" ? (shellCmd ?? "") : launchCmd(tool, prompt || undefined);
   const base = (cwd ?? "~").split("/").filter(Boolean).pop() ?? "~";

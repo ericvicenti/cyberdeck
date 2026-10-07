@@ -82,10 +82,16 @@ test("exit is reported and the row remains until removed", async () => {
   await srv.api(`/api/sessions/${s.id}`, { method: "DELETE" });
 }, 20000);
 
-test("cwd with ~ expands; bad input is rejected; rename works", async () => {
+test("cwd with ~ expands; a missing cwd falls back to home with a visible warning; bad input is rejected; rename works", async () => {
   const s = await create({ cwd: "~", cmd: "pwd", runner: "pty" });
   expect(s.cwd.startsWith("/")).toBe(true);
   expect(s.cwd).not.toContain("~");
+  const missing = await create({ cwd: "~/definitely-not-here-xyz", cmd: "pwd", runner: "pty" });
+  expect(missing.cwd).toBe(s.cwd);
+  const a = await attach(missing.id);
+  await until(() => a.output().includes("does not exist on this node"));
+  a.ws.close();
+  await srv.api(`/api/sessions/${missing.id}`, { method: "DELETE" });
   expect((await srv.api("/api/sessions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ runner: "nope" }) })).status).toBe(400);
   expect((await srv.api("/api/sessions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tool: "bash" }) })).status).toBe(400);
   expect((await srv.api(`/api/sessions/${s.id}/rename`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "renamed" }) })).ok).toBe(true);

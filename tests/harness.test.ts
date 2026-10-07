@@ -36,10 +36,22 @@ test("project mention picks the repo directory and its host", () => {
   expect(p.reasons.join(" ")).toContain("lives on yacht");
 });
 
-test("repo name mention (case-insensitive, longest wins)", () => {
+test("repo name mention picks that repo's directory (case-insensitive, longest wins)", () => {
   const p = planHarness({ ...base(), prompt: "update the terraform in seedinfra" });
-  expect(p.cwd).toBe("~/Code/Seed"); // project resolved; first non-glob repo is the project dir
-  expect(p.reasons.join(" ")).toContain("Seed Hypermedia");
+  expect(p.cwd).toBe("~/Code/SeedInfra");
+  expect(p.reasons.join(" ")).toContain("SeedInfra (Seed Hypermedia)");
+  // project name alone → the project's first repo
+  expect(planHarness({ ...base(), prompt: "seed hypermedia docs pass" }).cwd).toBe("~/Code/Seed");
+  // #repo tag also prefers that repo
+  expect(planHarness({ ...base(), prompt: "lint #SeedHost" }).cwd).toBe("~/Code/SeedHost");
+});
+
+test("tool pinned to shell runs the text as the command", () => {
+  const p = planHarness({ ...base(), prompt: "git status", overrides: { tool: "shell" } });
+  expect(p.cmd).toBe("git status");
+  expect(p.prompt).toBe("");
+  expect(p.title).toBe("sh git status");
+  expect(p.reasons.join(" ")).toContain("runs as a command");
 });
 
 test("explicit tokens: $ shell, cx: prefix, @node, #project", () => {

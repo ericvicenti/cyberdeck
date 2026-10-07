@@ -135,13 +135,15 @@ export class SessionManager {
   async create(opts: CreateOpts): Promise<SessionInfo> {
     const id = randomBytes(4).toString("hex");
     let cwd = expandHome(opts.cwd);
-    if (!existsSync(cwd)) cwd = homedir();
+    let warning: string | null = null;
+    if (!existsSync(cwd)) { warning = `cyberdeck: ${cwd} does not exist on this node; starting in ${homedir()}`; cwd = homedir(); }
     const cmd = (opts.cmd ?? "").trim() || null;
     const tool: Tool = opts.tool ?? (cmd ? "shell" : "shell");
     let runner: Runner = opts.runner ?? "pty";
     const title = (opts.title ?? "").trim() || (cmd ? cmd.split(" ")[0] : cwd.split("/").pop() || "~");
     const info: SessionInfo = { id, title, cwd, cmd, tool, prompt: opts.prompt ?? null, runner, state: "running", createdAt: Date.now(), exitedAt: null, exitCode: null, clients: 0, lastOutputAt: null, bells: 0, busy: false };
     const live: Live = { info, pty: null, clients: new Set(), buf: [], bufBytes: 0, cols: opts.cols ?? 120, rows: opts.rows ?? 32 };
+    if (warning) { const line = `\x1b[33m${warning}\x1b[0m\r\n`; live.buf.push(line); live.bufBytes += line.length; console.warn(warning); }
 
     if (runner === "tmux") {
       const name = TMUX_PREFIX + id;
