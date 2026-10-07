@@ -10,8 +10,9 @@
 //         boot we re-attach to every tmux session we still have a row for.
 import { spawn as ptySpawn, type IPty } from "bun-pty";
 import type { Database } from "bun:sqlite";
-import { existsSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from "fs";
 import { homedir } from "os";
+import { join, dirname } from "path";
 import { randomBytes } from "crypto";
 import { bus } from "./events";
 import type { Caps, Runner, Tool } from "../shared/harness";
@@ -37,6 +38,30 @@ export function expandHome(p: string | undefined | null): string {
   if (p === "~") return home;
   if (p.startsWith("~/")) return home + p.slice(1);
   return p;
+}
+
+/** Claude Code asks "do you trust this folder?" on first launch in a directory and records the answer in
+ *  its config (`projects[<dir>].hasTrustDialogAccepted`). A session started from Cyberdeck is the owner
+ *  launching into their own checkout, so pre-record the acceptance and skip the prompt. */
+export function trustClaudeDir(cwd: string): boolean {
+  const file = process.env.CLAUDE_CONFIG_DIR ? join(process.env.CLAUDE_CONFIG_DIR, ".claude.json") : join(homedir(), ".claude.json");
+  try {
+    let cfg: any = {};
+    if (existsSync(file)) { try { cfg = JSON.parse(readFileSync(file, "utf8")); } catch { return false; } } // never clobber a file we cannot parse
+    if (!cfg || typeof cfg !== "object") return false;
+    cfg.projects = cfg.projects && typeof cfg.projects === "object" ? cfg.projects : {};
+    const entry = cfg.projects[cwd] && typeof cfg.projects[cwd] === "object" ? cfg.projects[cwd] : {};
+    if (entry.hasTrustDialogAccepted === true) return true;
+    cfg.projects[cwd] = { allowedTools: [], ...entry, hasTrustDialogAccepted: true };
+    mkdirSync(dirname(file), { recursive: true });
+    const tmp = `${file}.cyberdeck-${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
+    renameSync(tmp, file);
+    return true;
+  } catch (err) {
+    console.warn(`sessions: could not pre-trust ${cwd} for Claude Code: ${err}`);
+    return false;
+  }
 }
 
 function loginShell(): string {
@@ -138,7 +163,8 @@ export class SessionManager {
     let warning: string | null = null;
     if (!existsSync(cwd)) { warning = `cyberdeck: ${cwd} does not exist on this node; starting in ${homedir()}`; cwd = homedir(); }
     const cmd = (opts.cmd ?? "").trim() || null;
-    const tool: Tool = opts.tool ?? (cmd ? "shell" : "shell");
+    const tool: Tool = opts.tool ?? "shell";
+    if (tool === "cc" || (cmd && /^claude(\s|$)/.test(cmd))) trustClaudeDir(cwd);
     let runner: Runner = opts.runner ?? "pty";
     const title = (opts.title ?? "").trim() || (cmd ? cmd.split(" ")[0] : cwd.split("/").pop() || "~");
     const info: SessionInfo = { id, title, cwd, cmd, tool, prompt: opts.prompt ?? null, runner, state: "running", createdAt: Date.now(), exitedAt: null, exitCode: null, clients: 0, lastOutputAt: null, bells: 0, busy: false };

@@ -1,5 +1,8 @@
 import { test, expect, beforeAll, afterAll } from "bun:test";
 import { startTestServer, TEST_TOKEN, type TestServer } from "./helpers";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 
 let srv: TestServer;
 beforeAll(() => { srv = startTestServer(); });
@@ -122,3 +125,27 @@ test("capabilities endpoint reports booleans; tmux can be disabled by env", asyn
     await srv.api(`/api/sessions/${s.id}`, { method: "DELETE" });
   } finally { delete process.env.CYBERDECK_SESSIONS_TMUX; }
 }, 20000);
+
+test("starting a cc session pre-accepts Claude Code's folder trust for that directory", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cyberdeck-claude-cfg-"));
+  writeFileSync(join(dir, ".claude.json"), JSON.stringify({ numStartups: 3, projects: { "/elsewhere": { allowedTools: ["Bash"], hasTrustDialogAccepted: true } } }));
+  process.env.CLAUDE_CONFIG_DIR = dir;
+  try {
+    // tool "cc" with a harmless command (we are not launching claude in a test)
+    const s = await create({ cwd: "~", cmd: "echo trusted", tool: "cc", runner: "pty" });
+    const cfg = JSON.parse(readFileSync(join(dir, ".claude.json"), "utf8"));
+    expect(cfg.projects[s.cwd].hasTrustDialogAccepted).toBe(true);
+    expect(cfg.projects["/elsewhere"].allowedTools).toEqual(["Bash"]); // existing entries untouched
+    expect(cfg.numStartups).toBe(3);
+    await srv.api(`/api/sessions/${s.id}`, { method: "DELETE" });
+    // a shell session does not touch it
+    const t = await create({ cwd: "/", cmd: "echo nope", tool: "shell", runner: "pty" });
+    expect(JSON.parse(readFileSync(join(dir, ".claude.json"), "utf8")).projects["/"]).toBeUndefined();
+    await srv.api(`/api/sessions/${t.id}`, { method: "DELETE" });
+    // an unparseable config is left alone rather than clobbered
+    writeFileSync(join(dir, ".claude.json"), "{not json");
+    const u = await create({ cwd: "~", cmd: "echo x", tool: "cc", runner: "pty" });
+    expect(readFileSync(join(dir, ".claude.json"), "utf8")).toBe("{not json");
+    await srv.api(`/api/sessions/${u.id}`, { method: "DELETE" });
+  } finally { delete process.env.CLAUDE_CONFIG_DIR; rmSync(dir, { recursive: true, force: true }); }
+});
