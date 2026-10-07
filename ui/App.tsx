@@ -12,6 +12,7 @@ import { Editor } from "./views/Editor";
 import { Term } from "./views/Term";
 import { Cmux } from "./views/Cmux";
 import { TokenGate } from "./views/TokenGate";
+import { PromptBar } from "./components/PromptBar";
 
 const NAV = [
   { view: "fleet", label: "Fleet", icon: ServerIcon },
@@ -20,7 +21,7 @@ const NAV = [
   { view: "services", label: "Services", icon: PulseIcon },
   { view: "data", label: "Data", icon: GitIcon },
   { view: "files", label: "Files", icon: FolderIcon },
-  { view: "term", label: "Terminal", icon: TerminalIcon },
+  { view: "term", label: "Sessions", icon: TerminalIcon },
   { view: "cmux", label: "cmux", icon: GridIcon },
 ];
 
@@ -149,6 +150,9 @@ export function App() {
 
         <main className="min-w-0 flex-1 overflow-hidden">{view}</main>
       </div>
+
+      {/* sticky prompt bar: start sessions from anywhere; live sessions strip */}
+      <PromptBar route={route} nodeName={fleet?.self.name ?? "local"} />
 
       {/* status bar (desktop) */}
       <footer className="hud-chrome hidden h-6 shrink-0 items-center gap-4 border-t px-3 text-[10px] uppercase tracking-wider text-zinc-500 sm:flex">

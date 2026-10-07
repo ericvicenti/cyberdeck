@@ -293,7 +293,61 @@ test("terminal: runs shell commands end-to-end", async () => {
     const text = await page.textContent('[data-testid="terminal-host"]');
     return text?.includes(play.split("/").pop()!) ?? false;
   });
+  // the deep link became a durable session: the URL now names it
+  expect(page.url()).toMatch(/#\/term\?session=[0-9a-f]{8}/);
 }, 30000);
+
+test("sessions survive leaving the view and reload; the strip leads back in", async () => {
+  const url = page.url();
+  const id = url.match(/session=([0-9a-f]{8})/)![1];
+  await page.goto(`${BASE}/#/fleet`);
+  await page.waitForSelector('[data-testid="session-chip"]');
+  // output produced while nobody is attached is replayed on return
+  const res = await fetch(`${BASE}/api/sessions/${id}/input`, { method: "POST", headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" }, body: JSON.stringify({ data: "echo while_away_$((3*3))", enter: true }) });
+  expect(res.ok).toBe(true);
+  await page.click('[data-testid="session-chip"]');
+  await page.waitForSelector("text=live");
+  await waitFor(async () => (await page.textContent('[data-testid="terminal-host"]'))?.includes("while_away_9") ?? false);
+  expect(page.url()).toContain(`session=${id}`);
+  await page.reload();
+  await page.waitForSelector("text=live");
+  await waitFor(async () => (await page.textContent('[data-testid="terminal-host"]'))?.includes("e2e_42") ?? false);
+}, 30000);
+
+test("prompt bar: plans a harness from the text and starts a session from any view", async () => {
+  await page.goto(`${BASE}/#/files?path=${encodeURIComponent(play)}`);
+  await page.waitForSelector('[data-testid="files-table"]');
+  await page.fill('[data-testid="prompt-input"]', "cx: look at this");
+  await page.waitForSelector('[data-testid="plan-chips"]');
+  expect(await page.textContent('[data-testid="plan-tool"]')).toContain("cx");
+  expect(await page.textContent('[data-testid="plan-reasons"]')).toContain("prefix");
+  // the Files view's directory is the proposed working directory
+  expect(await page.textContent('[data-testid="plan-cwd"]')).toContain(play.split("/").pop()!);
+  // click the tool chip to cycle: cx -> shell (pinned)
+  await page.click('[data-testid="plan-tool"]');
+  expect(await page.textContent('[data-testid="plan-tool"]')).toContain("shell");
+  expect(await page.textContent('[data-testid="plan-chips"]')).toContain("pinned");
+  // a $ command needs no agent: Enter starts it and lands in its terminal
+  await page.fill('[data-testid="prompt-input"]', "$ echo from_bar_$((5*5)) && pwd");
+  await page.press('[data-testid="prompt-input"]', "Enter");
+  await page.waitForSelector("text=live");
+  await waitFor(async () => (await page.textContent('[data-testid="terminal-host"]'))?.includes("from_bar_25") ?? false);
+  expect(page.url()).toMatch(/#\/term\?session=/);
+  // it ran in the Files directory and shows up as a tab and a live chip
+  await waitFor(async () => (await page.textContent('[data-testid="terminal-host"]'))?.includes(play.split("/").pop()!) ?? false);
+  expect((await page.$$('[data-testid="term-tab"]')).length).toBeGreaterThanOrEqual(1);
+  expect(await page.textContent('[data-testid="session-strip"]')).toContain("sh echo from_bar");
+  // background start (meta+Enter) keeps you where you are
+  await page.fill('[data-testid="prompt-input"]', "$ sleep 30");
+  await page.press('[data-testid="prompt-input"]', "Meta+Enter");
+  await waitFor(async () => ((await page.textContent('[data-testid="prompt-note"]').catch(() => "")) ?? "").includes("started sh sleep 30"));
+  expect(page.url()).toContain("session=");
+  // kill it from the tab bar (dialogs auto-accept)
+  await page.waitForSelector('[data-testid="term-tab"]:has-text("sleep 30")');
+  const before = (await page.$$('[data-testid="term-tab"]')).length;
+  await page.click(`[data-testid="term-tab"]:has-text("sleep 30") >> text=×`);
+  await waitFor(async () => (await page.$$('[data-testid="term-tab"]')).length === before - 1);
+}, 45000);
 
 // ---- fleet: pair a second daemon through the UI, then browse it remotely ----
 let daemon2: Subprocess | undefined;

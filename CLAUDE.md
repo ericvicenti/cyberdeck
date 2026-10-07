@@ -45,4 +45,19 @@ Gotchas:
 - node-pty does not work under Bun; the web terminal uses `bun-pty`.
 - Playwright e2e needs `bunx playwright install chromium` once per machine.
 
-cmux: `src/daemon/api/cmux.ts` drives Eric's cmux terminal multiplexer through its CLI (`/Applications/cmux.app/Contents/Resources/bin/cmux` or PATH) with validated argv only; `ui/views/Cmux.tsx` is the view. Terminal tabs + agent launch live in `ui/lib/terms.ts`, `ui/views/Term.tsx`, `ui/views/Agents.tsx`.
+cmux: `src/daemon/api/cmux.ts` drives Eric's cmux terminal multiplexer through its CLI (`/Applications/cmux.app/Contents/Resources/bin/cmux` or PATH) with validated argv only; `ui/views/Cmux.tsx` is the view.
+
+Live sessions + prompt bar: a terminal is a daemon-owned session (`src/daemon/sessions.ts`, routes in
+`src/daemon/api/sessions.ts`: `/api/sessions`, WS `/api/sessions/:id/attach`, `/api/harness/caps`), not a
+per-WebSocket PTY, so it keeps running when the browser leaves and any number of clients can attach and get the
+backlog replayed. Runner `tmux` (session `cd-<id>`, re-attached on boot) survives daemon restarts; runner `pty` does
+not, and `setUpdateGuard` defers auto-updates while any pty session runs (manual `POST /api/system/update` still
+applies). Remote nodes: REST through `/api/nodes/:id/proxy/sessions…`, attach through `/api/nodes/:id/sessions/:sid/attach`.
+The sticky prompt bar (`ui/components/PromptBar.tsx`, mounted in `App.tsx`) starts sessions from any view; the
+auto harness selector is the pure planner `src/shared/harness.ts` (shared by UI and tests): `$ cmd` = shell,
+`cc:`/`cx:` prefixes, `@node`, `#project`, plus plain mentions of hosts, projects, repos, "claude"/"codex"; it
+uses the project's `hosts` to pick the machine and each node's caps (claude/codex/tmux on the login shell PATH) to
+pick agent and runner, and reports `reasons` + `pinned` for the chips. `ui/lib/sessions.ts` is the client
+(explicit node addressing, `useLiveSessions` polls every online node); `ui/views/Term.tsx` is tabs-over-sessions;
+`ui/lib/terms.ts` keeps `openTerminal` for other views. `/api/term` (ephemeral PTY) still exists for the fleet proxy
+and tests. Tests: `tests/sessions.test.ts`, `tests/harness.test.ts`, e2e "prompt bar"/"sessions survive".

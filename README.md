@@ -42,6 +42,14 @@ Cyberdeck manages itself.
 
 ## Agents
 
+The prompt bar at the bottom of every view starts an agent session with one line: type the task, and the
+auto harness selector proposes the machine, the agent (Claude Code `cc` or Codex `cx`), the project directory
+and the runner from what you wrote and where you are (`@yacht`, `#seed`, `cc:`/`cx:`, or `$ cmd` for a plain
+shell; or just mention a host, project or repo). Every choice is a chip you can override before sending.
+Sessions are owned by the daemon, so they keep running when you close the tab; the live strip above the bar
+and the Sessions view lead back into them from any browser, and tmux-backed sessions survive daemon updates
+(`tmux attach -t cd-<id>` works from a real terminal too).
+
 Cyberdeck is an MCP server for [Seed Agents](https://hyper.media) and any other MCP client:
 `POST /api/mcp` (Streamable HTTP, bearer token). Its tools expose the node and the deck: repo
 risk, hosts and services, the project tree, the agents' handoff, the cross-host session index,

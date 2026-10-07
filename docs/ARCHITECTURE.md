@@ -599,6 +599,12 @@ hashes but scans must be fast (300 project dirs ≈ minutes, not hours).
 | POST | `/api/control/collab/tick`, `/run`, `/add`, `/auto` | `{id}` / task fields / `{auto}` | start the next or a given collab run (detached `fleet collab …`), add a task, toggle the auto scheduler (persisted) |
 | GET | `/api/control/collab/runs/:id/log` | `?file=worker.log\|reviewer.log\|result.md&tail=` | `{text, size}` tail of a run log under `~/.fleet/runs/<id>/` |
 | POST | `/api/control/sync` | — | runs `fleet sync` |
+| GET/POST | `/api/sessions` | `{cwd?, cmd?, title?, tool?: cc\|cx\|shell, prompt?, runner?: tmux\|pty, cols?, rows?}` | list live sessions / start one (daemon-owned PTY; `~` in `cwd` expands on the node; `tmux` falls back to `pty` when tmux is missing) → `SessionInfo {id, title, cwd, cmd, tool, prompt, runner, state: running\|exited\|lost, createdAt, exitedAt, exitCode, clients, lastOutputAt, bells, busy}` |
+| GET/DELETE | `/api/sessions/:id` | — | one session / kill it (and its tmux session) and forget the row |
+| POST | `/api/sessions/:id/input`, `/rename` | `{data, enter?}` / `{title}` | type into a session without attaching / rename |
+| WS | `/api/sessions/:id/attach` | `?cols=&rows=` | attach: `{t:"hello", session}` then the backlog as `{t:"data", replay:true}`, then live `{t:"data"}`; client sends `{t:"input"}` / `{t:"resize"}`; `{t:"exit", code}` when the shell ends (an exited session replays its last screen and closes) |
+| WS | `/api/nodes/:id/sessions/:sid/attach` | — | same, piped to a peer (REST goes through `/api/nodes/:id/proxy/sessions…`) |
+| GET | `/api/harness/caps` | `?refresh=1` | `{cc, cx, tmux, cmux}`: what this node's login shell can run; feeds the auto harness selector |
 | POST | `/api/mcp` | JSON-RPC (MCP Streamable HTTP, stateless; GET/DELETE answer 405) | the MCP tool server for Seed Agents and other MCP clients: `status`, `fleet_status`, `hosts`, `projects`, `todo`, `handoff`, `sessions`, `repos`, `services`, `collab_tasks`, `collab_add`, `collab_run`, `run_log`, `note`, `scan` (docs/AGENTS.md); same auth as every `/api` route |
 | GET | `/api/roots` | — | scan roots with last-scan summaries |
 | POST | `/api/roots` | `{path}` | adds root (also persisted to config) |

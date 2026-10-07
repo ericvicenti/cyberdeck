@@ -211,12 +211,10 @@ export function registerFleetRoutes(
     }
   });
 
-  // WebSocket terminal proxy: pipe browser <-> peer /api/term.
-  app.get(
-    "/api/nodes/:id/term",
+  // WebSocket proxies: pipe browser <-> a peer WebSocket endpoint.
+  const proxyWs = (peerPath: (c: any, node: NodeRow) => string) =>
     upgradeWebSocket((c: any) => {
       const node = getNode(c.req.param("id"));
-      const cwd = c.req.query("cwd");
       let peer: WebSocket | null = null;
       const pending: string[] = [];
       return {
@@ -226,8 +224,7 @@ export function registerFleetRoutes(
             ws.close();
             return;
           }
-          const wsUrl = node.url.replace(/^http/, "ws") + `/api/term?token=${encodeURIComponent(node.token)}${cwd ? `&cwd=${encodeURIComponent(cwd)}` : ""}`;
-          peer = new WebSocket(wsUrl);
+          peer = new WebSocket(node.url.replace(/^http/, "ws") + peerPath(c, node));
           peer.onopen = () => {
             for (const msg of pending.splice(0)) peer!.send(msg);
           };
@@ -250,6 +247,8 @@ export function registerFleetRoutes(
           peer = null;
         },
       };
-    })
-  );
+    });
+  // Ephemeral terminal on a peer (/api/term) and attach to a peer's live session.
+  app.get("/api/nodes/:id/term", proxyWs((c, node) => { const cwd = c.req.query("cwd"); return `/api/term?token=${encodeURIComponent(node.token)}${cwd ? `&cwd=${encodeURIComponent(cwd)}` : ""}`; }));
+  app.get("/api/nodes/:id/sessions/:sid/attach", proxyWs((c, node) => { const q = new URLSearchParams({ token: node.token }); for (const k of ["cols", "rows"]) { const v = c.req.query(k); if (v) q.set(k, v); } return `/api/sessions/${encodeURIComponent(c.req.param("sid"))}/attach?${q}`; }));
 }

@@ -44,14 +44,15 @@ export function startTestServer(
   const token = opts.token ?? TEST_TOKEN;
   const db = new Database(":memory:");
   initSchema(db);
-  const { fetch: appFetch, websocket } = createServer(db, cfg, token, opts.nodeId ?? "stw-test");
+  const { fetch: appFetch, websocket, sessions } = createServer(db, cfg, token, opts.nodeId ?? "stw-test");
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: appFetch, websocket });
   const base = `http://127.0.0.1:${server.port}`;
   return {
     db,
     base,
     wsBase: `ws://127.0.0.1:${server.port}`,
-    stop: () => server.stop(true),
+    // Kill daemon-held PTYs first; stop() is not awaited so a straggling socket cannot hang the hook.
+    stop: () => { sessions.close(); void server.stop(true); },
     api: (path, init) =>
       fetch(`${base}${path}`, {
         ...init,

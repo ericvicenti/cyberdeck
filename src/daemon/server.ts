@@ -18,7 +18,9 @@ import { registerControlRoutes } from "./api/control";
 import { registerCmuxRoutes } from "./api/cmux";
 import { registerMcpRoutes } from "./api/mcp";
 import { nodeStatus } from "./status";
-import { currentCommit, checkForUpdate, applyUpdate } from "./updater";
+import { registerSessionRoutes } from "./api/sessions";
+import { SessionManager } from "./sessions";
+import { currentCommit, checkForUpdate, applyUpdate, setUpdateGuard } from "./updater";
 
 const UI_DIST = join(import.meta.dir, "../../dist/ui");
 export const VERSION = "0.4.0";
@@ -170,6 +172,13 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   registerCmuxRoutes(app);
   registerMcpRoutes(app, db, cfg, control, { status, version: VERSION });
 
+  // Live sessions (daemon-owned PTYs). tmux-backed ones survive restarts; a
+  // self-update is deferred while plain pty sessions are still running.
+  const sessions = new SessionManager(db);
+  sessions.recover().catch((err) => console.error("session recovery failed:", err));
+  setUpdateGuard(() => { const n = sessions.fragileCount(); return n ? `${n} live session(s) would be killed` : null; });
+  registerSessionRoutes(app, sessions, upgradeWebSocket, (c) => Boolean(authByReq.get(c.req.raw)));
+
   app.get(
     "/api/term",
     upgradeWebSocket((c) => {
@@ -207,5 +216,5 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   app.use("/*", serveStatic({ root: UI_DIST }));
   app.get("*", serveStatic({ path: join(UI_DIST, "index.html") }));
 
-  return { fetch: app.fetch, websocket };
+  return { fetch: app.fetch, websocket, sessions };
 }

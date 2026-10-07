@@ -83,12 +83,17 @@ export function nudgePeer(node: { id: string; url: string; token: string }): voi
 }
 
 let lastSelfCheck = 0;
+let guard: () => string | null = () => null;
+/** Register a veto for automatic updates (e.g. live sessions that would die). Manual updates ignore it. */
+export function setUpdateGuard(fn: () => string | null): void { guard = fn; }
 export function maybeSelfUpdate(reason: string): void {
   if (updating || Date.now() - lastSelfCheck < NUDGE_INTERVAL_MS) return;
   lastSelfCheck = Date.now();
   checkForUpdate()
     .then((r) => {
       if (r.behind > 0) {
+        const veto = guard();
+        if (veto) { console.log(`auto-update (${reason}) deferred: ${veto}`); lastSelfCheck = 0; return; }
         console.log(`auto-update (${reason}): ${r.behind} commit(s) behind origin`);
         return applyUpdate();
       }
