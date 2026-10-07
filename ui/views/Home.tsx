@@ -130,6 +130,43 @@ function NodeCard(props: { name: string; subtitle: string; online: boolean; stat
 
 // --------------------------------------------------------------------- home ----
 
+type CaseworkPairing = { url: string; key: string; link: string; qr: string; devices: { id: string; info?: { name?: string; model?: string } }[] };
+/** Pairing card for the Casework Desk iPad/iPhone app: scan the QR (or type URL + key) in its Server settings. */
+function CaseworkCard() {
+  const [pairing, setPairing] = useState<CaseworkPairing | null>(null);
+  const [err, setErr] = useState("");
+  const [copied, setCopied] = useState("");
+  const load = async () => {
+    try { setPairing(await api<CaseworkPairing>(`/api/casework/pairing?url=${encodeURIComponent(location.origin)}`)); setErr(""); }
+    catch (e) { setErr(e instanceof ApiError && e.status === 403 ? "sign in with the token or over the tailnet to see the pairing key" : String(e)); }
+  };
+  useEffect(() => { void load(); const t = setInterval(() => void load(), 15_000); return () => clearInterval(t); }, []);
+  const copy = async (what: string, value: string) => { try { await navigator.clipboard.writeText(value); setCopied(what); setTimeout(() => setCopied(""), 1500); } catch {} };
+  return (
+    <div className="mt-3 hud-card p-4" data-testid="casework-card">
+      <div className="flex flex-wrap items-start gap-5">
+        {pairing ? <div className="shrink-0 rounded-lg border border-cyan-900/60 bg-[#e8fbff] p-1" dangerouslySetInnerHTML={{ __html: pairing.qr.replace(/width="\d+" height="\d+"/, 'width="168" height="168"') }} /> : null}
+        <div className="min-w-0 flex-1">
+          <div className="hud-label neon">iPad / iPhone client</div>
+          <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+            In Casework Desk open <span className="text-zinc-300">Server settings</span> and scan this code, or enter the address and key by hand. The key only reaches the screens the app needs; it is not the node token.
+          </p>
+          {err ? <div className="mt-2 text-[11px] text-red-400">{err}</div> : null}
+          {pairing ? (
+            <div className="mt-3 flex flex-col gap-1.5 font-mono text-[11px]">
+              <div className="flex items-center gap-2"><span className="w-12 text-zinc-500">url</span><span className="truncate text-zinc-200">{pairing.url}</span><button onClick={() => copy("url", pairing.url)} className="hud-chip">{copied === "url" ? "copied" : "copy"}</button></div>
+              <div className="flex items-center gap-2"><span className="w-12 text-zinc-500">key</span><span className="truncate text-zinc-200">{pairing.key}</span><button onClick={() => copy("key", pairing.key)} className="hud-chip">{copied === "key" ? "copied" : "copy"}</button></div>
+              <div className="flex items-center gap-2"><span className="w-12 text-zinc-500">link</span><button onClick={() => copy("link", pairing.link)} className="hud-chip">{copied === "link" ? "copied" : "copy pairing link"}</button>
+                <button onClick={async () => { if (!confirm("Rotate the Casework key? Paired devices must re-pair.")) return; await post("/api/casework/rotate", {}); await load(); }} className="hud-chip text-red-300">rotate key</button></div>
+              <div className="mt-1 text-zinc-500">devices: {pairing.devices.length ? pairing.devices.map((d) => d.info?.name ?? d.info?.model ?? d.id.slice(0, 8)).join(", ") : "none connected"}</div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Home({ onLocked }: { onLocked: () => void }) {
   const [info, setInfo] = useState<FleetInfo | null>(null);
   const [selfStatus, setSelfStatus] = useState<NodeStatus | null>(null);
@@ -444,6 +481,9 @@ export function Home({ onLocked }: { onLocked: () => void }) {
             )}
           </div>
         </div>
+
+        <h2 className="hud-label neon-magenta mt-8">Casework Desk</h2>
+        <CaseworkCard />
 
         <p className="mt-6 text-[10px] leading-relaxed text-zinc-600">
           Pairing exchanges access tokens directly between the two machines over your local network, gated by the one-time code. Only pair on networks you trust. Remote machines are reached through this node — no ports are opened to the internet.

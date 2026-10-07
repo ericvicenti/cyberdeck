@@ -17,6 +17,7 @@ import { registerMediaRoutes, cleanupHlsCache } from "./api/media";
 import { registerControlRoutes } from "./api/control";
 import { registerCmuxRoutes } from "./api/cmux";
 import { registerMcpRoutes } from "./api/mcp";
+import { registerCaseworkRoutes } from "./api/casework";
 import { nodeStatus } from "./status";
 import { registerSessionRoutes } from "./api/sessions";
 import { registerDashboardRoutes } from "./api/dashboard";
@@ -26,13 +27,17 @@ import { currentCommit, checkForUpdate, applyUpdate, setUpdateGuard } from "./up
 const UI_DIST = join(import.meta.dir, "../../dist/ui");
 export const VERSION = "0.4.0";
 
-export type AuthInfo = { method: "token" | "tailscale"; login?: string; node?: string };
+// "casework" = the Casework Desk app's pairing key: scoped to the routes the app needs (api/casework.ts).
+export type AuthInfo = { method: "token" | "tailscale" | "casework"; login?: string; node?: string };
 export type ServerOptions = {
   /** Override peer-address lookup (tests inject tailnet/LAN addresses). Default: Bun's server.requestIP. */
   requestIp?: (c: { req: { raw: Request } }) => string | null;
   tailscale?: Tailscale;
   /** Write a detected owner into config.json (default true; tests turn it off). */
   persistOwner?: boolean;
+  /** Casework Desk: where experience .tsx files live (default repo `casework/`) and a fixed pairing key (tests). */
+  caseworkExperiencesDir?: string;
+  caseworkKey?: string;
 };
 
 export function createServer(db: Database, cfg: CyberdeckConfig, token: string, nodeId = "stw-dev", opts: ServerOptions = {}) {
@@ -65,8 +70,11 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   // by WebSocket upgrade handlers and the pairing route.
   const authByReq = new WeakMap<Request, AuthInfo>();
   const seenIdentities = new Set<string>();
+  let casework: ReturnType<typeof registerCaseworkRoutes> | null = null; // assigned below; consulted at request time
   const authenticate = async (c: any): Promise<AuthInfo | null> => {
     if (tokenOk(c)) return { method: "token" };
+    const bearer = (c.req.header("authorization") ?? "").replace(/^Bearer /, "");
+    if (bearer && casework && casework.matches(bearer)) return { method: "casework" };
     const ip = peerIp(c);
     if (!ip || !owner) return null;
     // `tailscale serve` (HTTPS front door) proxies from loopback and stamps the
@@ -112,6 +120,7 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
     // through the fleet proxy for remote playback.
     if (c.req.method === "GET" && /^\/api\/(nodes\/[^/]+\/proxy\/)?media\/hls\//.test(c.req.path)) return next();
     if (!auth) return c.json({ error: "unauthorized" }, 401);
+    if (auth.method === "casework" && !(casework?.allows(c.req.method, c.req.path) ?? false)) return c.json({ error: "forbidden for the Casework pairing key" }, 403);
     await next();
   });
 
@@ -171,6 +180,7 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   registerFleetRoutes(app, db, cfg, nodeId, token, upgradeWebSocket, { tailscale: ts, authedViaTailscale });
   const control = registerControlRoutes(app, cfg);
   registerCmuxRoutes(app);
+  casework = registerCaseworkRoutes(app, { token, nodeName: cfg.nodeName, upgradeWebSocket, isFullAuth: (c) => { const m = authByReq.get(c.req.raw)?.method; return m === "token" || m === "tailscale"; }, experiencesDir: opts.caseworkExperiencesDir, key: opts.caseworkKey });
   registerDashboardRoutes(app, db, cfg);
   registerMcpRoutes(app, db, cfg, control, { status, version: VERSION });
 

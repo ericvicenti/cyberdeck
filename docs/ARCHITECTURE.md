@@ -589,7 +589,16 @@ hashes but scans must be fast (300 project dirs ≈ minutes, not hours).
 | POST | `/api/nodes/pairing/complete` | `{code, endpoint}` | `{node}` (dials endpoint, verifies code, exchanges pubkeys) |
 | DELETE | `/api/nodes/:id` | — | revoke pairing |
 | ANY | `/api/nodes/:id/proxy/*` | any | transparently forwards the request to that node's API over the authenticated WS tunnel; this is how "administer every node from any node" works — remote UIs reuse the same routes |
-| GET | `/api/auth/whoami` | — | `{method:"token"\|"tailscale"\|"none", login?, node?}`: how this caller is authenticated (never 401; see SECURITY §4.5) |
+| GET | `/api/auth/whoami` | — | `{method:"token"\|"tailscale"\|"casework"\|"none", login?, node?}`: how this caller is authenticated (never 401; see SECURITY §4.5). `casework` = the Casework Desk pairing key, scoped by `caseworkAllows` (api/casework.ts) |
+| GET | `/health` | — | `{ok:true}`, no auth: the Casework Desk app's liveness probe |
+| GET | `/api/state` | — | Casework Desk: `{scene, revision, devices, events, presets, voice}`; the scene is a `RemoteModule` named `cyberdeck` |
+| GET | `/api/modules/:name` | `?v=` | Casework Desk: `casework/<name>.tsx` bundled by `Bun.build` to CommonJS (native modules stay `require()`), wrapped in an error boundary |
+| POST | `/api/experiences/validate` · GET `/api/experience-status` · POST `/api/experiences/error` | — | recompile all experiences (broadcasts `modules.changed`) / compile status / a device's crash report |
+| POST | `/api/command` | `{deviceId?, action:{name,args}}` | deliver a native action to connected devices → 202 `{id, sent}` or 409 when none |
+| PUT/GET | `/api/media/:name` | bytes | uploads from the app into `~/.cyberdeck/casework-media` (80 MiB max) |
+| GET | `/api/casework/pairing` | `?url=` | full auth only: `{url, key, link, qr(svg), devices}` for the Home page card; POST `/api/casework/rotate` replaces the key and drops devices |
+| POST | `/api/casework/run` | `{cwd, cmd}` | bounded non-interactive command (60 s, `bash -lc`) for the app's Run screen → `{code, output}` |
+| WS | `/control` | first frame `{type:"hello", role:"device"\|"console", token, info}` | Casework Desk device socket: `welcome{id,scene,revision,voice,devices}`, then `ping/pong`, `scene`, `command/result`, `event`, `modules.changed`, `peer.left`; wrong key closes 4001 |
 | POST | `/api/fleet/pair-direct` | `{url}` | pair with a tailnet peer without a code (the peer trusts us as its owner via `tailscale whois`) |
 | GET | `/api/control/overview` | — | fleet dashboard: `{fleetDir, status, projects, todo, handoff, collab:{tasks,runs,auto}, services}` from the Fleet repo's CLI (20 s cache; `projects[].services` are `host/name` patterns the UI matches against `services.rows`, `status.hosts[].ssh` is the alias the UI uses to run commands on unpaired hosts); 404 `no fleet dir` when `fleetDir` is unset |
 | GET | `/api/control/sessions` | `?q=&host=&tool=` | cross-host agent session index (`fleet sessions --json`) |
