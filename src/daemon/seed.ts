@@ -172,6 +172,9 @@ export class SeedBridge {
           if (!/^[0-9a-fA-F]{64}$/.test(hex)) throw new Error("CYBERDECK_SEED_KEY_SEED must be 32 bytes of hex");
           this.#signer = blobs.nobleKeyPairFromSeed(Uint8Array.from(Buffer.from(hex, "hex")));
         } else {
+          if (typeof DecompressionStream === "undefined") {
+            throw new Error(`Bun ${Bun.version} cannot read the Seed vault; Bun 1.3.3 or newer is required. Run bun upgrade, then cyberdeck restart.`);
+          }
           const vault = await import("@seed-hypermedia/client/vault-local");
           const accounts = await vault.loadLocalVaultAccounts();
           if (!accounts) throw new Error("no local Seed vault found (is the Seed desktop app or daemon installed on this machine?)");

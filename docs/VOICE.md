@@ -34,7 +34,13 @@ the Casework pairing key reaches every `/api/voice/*` route except `setup`.
 [signed API](https://github.com/seed-hypermedia/seed/blob/main/hypermedia/agent/signed-api.md):
 every action is `{type: 'AgentsAction', signer, account, sig, protocol: 3, action: {..., ts}}`,
 signed with `@seed-hypermedia/client/blobs` and encoded with `@seed-hypermedia/client/cbor`. The
-signer is lazy:
+signer is lazy.
+
+Local vault loading requires **Bun 1.3.3 or newer** for `DecompressionStream`. If setup reports
+an unsupported runtime, run `bun upgrade`, then `cyberdeck restart` once active terminal sessions
+have finished. Updating Cyberdeck's source alone does not update the running Bun process.
+
+Identity sources:
 
 - `CYBERDECK_SEED_KEY_SEED` (32 bytes, hex) builds the keypair directly: tests and headless boxes.
 - Otherwise the local Seed vault (`@seed-hypermedia/client/vault-local`: the desktop app's

@@ -34,6 +34,8 @@ if ! command -v bun >/dev/null && [ ! -x "$HOME/.bun/bin/bun" ]; then
 fi
 export PATH="$HOME/.bun/bin:$PATH"
 BUN="$(command -v bun)"
+"$BUN" -e 'process.exit(typeof DecompressionStream === "function" ? 0 : 1)' \
+  || fail "Bun 1.3.3 or newer is required for Seed voice identity loading. Run: $BUN upgrade, then re-run this installer."
 
 # --- ffmpeg (media transcoding; non-fatal if it cannot be installed) --------
 if [ -z "${CYBERDECK_TEST:-}" ] && ! command -v ffmpeg >/dev/null; then
