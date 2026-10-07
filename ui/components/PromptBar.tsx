@@ -5,7 +5,8 @@
 // node, which is the way back into them.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { activeNode, api, type Route } from "../lib/api";
-import { planHarness, shortCwd, type Caps, type PlanOverrides, type Runner, type Tool } from "../../src/shared/harness";
+import { planHarness, shortCwd, type Caps, type PlanOverrides, type PlanRepo, type Runner, type Tool } from "../../src/shared/harness";
+import { apiOn } from "../lib/sessions";
 import { createSession, getCaps, openSession, useLiveSessions, type LiveSession } from "../lib/sessions";
 import { recentCwds, rememberCwd } from "../lib/terms";
 import type { Overview } from "../lib/control";
@@ -33,6 +34,7 @@ export function PromptBar({ route, nodeName }: { route: Route; nodeName: string 
   const [note, setNote] = useState<{ text: string; kind: "ok" | "err" } | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [caps, setCaps] = useState<Record<string, Caps | null>>({});
+  const [repos, setRepos] = useState<Record<string, PlanRepo[]>>({});
   const [editCwd, setEditCwd] = useState(false);
   const [pref, setPref] = useState<"cc" | "cx">(readPref);
   const ta = useRef<HTMLTextAreaElement>(null);
@@ -42,14 +44,23 @@ export function PromptBar({ route, nodeName }: { route: Route; nodeName: string 
   // Capabilities for every reachable node (cached per page).
   const nodeIds = useMemo(() => ["", ...(nodes?.nodes.filter((n) => n.online).map((n) => n.id) ?? [])], [nodes]);
   useEffect(() => { for (const id of nodeIds) if (!(id in caps)) getCaps(id).then((c) => setCaps((m) => ({ ...m, [id]: c }))); }, [nodeIds]);
+  // Every indexed checkout on every online node is a possible destination (refreshed every 5 min).
+  useEffect(() => {
+    let alive = true;
+    const load = () => { for (const id of nodeIds) apiOn<{ path: string; name: string }[]>(id, "/api/repos").then((rows) => { if (alive) setRepos((m) => ({ ...m, [id]: rows.map((r) => ({ node: id, name: r.path.split("/").pop() || r.name, path: r.path })) })); }).catch(() => {}); };
+    load();
+    const iv = setInterval(load, 5 * 60_000);
+    return () => { alive = false; clearInterval(iv); };
+  }, [nodeIds]);
+  const allRepos = useMemo(() => nodeIds.flatMap((id) => repos[id] ?? []), [repos, nodeIds]);
   useEffect(() => { if (note?.kind === "ok") { const t = setTimeout(() => setNote(null), 4000); return () => clearTimeout(t); } }, [note]);
 
   const planNodes = useMemo(() => [{ id: "", name: nodes?.self.name ?? nodeName, online: true, caps: caps[""] ?? null }, ...(nodes?.nodes ?? []).map((n) => ({ id: n.id, name: n.name, online: n.online, caps: caps[n.id] ?? null }))], [nodes, caps, nodeName]);
   const projects = useMemo(() => (overview?.projects ?? []).map((p) => ({ slug: p.slug, name: p.name, repos: p.repos, hosts: p.hosts })), [overview]);
   const context = useMemo(() => ({ node: activeNode(), ...contextFor(route, sessions) }), [route, sessions]);
-  const plan = useMemo(() => planHarness({ prompt: text, context, nodes: planNodes, projects, overrides, defaultTool: pref }), [text, context, planNodes, projects, overrides, pref]);
+  const plan = useMemo(() => planHarness({ prompt: text, context, nodes: planNodes, projects, repos: allRepos, overrides, defaultTool: pref }), [text, context, planNodes, projects, allRepos, overrides, pref]);
   const home = overview ? overview.fleetDir.replace(/\/Code\/[^/]+$/, "") : "";
-  const cwdOptions = useMemo(() => Array.from(new Set([...recentCwds(), ...(home ? [`${home}/Code`] : []), ...projects.flatMap((p) => p.repos.filter((r) => !r.includes("*")).map((r) => `~/Code/${r.replace(/\/.*$/, "")}`))])), [projects, home, focused]);
+  const cwdOptions = useMemo(() => Array.from(new Set([...recentCwds(), ...(home ? [`${home}/Code`] : []), ...(repos[plan.node] ?? []).map((r) => r.path), ...projects.flatMap((p) => p.repos.filter((r) => !r.includes("*")).map((r) => `~/Code/${r.replace(/\/.*$/, "")}`))])), [projects, home, focused, repos, plan.node]);
 
   const send = async (background: boolean) => {
     const t = text.trim();

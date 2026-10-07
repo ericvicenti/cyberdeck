@@ -108,3 +108,25 @@ test("missing tool on the target swaps to the other agent and warns if neither e
   const none = base().nodes.map((n) => (n.id === "" ? { ...n, caps: { cc: false, cx: false, tmux: false, cmux: false } } : n));
   expect(planHarness({ ...base(), nodes: none, prompt: "hello" }).reasons.join(" ")).toContain("warning: cc not found");
 });
+
+test("scanned repos: any indexed checkout is a destination, on whichever node has it", () => {
+  const repos = [
+    { node: "n-yacht", name: "LangKit", path: "/Users/eric/Code/LangKit" },
+    { node: "", name: "Supe", path: "/Users/eric/Code/Supe" },
+    { node: "n-yacht", name: "Supe", path: "/Users/eric/Code/Supe" },
+    { node: "n-iris", name: "OnlyOnIris", path: "/home/eric/Code/OnlyOnIris" },
+  ];
+  const lk = planHarness({ ...base(), repos, prompt: "add a tokenizer test to LangKit" });
+  expect(lk.node).toBe("n-yacht");
+  expect(lk.cwd).toBe("/Users/eric/Code/LangKit");
+  expect(lk.reasons.join(" ")).toContain("LangKit (checkout on yacht)");
+  // present on both machines: stay on the current one
+  const supe = planHarness({ ...base(), repos, prompt: "lint supe" });
+  expect(supe.node).toBe("");
+  expect(supe.cwd).toBe("/Users/eric/Code/Supe");
+  // only on an offline node: no match, default directory
+  expect(planHarness({ ...base(), repos, prompt: "fix OnlyOnIris" }).cwd).toBe("~/Code");
+  // #tag works for checkouts too; Deck projects still win for their own names
+  expect(planHarness({ ...base(), repos, prompt: "docs #langkit" }).cwd).toBe("/Users/eric/Code/LangKit");
+  expect(planHarness({ ...base(), repos, prompt: "ship the botical player" }).cwd).toBe("~/Code/BoticalMedia");
+});

@@ -16,6 +16,8 @@ export type Caps = { cc: boolean; cx: boolean; tmux: boolean; cmux: boolean };
 
 export type PlanNode = { id: string; name: string; online: boolean; caps?: Caps | null };
 export type PlanProject = { slug: string; name: string; repos: string[]; hosts: string[] };
+/** A git checkout the daemon on `node` has indexed (every repo, not only ones a Deck project claims). */
+export type PlanRepo = { node: string; name: string; path: string };
 export type PlanContext = { node: string; cwd?: string | null; project?: string | null };
 export type PlanOverrides = { node?: string; tool?: Tool; cwd?: string; runner?: Runner };
 
@@ -25,6 +27,7 @@ export type PlanInput = {
   /** All nodes including self; self has id "" (the UI's "local"). */
   nodes: PlanNode[];
   projects: PlanProject[];
+  repos?: PlanRepo[];
   overrides?: PlanOverrides;
   /** Default agent when nothing else decides (user preference). */
   defaultTool?: "cc" | "cx";
@@ -78,7 +81,12 @@ export function planHarness(input: PlanInput): Plan {
   let node: PlanNode | null = null;
   let project: PlanProject | null = null;
   let repo: string | null = null; // a specific repo named in the prompt
+  let scanned: PlanRepo | null = null; // an indexed checkout named in the prompt
   let cwd: string | null = null;
+  const repos = input.repos ?? [];
+  const nodeOk = (id: string) => { const n = nodes.find((x) => x.id === id); return !!n && (n.id === "" || n.online); };
+  /** Prefer a checkout on the current node, then any online node. */
+  const pickRepo = (cands: PlanRepo[]): PlanRepo | null => cands.find((r) => r.node === input.context.node) ?? cands.find((r) => nodeOk(r.node)) ?? null;
 
   // ---- explicit syntax ----
   const shell = text.match(/^[$!]\s+(.+)$/s);
@@ -93,9 +101,14 @@ export function planHarness(input: PlanInput): Plan {
   });
   text = text.replace(/(^|\s)#([\w.-]+)/g, (m, sp, tag) => {
     const p = input.projects.find((x) => x.slug.toLowerCase() === tag.toLowerCase() || x.name.toLowerCase() === tag.toLowerCase() || x.repos.some((r) => repoName(r).toLowerCase() === tag.toLowerCase()));
-    if (!p) return m;
-    project = p; reasons.push(`#${tag}: project ${p.name}`);
-    repo = p.repos.map(repoName).find((r) => r.toLowerCase() === tag.toLowerCase()) ?? null;
+    if (p) {
+      project = p; reasons.push(`#${tag}: project ${p.name}`);
+      repo = p.repos.map(repoName).find((r) => r.toLowerCase() === tag.toLowerCase()) ?? null;
+      return sp;
+    }
+    const r = pickRepo(repos.filter((x) => x.name.toLowerCase() === tag.toLowerCase()));
+    if (!r) return m;
+    scanned = r; reasons.push(`#${tag}: checkout ${shortCwd(r.path)}`);
     return sp;
   });
   text = text.replace(/\s{2,}/g, " ").trim();
@@ -119,6 +132,18 @@ export function planHarness(input: PlanInput): Plan {
       }
     }
     if (best) { project = best.p; repo = best.repo; reasons.push(best.repo ? `mentions ${best.repo} (${best.p.name})` : `mentions ${best.p.name}`); }
+    // Any indexed checkout counts too (a longer repo name beats a shorter project match).
+    let bestRepo: { r: PlanRepo; len: number } | null = null;
+    const seen = new Set<string>();
+    for (const r of repos) {
+      const key = r.name.toLowerCase();
+      if (r.name.length < 3 || seen.has(key) || (best && best.len >= r.name.length)) continue;
+      if (!wordRe(r.name).test(text)) continue;
+      seen.add(key);
+      const pick = pickRepo(repos.filter((x) => x.name.toLowerCase() === key));
+      if (pick && (!bestRepo || r.name.length > bestRepo.len)) bestRepo = { r: pick, len: r.name.length };
+    }
+    if (bestRepo) { scanned = bestRepo.r; project = null; repo = null; reasons.push(`mentions ${bestRepo.r.name} (checkout on ${nodes.find((n) => n.id === bestRepo!.r.node)?.name ?? "node"})`); }
   }
 
   // ---- context fallbacks ----
@@ -130,6 +155,7 @@ export function planHarness(input: PlanInput): Plan {
 
   // ---- node ----
   if (ov.node !== undefined) { node = nodes.find((n) => n.id === ov.node) ?? self; pinned.push("node"); }
+  else if (!node && scanned) node = nodes.find((n) => n.id === (scanned as PlanRepo).node) ?? self;
   else if (!node) {
     const current = nodes.find((n) => n.id === input.context.node) ?? self;
     const hosts = project ? (project as PlanProject).hosts : [];
@@ -144,6 +170,8 @@ export function planHarness(input: PlanInput): Plan {
 
   // ---- cwd ----
   if (ov.cwd !== undefined) { cwd = ov.cwd; pinned.push("cwd"); }
+  else if (scanned && (scanned as PlanRepo).node === node.id) cwd = (scanned as PlanRepo).path;
+  else if (scanned) cwd = `~/Code/${(scanned as PlanRepo).name}`;
   else if (projRepo) cwd = `~/Code/${projRepo}`;
   else if (input.context.cwd && (node.id === input.context.node)) { cwd = input.context.cwd; reasons.push(`current directory ${shortCwd(cwd)}`); }
   else cwd = "~/Code";

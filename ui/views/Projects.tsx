@@ -4,6 +4,9 @@ import { type Overview, type Project, type Session, type ServiceRow, pill, isoAg
 import { openTerminal, launchCmd, resumeCmd } from "../lib/terms";
 import { useFleetNodes, openOnHost } from "../lib/hosts";
 import { Markdown } from "./Markdown";
+import { openTerminal } from "../lib/terms";
+
+const UNASSIGNED = "_repos";
 
 type Repo = { id: number; path: string; name: string; head_branch: string | null; dirty_files: number; untracked_files: number; stashes: number; ahead: number; risk: string; last_commit_at: number | null };
 
@@ -14,6 +17,7 @@ export function Projects({ params, onLocked }: { params: URLSearchParams; onLock
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const nodes = useFleetNodes();
+  const [repoQ, setRepoQ] = useState("");
   const selected = params.get("p") ?? "";
 
   const load = async () => {
@@ -37,8 +41,12 @@ export function Projects({ params, onLocked }: { params: URLSearchParams; onLock
   }, [ov?.fleetDir]);
 
   const projects = ov?.projects ?? [];
-  const current: Project | undefined = projects.find((p) => p.slug === selected) ?? projects[0];
   const parent = useMemo(() => (current?.parent ? projects.find((p) => p.slug === current.parent) : undefined), [projects, current]);
+  const showUnassigned = selected === UNASSIGNED;
+  const current: Project | undefined = showUnassigned ? undefined : projects.find((p) => p.slug === selected) ?? projects[0];
+  // Every indexed checkout that no project claims: the long tail Eric still thinks of as projects.
+  const unassigned = useMemo(() => repos.filter((r) => !projects.some((p) => p.repos.some((g) => globMatches(g, r.path)))).sort((a, b) => (b.last_commit_at ?? 0) - (a.last_commit_at ?? 0)), [repos, projects]);
+  const unassignedShown = useMemo(() => { const q = repoQ.trim().toLowerCase(); return q ? unassigned.filter((r) => r.path.toLowerCase().includes(q)) : unassigned; }, [unassigned, repoQ]);
   const children = useMemo(() => (current ? projects.filter((p) => p.parent === current.slug) : []), [projects, current]);
   const projRepos = useMemo(() => (current ? repos.filter((r) => current.repos.some((g) => globMatches(g, r.path))) : []), [repos, current]);
   const needles = useMemo(() => (current ? [current.name, ...current.repos.map((r) => r.replace(/[/*].*$/, ""))].filter((n) => n.length > 2).map((n) => n.toLowerCase()) : []), [current]);
@@ -91,7 +99,38 @@ export function Projects({ params, onLocked }: { params: URLSearchParams; onLock
               ))}
               {projects.length === 0 && <div className="p-3 text-[12px] text-zinc-500">No projects yet. Add folders under projects/ in the fleet repo.</div>}
               {ov.fleetDir && <button onClick={() => navigate("files", { path: `${ov.fleetDir}/projects` })} className="mt-1 w-full px-2 py-1 text-left text-[10px] text-zinc-600 hover:text-sky-400">browse projects/ →</button>}
+              <button
+                onClick={() => navigate("projects", { p: UNASSIGNED })}
+                data-testid="project-unassigned"
+                className={`hud-row mt-1 flex w-full items-center gap-2 rounded-sm border-t border-zinc-800/60 px-2 py-1.5 text-left text-[12px] ${showUnassigned ? "bg-sky-500/10 text-zinc-100 shadow-[inset_2px_0_0_#22d3ee]" : "text-zinc-400"}`}
+                title="checkouts on this machine that no project claims"
+              >
+                <span className="truncate">Unassigned repos</span>
+                <span className="ml-auto shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-zinc-400">{unassigned.length}</span>
+              </button>
             </nav>
+
+            {showUnassigned && (
+              <section className="min-w-0 space-y-4">
+                <Panel
+                  title={`Unassigned repos on ${activeNode() ? activeNodeName() : ov.status?.host ?? "this machine"} (${unassignedShown.length}${repoQ ? ` of ${unassigned.length}` : ""})`}
+                  right={<input value={repoQ} onChange={(e) => setRepoQ(e.target.value)} placeholder="filter" data-testid="unassigned-filter" className="w-40 rounded-sm border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-100 outline-none focus:border-sky-500/60" />}
+                >
+                  <p className="pb-2 text-[11px] text-zinc-500">Every git checkout the daemon indexed here that no Deck project lists in its <span className="font-mono">repos</span>. Add a project file under <span className="font-mono">Deck/projects/</span> to claim one; or just start a session in it.</p>
+                  {unassignedShown.length === 0 && <Empty>{repos.length ? "Everything here belongs to a project." : "No repos indexed yet."}</Empty>}
+                  {unassignedShown.slice(0, 300).map((r) => (
+                    <Row key={r.id}>
+                      <span className="w-56 truncate font-mono text-[11px] text-zinc-200" title={r.path}>{r.path.replace(/^.*\/Code\//, "")}</span>
+                      <span className="hidden w-32 truncate text-[11px] text-zinc-400 sm:inline">{r.head_branch ?? "detached"}</span>
+                      <span className="hidden min-w-0 flex-1 truncate text-[11px] text-zinc-500 md:inline">{r.dirty_files ? `${r.dirty_files} modified · ` : ""}{r.untracked_files ? `${r.untracked_files} untracked · ` : ""}{r.ahead ? `${r.ahead} local-only · ` : ""}{fmtAgo(r.last_commit_at)}</span>
+                      <span className={`ml-auto rounded px-1.5 py-0.5 text-[9px] uppercase ${r.risk === "safe" ? "bg-emerald-500/15 text-emerald-400" : r.risk === "attention" ? "bg-amber-500/15 text-amber-400" : "bg-red-500/15 text-red-400"}`}>{r.risk}</span>
+                      <button onClick={() => openTerminal({ cwd: r.path, title: `sh ${r.path.split("/").pop()}` })} className="shrink-0 rounded border border-sky-500/30 px-2 py-0.5 text-[10px] text-sky-300 hover:bg-sky-500/10" title="open a shell session here">Session</button>
+                    </Row>
+                  ))}
+                  {unassignedShown.length > 300 && <div className="pt-2 text-[10px] text-zinc-600">showing 300; narrow the filter</div>}
+                </Panel>
+              </section>
+            )}
 
             {current && (
               <section className="min-w-0 space-y-4">
