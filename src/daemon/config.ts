@@ -41,6 +41,33 @@ export interface CyberdeckConfig {
   /** Backup replication (ROADMAP M2, not built yet). `targets` are fleet node names that
    *  should hold a copy of this node's novel data; the home dashboard reads it. */
   backup?: { targets: string[] };
+  /** Seed agents bridge (voice): which agents server to sign into and as whom. See docs/VOICE.md. */
+  seed?: Partial<SeedConfig>;
+}
+
+/** Resolved Seed bridge settings: defaults, then `config.seed`, then the CYBERDECK_SEED_* env overrides. */
+export interface SeedConfig {
+  /** Seed agents server base URL (the voice-capable instance). */
+  agentsUrl: string;
+  /** Name of the local Seed vault account that signs actions (`cyberdeck seed status` shows whether it loads). */
+  identity: string;
+  /** Agent and session the voice calls go to; filled by `cyberdeck seed setup` (persisted in seed.json, not here). */
+  agentId?: string;
+  sessionId?: string;
+  /** Model used when setup has to create the "Cyberdeck" agent. */
+  modelProvider: string;
+  model: string;
+}
+
+export const SEED_DEFAULTS: SeedConfig = { agentsUrl: "http://127.0.0.1:3053", identity: "main", modelProvider: "OpenAI", model: "gpt-6-sol" };
+
+export function seedConfig(cfg: Pick<CyberdeckConfig, "seed">, env: NodeJS.ProcessEnv = process.env): SeedConfig {
+  const fromFile = Object.fromEntries(Object.entries(cfg.seed ?? {}).filter(([, v]) => v !== undefined && v !== null && v !== ""));
+  const out: SeedConfig = { ...SEED_DEFAULTS, ...fromFile };
+  if (env.CYBERDECK_SEED_AGENTS_URL) out.agentsUrl = env.CYBERDECK_SEED_AGENTS_URL;
+  if (env.CYBERDECK_SEED_IDENTITY) out.identity = env.CYBERDECK_SEED_IDENTITY;
+  out.agentsUrl = out.agentsUrl.replace(/\/+$/, "");
+  return out;
 }
 
 const DEFAULTS: CyberdeckConfig = {

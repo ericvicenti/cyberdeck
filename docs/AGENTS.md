@@ -22,7 +22,9 @@ Auth is the daemon's normal `/api` gate: `Authorization: Bearer <~/.cyberdeck/to
 MCP clients send static headers, so the bearer token is the form that matters.
 
 `cyberdeck mcp` prints the URL, the header, and the transport; `cyberdeck mcp --json` prints the
-same as JSON for scripts.
+same as JSON for scripts. `cyberdeck seed setup` does the registration for you on the configured
+Seed agents server (stores the token as the `cyberdeck-mcp-token` secret, saves the `cyberdeck`
+MCP server, and grants it to the voice agent; see `docs/VOICE.md`).
 
 ### Tools
 

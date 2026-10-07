@@ -3,7 +3,8 @@
 //
 // Wire protocol (fixed by the shipped app, TestFlight 1.0.0 (2)):
 //   GET  /health                      liveness (no auth)
-//   GET  /api/state                   scene + revision + devices + events (Bearer pairing key)
+//   GET  /api/state                   scene + revision + devices + events + voice (Bearer pairing key)
+//   GET  /api/voice/config, POST /api/voice/livekit   AI call flow (api/voice.ts, docs/VOICE.md)
 //   GET  /api/modules/:name?v=rev     compiled CommonJS experience (TSX bundled here with Bun.build)
 //   POST /api/experiences/validate    recompile; GET /api/experience-status; POST /api/experiences/error
 //   POST /api/command                 {deviceId?, action:{name,args}} -> delivered over the socket
@@ -59,6 +60,9 @@ export function caseworkAllows(method: string, path: string): boolean {
   if (path.startsWith("/api/modules/")) return get;
   if (path.startsWith("/api/media/")) return get || method === "PUT";
   if (path === "/api/command" || path === "/api/experiences/validate" || path === "/api/experiences/error" || path === "/api/casework/run") return post;
+  // Voice: the app's AI call flow (docs/VOICE.md). Setup stays with the node token.
+  if (path === "/api/voice/config" || path === "/api/voice/status" || path === "/api/voice/transcript") return get;
+  if (path === "/api/voice/livekit" || path === "/api/voice/session/reset") return post;
   if (path === "/api/fleet/nodes") return get;
   if (path.startsWith("/api/control/")) {
     if (get) return true;
@@ -108,6 +112,8 @@ export type CaseworkDeps = {
   experiencesDir?: string;
   /** Fixed pairing key (tests); otherwise ~/.cyberdeck/casework-key is loaded or created. */
   key?: string;
+  /** Voice availability for `/api/state` and the `welcome` frame (the Seed bridge's summary; absent = no voice). */
+  voice?: () => Promise<{ configured: boolean; provider: "livekit" | "none"; reason?: string }>;
 };
 
 export function registerCaseworkRoutes(app: Hono, deps: CaseworkDeps) {
@@ -123,7 +129,7 @@ export function registerCaseworkRoutes(app: Hono, deps: CaseworkDeps) {
   const devices = () => [...peers.values()].filter((p) => p.role === "device").map((p) => ({ id: p.id, info: p.info }));
   const broadcast = (msg: unknown, role?: Peer["role"]) => { for (const p of peers.values()) if (!role || p.role === role) p.send(msg); };
   const record = (event: unknown) => { events.push(event); if (events.length > 100) events.shift(); broadcast({ type: "event", event }, "console"); };
-  const voice = () => ({ configured: false, provider: "none" });
+  const voice = async () => { try { return deps.voice ? await deps.voice() : { configured: false, provider: "none" as const }; } catch (e) { return { configured: false, provider: "none" as const, reason: String(e) }; } };
   const status = () => ({ modules: [...compiled].map(([name, v]) => ({ name, hash: v.hash, updatedAt: v.updatedAt, error: errors.get(name) })), errors: Object.fromEntries(errors), nativeModules: NATIVE_MODULES });
   const get = async (name: string) => {
     if (!compiled.has(name)) { try { compiled.set(name, await compileExperience(name, dir)); errors.delete(name); } catch (e) { errors.set(name, String(e)); throw e; } }
@@ -141,8 +147,7 @@ export function registerCaseworkRoutes(app: Hono, deps: CaseworkDeps) {
   void validate().catch(() => {});
 
   app.get("/health", (c) => c.json({ ok: true }));
-  app.get("/api/state", (c) => c.json({ scene: scene(), revision, devices: devices(), events, presets: ["cyberdeck"], voice: voice() }));
-  app.get("/api/voice/config", (c) => c.json(voice()));
+  app.get("/api/state", async (c) => c.json({ scene: scene(), revision, devices: devices(), events, presets: ["cyberdeck"], voice: await voice() }));
   app.get("/api/experience-status", (c) => c.json(status()));
   app.post("/api/experiences/validate", async (c) => c.json(await validate()));
   app.post("/api/experiences/error", async (c) => {
@@ -238,7 +243,9 @@ export function registerCaseworkRoutes(app: Hono, deps: CaseworkDeps) {
           const id = randomUUID();
           peer = { id, role: msg.role, info: msg.info, send: (m) => { try { ws.send(JSON.stringify(m)); } catch {} }, close: () => { try { ws.close(1000, "key rotated"); } catch {} } };
           peers.set(id, peer);
-          peer.send({ type: "welcome", id, scene: scene(), revision, voice: voice(), devices: devices() });
+          const p = peer;
+          // The welcome carries voice availability, which may need a (cached) agents-server probe.
+          void voice().then((v) => { if (peers.get(id) === p) p.send({ type: "welcome", id, scene: scene(), revision, voice: v, devices: devices() }); });
           broadcast({ type: "devices", devices: devices() }, "console");
           record({ name: "device.connected", at: Date.now(), deviceId: id, info: msg.info });
           return;

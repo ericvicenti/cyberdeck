@@ -19,11 +19,12 @@ function token(): string {
 async function api(path: string, init?: RequestInit): Promise<any> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: { authorization: `Bearer ${token()}` },
+    headers: { authorization: `Bearer ${token()}`, ...(init?.body ? { "content-type": "application/json" } : {}) },
   });
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   return res.json();
 }
+const when = (ms?: number) => (ms ? new Date(ms).toLocaleString() : "never");
 
 async function sh(command: string[]): Promise<number> {
   const proc = Bun.spawn(command, { stdout: "inherit", stderr: "inherit" });
@@ -117,6 +118,45 @@ switch (cmd) {
     console.log(`  transport:  http\n\nIn Seed Agents: Tools tab -> MCP servers -> Add server, paste the url and the header; name it "cyberdeck".\nSee docs/AGENTS.md for reachability (a hosted agents server needs a public route to this node).`);
     break;
   }
+  case "seed": {
+    // Seed agents bridge (voice): all through the daemon's /api/voice/* routes (docs/VOICE.md).
+    const sub = process.argv[3] ?? "status";
+    const flags = process.argv.slice(4);
+    const fail = (e: unknown) => { console.log(`seed ${sub} failed: ${e instanceof Error ? e.message : String(e)}`); process.exit(1); };
+    if (sub === "status") {
+      const s = await api("/api/voice/status").catch(fail);
+      console.log(`agents server: ${s.agentsUrl}  (${s.health?.ok ? `up${s.health.voice ? ", voice" : ", NO voice"}${s.health.version ? `, ${s.health.version}` : ""}` : `down: ${s.health?.error ?? "?"}`})`);
+      console.log(`identity:      ${s.identity.name} ${s.identity.available ? `-> ${s.identity.principal}` : `(unavailable: ${s.identity.error ?? "?"})`}`);
+      console.log(`agent:         ${s.agent ? `${s.agent.name ?? "?"} (${s.agent.id})` : "not set up"}`);
+      console.log(`session:       ${s.sessionId ?? "none"}`);
+      console.log(`mcp registered: ${when(s.mcpRegisteredAt)}   last call: ${when(s.lastCallAt)}`);
+      console.log(s.configured ? "voice: ready (provider livekit)" : `voice: not configured — ${s.reason}`);
+      if (!s.configured) process.exit(1);
+    } else if (sub === "setup") {
+      const name = flags.includes("--name") ? flags[flags.indexOf("--name") + 1] : undefined;
+      const r = await api("/api/voice/setup", { method: "POST", body: JSON.stringify({ new: flags.includes("--new"), adopt: !flags.includes("--no-adopt"), ...(name ? { name } : {}) }) }).catch(fail);
+      console.log(`agent:   ${r.agent.name ?? "?"} (${r.agent.id}) — ${r.agent.origin}`);
+      console.log(`session: ${r.sessionId}`);
+      console.log(`mcp:     ${r.mcp.name} -> ${r.mcp.url} (${r.mcp.state ?? "unknown"}${typeof r.mcp.tools === "number" ? `, ${r.mcp.tools} tools` : ""}${r.mcp.error ? `: ${r.mcp.error}` : ""})`);
+      for (const w of r.warnings ?? []) console.log(`warning: ${w}`);
+    } else if (sub === "reset-session") {
+      const r = await api("/api/voice/session/reset", { method: "POST" }).catch(fail);
+      console.log(`new session: ${r.sessionId}${r.previous ? ` (was ${r.previous})` : ""}`);
+    } else if (sub === "call") {
+      // Smoke test: mint a LiveKit room without joining it (the token is withheld; the room times out on the worker).
+      const r = await api("/api/voice/livekit", { method: "POST" }).catch(fail);
+      const { token: _t, ...rest } = r;
+      console.log(JSON.stringify({ ...rest, token: "<withheld>", expiresIn: `${Math.max(0, Math.round((r.expiresAt - Date.now()) / 1000))}s` }, null, 2));
+    } else if (sub === "transcript") {
+      const r = await api(`/api/voice/transcript?limit=${encodeURIComponent(flags[0] ?? "20")}`).catch(fail);
+      for (const m of r.messages ?? []) console.log(`[${new Date(m.at).toLocaleTimeString()}] ${m.role}: ${m.text}`);
+      if (!r.messages?.length) console.log("(no messages)");
+    } else {
+      console.log("usage: cyberdeck seed status | setup [--new] [--no-adopt] [--name <agent>] | reset-session | call | transcript [n]");
+      process.exit(1);
+    }
+    break;
+  }
   case "whoami": {
     const res = await fetch(`${BASE}/api/auth/whoami`, { headers: { authorization: `Bearer ${token()}` } });
     console.log(JSON.stringify(await res.json()));
@@ -136,5 +176,6 @@ usage: cyberdeck <command>
   update     pull own source, rebuild, restart
   serve      expose the UI as https://<node>.<tailnet> via tailscale serve (serve off: stop)
   mcp        connection details for MCP clients such as Seed Agents (--json)
+  seed       voice bridge to the Seed agents server: status | setup [--new] | reset-session | call | transcript
   whoami     how the local daemon sees this caller`);
 }

@@ -3,7 +3,7 @@ import { createBunWebSocket } from "hono/bun";
 import { serveStatic } from "hono/bun";
 import { join } from "path";
 import type { Database } from "bun:sqlite";
-import { saveConfigPatch, type CyberdeckConfig } from "./config";
+import { saveConfigPatch, seedConfig, type CyberdeckConfig } from "./config";
 import { getConnInfo } from "hono/bun";
 import { Tailscale, isLoopback, isTailscaleIp } from "./tailscale";
 import { bus } from "./events";
@@ -18,6 +18,8 @@ import { registerControlRoutes } from "./api/control";
 import { registerCmuxRoutes } from "./api/cmux";
 import { registerMcpRoutes } from "./api/mcp";
 import { registerCaseworkRoutes } from "./api/casework";
+import { registerVoiceRoutes } from "./api/voice";
+import { SeedBridge } from "./seed";
 import { nodeStatus } from "./status";
 import { registerSessionRoutes } from "./api/sessions";
 import { registerDashboardRoutes } from "./api/dashboard";
@@ -45,6 +47,8 @@ export type ServerOptions = {
   caseworkKey?: string;
   /** Start the periodic Cloud AI archive sync (default true; tests turn it off). */
   cloudSync?: boolean;
+  /** Seed bridge overrides (tests): where seed.json lives and which companion.json to adopt. */
+  seed?: { home?: string; companionFile?: string };
 };
 
 export function createServer(db: Database, cfg: CyberdeckConfig, token: string, nodeId = "stw-dev", opts: ServerOptions = {}) {
@@ -187,7 +191,11 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   registerFleetRoutes(app, db, cfg, nodeId, token, upgradeWebSocket, { tailscale: ts, authedViaTailscale });
   const control = registerControlRoutes(app, cfg);
   registerCmuxRoutes(app);
-  casework = registerCaseworkRoutes(app, { token, nodeName: cfg.nodeName, upgradeWebSocket, isFullAuth: (c) => { const m = authByReq.get(c.req.raw)?.method; return m === "token" || m === "tailscale"; }, experiencesDir: opts.caseworkExperiencesDir, key: opts.caseworkKey });
+  const isFullAuth = (c: { req: { raw: Request } }) => { const m = authByReq.get(c.req.raw)?.method; return m === "token" || m === "tailscale"; };
+  // Seed agents bridge: voice calls from the Casework app / web Desk go to a Seed agent (docs/VOICE.md).
+  const seed = new SeedBridge({ config: seedConfig(cfg), port: cfg.port, token, home: opts.seed?.home, companionFile: opts.seed?.companionFile });
+  casework = registerCaseworkRoutes(app, { token, nodeName: cfg.nodeName, upgradeWebSocket, isFullAuth, experiencesDir: opts.caseworkExperiencesDir, key: opts.caseworkKey, voice: () => seed.voiceSummary() });
+  registerVoiceRoutes(app, seed, { isFullAuth });
   registerDashboardRoutes(app, db, cfg);
   registerMcpRoutes(app, db, cfg, control, { status, version: VERSION });
 

@@ -5,12 +5,15 @@ import { Database } from "bun:sqlite";
 import { join } from "path";
 import { initSchema } from "../src/daemon/db";
 import { createServer } from "../src/daemon/server";
-import { testConfig, TEST_TOKEN } from "./helpers";
+import { testConfig, TEST_TOKEN, tmpHomeDir } from "./helpers";
 import { qrMatrix, qrSvg } from "../src/daemon/casework/qr";
 import { caseworkAllows } from "../src/daemon/api/casework";
 
 const KEY = "casework-pairing-key-for-tests";
 const FIXTURES = join(import.meta.dir, "fixtures", "casework");
+// Voice is off here: a deterministic signer (never the Seed vault) and an agents URL nothing listens on.
+process.env.CYBERDECK_SEED_KEY_SEED ??= "7f".repeat(32);
+const seedHome = tmpHomeDir("casework-seed");
 let server: ReturnType<typeof Bun.serve>;
 let base = "", wsBase = "";
 let sessions: { close: () => void };
@@ -18,13 +21,13 @@ let sessions: { close: () => void };
 beforeAll(() => {
   const db = new Database(":memory:");
   initSchema(db);
-  const s = createServer(db, testConfig(), TEST_TOKEN, "stw-test", { caseworkKey: KEY, caseworkExperiencesDir: FIXTURES, persistOwner: false });
+  const s = createServer(db, testConfig({ seed: { agentsUrl: "http://127.0.0.1:1" } }), TEST_TOKEN, "stw-test", { caseworkKey: KEY, caseworkExperiencesDir: FIXTURES, persistOwner: false, cloudSync: false, seed: { home: seedHome.dir, companionFile: join(seedHome.dir, "none.json") } });
   sessions = s.sessions;
   server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: s.fetch, websocket: s.websocket });
   base = `http://127.0.0.1:${server.port}`;
   wsBase = `ws://127.0.0.1:${server.port}`;
 });
-afterAll(() => { sessions.close(); void server.stop(true); });
+afterAll(() => { sessions.close(); void server.stop(true); seedHome.cleanup(); });
 
 const withKey = (path: string, init: RequestInit = {}) => fetch(`${base}${path}`, { ...init, headers: { authorization: `Bearer ${KEY}`, ...init.headers } });
 const withToken = (path: string, init: RequestInit = {}) => fetch(`${base}${path}`, { ...init, headers: { authorization: `Bearer ${TEST_TOKEN}`, ...init.headers } });
@@ -76,6 +79,9 @@ describe("casework key scope", () => {
     expect(caseworkAllows("GET", "/api/casework/pairing")).toBe(false);
     expect(caseworkAllows("POST", "/api/casework/rotate")).toBe(false);
     expect(caseworkAllows("POST", "/api/system/update")).toBe(false);
+    expect(caseworkAllows("GET", "/api/voice/config")).toBe(true);
+    expect(caseworkAllows("POST", "/api/voice/livekit")).toBe(true);
+    expect(caseworkAllows("POST", "/api/voice/setup")).toBe(false);
   });
 });
 
@@ -96,6 +102,8 @@ describe("casework server", () => {
     expect(typeof j.revision).toBe("number");
     expect(j.devices).toEqual([]);
     expect(j.voice.configured).toBe(false);
+    expect(j.voice.provider).toBe("none");
+    expect(j.voice.reason).toContain("unreachable");
   });
   test("the pairing key cannot reach routes outside the app's scope", async () => {
     expect((await withKey("/api/fs/list?path=/")).status).toBe(403);
@@ -137,6 +145,7 @@ describe("casework server", () => {
     const dev = await connectDevice(KEY);
     expect(dev.first.type).toBe("welcome");
     expect(dev.first.scene.tree.props.name).toBe("cyberdeck");
+    expect(dev.first.voice).toMatchObject({ configured: false, provider: "none" });
     expect(typeof dev.first.id).toBe("string");
 
     const state = await (await withKey("/api/state")).json();
