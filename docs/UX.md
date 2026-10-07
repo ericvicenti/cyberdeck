@@ -790,3 +790,11 @@ State rules: server state lives exclusively in TanStack Query (WS-invalidated); 
 3. Fully keyboard-operable; visible focus; palette entries registered.
 4. Dark and light themes; AA contrast; reduced-motion respected.
 5. Every timestamped panel shows data age; every destructive action tiered per §13.2.
+
+
+## Terminal, Agents launch, and cmux (deck-ui, 2026-10-07)
+
+- **Terminal** is tabbed: tabs are per node and persisted in localStorage (`cyberdeck-term-tabs:<node>`), each with a cwd and an optional startup command. The startup command is sent as the first PTY input after the WebSocket opens, so it works unchanged through `/api/nodes/:id/term` on a remote node. The "+" form offers recent cwds and project repos from `/api/control/overview`, and quick picks for `cc` / `cx`. Panes stay mounted while hidden so shells survive tab switches. Mobile gets a key toolbar (esc, tab, ctrl modifier, ^c, ^d, arrows, enter).
+- **Agents → Launch an agent**: node + cwd + agent (cc = `claude --dangerously-skip-permissions`, cx = `codex --yolo`) + optional first prompt → opens a terminal tab on that node running the agent. Sessions rows have **Resume here / Resume there** (opens a terminal running `--resume <id>` / `codex --yolo resume <id>` on the session's host); runs have **Open in terminal** (tails the selected log on the run's host).
+- **cmux** view (`/api/cmux/*`): the live window → workspace → pane → surface tree from `cmux tree --all`, the selected surface's screen (`read-screen`, polled every 1.5 s, optional scrollback), a send line (`send` + Enter), quick keys (`send-key`), Focus in cmux (`select-workspace`), New workspace (`new-workspace --cwd --command`), Close. Refs are validated against `^(window|workspace|pane|surface|tab):\d+$` or a UUID and passed as argv, never through a shell. Node-aware through the proxy, so it drives the other laptop's cmux too. The title bar shows a `cmux N` chip when cmux is running on the active node.
+- **TokenGate** asks `/api/auth/whoami` first and skips the token prompt when the request is authenticated by Tailscale identity.

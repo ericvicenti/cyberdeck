@@ -11,7 +11,7 @@
     "start": "bun run src/daemon/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test tests",
-    "test:unit": "bun test tests/fsops.test.ts tests/api.test.ts tests/term.test.ts tests/scan.test.ts tests/install.test.ts",
+    "test:unit": "bun test tests/fsops.test.ts tests/api.test.ts tests/term.test.ts tests/scan.test.ts tests/install.test.ts tests/cmux.test.ts",
     "test:e2e": "bun test tests/e2e.test.ts"
   },
   "dependencies": {
