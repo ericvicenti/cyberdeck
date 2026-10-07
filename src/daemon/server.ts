@@ -63,7 +63,19 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   const authenticate = async (c: any): Promise<AuthInfo | null> => {
     if (tokenOk(c)) return { method: "token" };
     const ip = peerIp(c);
-    if (!ip || !owner || !isTailscaleIp(ip)) return null;
+    if (!ip || !owner) return null;
+    // `tailscale serve` (HTTPS front door) proxies from loopback and stamps the
+    // verified tailnet identity on the request. Only honored from loopback,
+    // where any process could already read the bearer token anyway.
+    if (isLoopback(ip)) {
+      const login = c.req.header("tailscale-user-login");
+      if (!login || login !== owner) return null;
+      const node = c.req.header("tailscale-user-name") ?? "";
+      const key = `serve:${login}`;
+      if (!seenIdentities.has(key)) { seenIdentities.add(key); console.log(`tailscale: trusting ${login} via tailscale serve`); }
+      return { method: "tailscale", login, node };
+    }
+    if (!isTailscaleIp(ip)) return null;
     const id = await ts.whois(ip);
     if (!id || id.login !== owner) return null;
     const key = `${id.login}@${id.node}`;
