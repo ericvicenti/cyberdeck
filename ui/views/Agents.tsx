@@ -64,8 +64,15 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
     const p = new URLSearchParams();
     if (q) p.set("q", q);
     if (host) p.set("host", host);
-    if (tool) p.set("tool", tool);
-    try { setSessions(await api<Session[]>(`/api/control/sessions?${p}`)); } catch {}
+    if (tool && tool !== "cloud") p.set("tool", tool);
+    let rows: Session[] = [];
+    if (tool !== "cloud") { try { rows = await api<Session[]>(`/api/control/sessions?${p}`); } catch {} }
+    if (!tool || tool === "cloud") {
+      // archived cloud conversations (chatgpt / claude.ai) live beside the cc/cx index
+      for (const prov of ["chatgpt", "claude"]) { try { const c = await api<Session[]>(`/api/cloud/${prov}/conversations?q=${encodeURIComponent(q)}`); rows.push(...c.filter((s) => !host || s.host === host)); } catch {} }
+      rows.sort((a, b) => b.updated.localeCompare(a.updated));
+    }
+    setSessions(rows);
   };
   useEffect(() => { const t = setTimeout(loadSessions, 250); return () => clearTimeout(t); }, [q, host, tool, ov?.fleetDir]);
 
@@ -253,7 +260,7 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
                 <div className="flex items-center gap-2">
                   <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="search title, path, id" data-testid="session-search" className="w-48 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-100 outline-none focus:border-zinc-500" />
                   <select value={host} onChange={(e) => setHost(e.target.value)} className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-300"><option value="">all hosts</option>{sessionHosts.map((h) => <option key={h} value={h}>{h}</option>)}</select>
-                  <select value={tool} onChange={(e) => setTool(e.target.value)} className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-300"><option value="">cc + cx</option><option value="cc">cc</option><option value="cx">cx</option></select>
+                  <select value={tool} onChange={(e) => setTool(e.target.value)} className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-300"><option value="">cc + cx + cloud</option><option value="cc">cc</option><option value="cx">cx</option><option value="cloud">cloud (chatgpt, claude)</option></select>
                 </div>
               }
             >
@@ -261,15 +268,19 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
               {sessions.slice(0, 80).map((s) => (
                 <Row key={`${s.host}-${s.id}`}>
                   <span className="w-16 shrink-0 text-[11px] text-zinc-400"><HostLink host={s.host} /></span>
-                  <span className={`shrink-0 rounded px-1 text-[10px] ${s.tool === "cc" ? "bg-orange-500/15 text-orange-300" : "bg-sky-500/15 text-sky-300"}`}>{s.tool}</span>
+                  <span className={`shrink-0 rounded px-1 text-[10px] ${s.tool === "cc" ? "bg-orange-500/15 text-orange-300" : s.tool === "cx" ? "bg-sky-500/15 text-sky-300" : (s.tool as string) === "chatgpt" ? "bg-emerald-500/15 text-emerald-300" : "bg-amber-500/15 text-amber-300"}`}>{(s.tool as string) === "claude-web" ? "claude" : s.tool}</span>
                   <span className="w-14 shrink-0 text-[10px] text-zinc-500">{isoAgo(s.updated)}</span>
                   <span className="min-w-0 flex-1 truncate text-[12px] text-zinc-200" title={s.title}>{s.title}</span>
                   {s.host.toLowerCase() === me.toLowerCase() ? (
                     <button onClick={() => navigate("files", { path: s.cwd })} className="hidden w-44 truncate text-left font-mono text-[10px] text-zinc-600 hover:text-sky-400 md:inline" title="browse this directory">{homePath(s.cwd)}</button>
                   ) : <span className="hidden w-44 truncate font-mono text-[10px] text-zinc-600 md:inline">{homePath(s.cwd)}</span>}
                   <span className="hidden w-24 truncate font-mono text-[10px] text-zinc-700 lg:inline">{s.id}</span>
+                  {s.tool !== "cc" && s.tool !== "cx" ? (
+                    <button onClick={() => navigate("cloud", { profile: (s.tool as string) === "chatgpt" ? "chatgpt" : "claude", url: (s as Session & { url?: string }).url ?? "" })} className="shrink-0 rounded border border-emerald-500/30 px-2 py-0.5 text-[10px] text-emerald-300 hover:bg-emerald-500/10" title="open the archived conversation live in the remote browser">Open in Cloud</button>
+                  ) : (
                   <button onClick={() => openOn(s.host, s.cwd, resumeCmd(s.tool, s.id), `${s.tool} ${s.title.slice(0, 18)}`)} className="shrink-0 rounded border border-sky-500/30 px-2 py-0.5 text-[10px] text-sky-300 hover:bg-sky-500/10" title={s.host === me ? "resume in a terminal here" : `resume in a terminal on ${s.host} (natively on a paired node, else over ssh)`}>{s.host === me ? "Resume here" : "Resume there"}</button>
-                  {s.host !== me && (
+                  )}
+                  {s.host !== me && s.tool !== "chatgpt" as string && (s.tool as string) !== "claude-web" && (
                     <button disabled={pulling === s.id} onClick={() => { setPulling(s.id); act(`Pull ${s.id.slice(0, 8)}`, () => post("/api/control/sessions/pull", { id: s.id })).finally(() => setPulling(null)); }} className="shrink-0 rounded border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-40">{pulling === s.id ? "…" : "Pull here"}</button>
                   )}
                 </Row>

@@ -131,6 +131,11 @@ export const PulseIcon = (p: P) => (
   </svg>
 );
 
+export const CloudIcon = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M17.5 19a4.5 4.5 0 0 0 .4-8.98A7 7 0 0 0 4.3 12.2 3.5 3.5 0 0 0 6 19h11.5z" />
+  </svg>
+);
 export const GridIcon = (p: P) => (
   <svg {...base(p)}>
     <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />

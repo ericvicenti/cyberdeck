@@ -62,6 +62,14 @@ export const termWsUrl = (params: Record<string, string> = {}): string => {
   return `${proto}://${location.host}${path}?${q}`;
 };
 
+/** Remote-browser screencast WS, node-aware (/api/browser/:p/stream locally, /api/nodes/:id/browser/:p/stream remotely). */
+export const browserWsUrl = (profile: string): string => {
+  const node = activeNode();
+  const path = node ? `/api/nodes/${node}/browser/${encodeURIComponent(profile)}/stream` : `/api/browser/${encodeURIComponent(profile)}/stream`;
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  return `${proto}://${location.host}${path}?${new URLSearchParams({ token: token() })}`;
+};
+
 export const rawUrl = (path: string, params: Record<string, string> = {}): string =>
   `${scoped(path)}?${new URLSearchParams({ ...params, token: token() })}`;
 

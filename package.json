@@ -11,13 +11,14 @@
     "start": "bun run src/daemon/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test tests",
-    "test:unit": "bun test tests/fsops.test.ts tests/auth.test.ts tests/api.test.ts tests/term.test.ts tests/scan.test.ts tests/install.test.ts tests/cmux.test.ts tests/dashboard.test.ts",
+    "test:unit": "bun test tests/fsops.test.ts tests/auth.test.ts tests/api.test.ts tests/term.test.ts tests/scan.test.ts tests/install.test.ts tests/cmux.test.ts tests/dashboard.test.ts tests/cloud.test.ts",
     "test:e2e": "bun test tests/e2e.test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
     "bun-pty": "^0.4.10",
     "hono": "^4.6.0",
+    "playwright": "^1.62.1",
     "video.js": "^8.24.0",
     "zod": "3.25.76"
   },
@@ -36,7 +37,6 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "codemirror": "^6.0.2",
-    "playwright": "^1.62.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwindcss": "^4.0.0",

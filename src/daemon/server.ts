@@ -20,6 +20,11 @@ import { registerMcpRoutes } from "./api/mcp";
 import { nodeStatus } from "./status";
 import { registerSessionRoutes } from "./api/sessions";
 import { registerDashboardRoutes } from "./api/dashboard";
+import { registerBrowserRoutes } from "./api/browser";
+import { registerCloudRoutes } from "./api/cloud";
+import { browsers } from "./browser";
+import { CloudArchive } from "./cloud";
+import { CYBERDECK_HOME } from "./config";
 import { SessionManager } from "./sessions";
 import { currentCommit, checkForUpdate, applyUpdate, setUpdateGuard } from "./updater";
 
@@ -33,6 +38,8 @@ export type ServerOptions = {
   tailscale?: Tailscale;
   /** Write a detected owner into config.json (default true; tests turn it off). */
   persistOwner?: boolean;
+  /** Start the periodic Cloud AI archive sync (default true; tests turn it off). */
+  cloudSync?: boolean;
 };
 
 export function createServer(db: Database, cfg: CyberdeckConfig, token: string, nodeId = "stw-dev", opts: ServerOptions = {}) {
@@ -180,6 +187,12 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   sessions.recover().catch((err) => console.error("session recovery failed:", err));
   setUpdateGuard(() => { const n = sessions.fragileCount(); return n ? `${n} live session(s) would be killed` : null; });
   registerSessionRoutes(app, sessions, upgradeWebSocket, (c) => Boolean(authByReq.get(c.req.raw)));
+
+  // Remote browser (persistent headless Chromium per profile) + the Cloud AI archive that drives it.
+  registerBrowserRoutes(app, browsers, upgradeWebSocket, (c) => Boolean(authByReq.get(c.req.raw)));
+  const cloud = new CloudArchive(browsers, cfg.fleetDir ?? join(CYBERDECK_HOME, "cloud-archive"));
+  if (opts.cloudSync !== false) cloud.start();
+  registerCloudRoutes(app, cloud);
 
   app.get(
     "/api/term",

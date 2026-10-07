@@ -470,6 +470,10 @@ Edit in UI → worker encrypts with the item's ItemKey (new random nonce), bumps
 
 ---
 
+## 7.5 Remote browser profiles (Cloud AI)
+
+The daemon can run a persistent headless Chromium per profile (`~/.cyberdeck/browser/<profile>/`, directory mode 0700). Those profiles hold **live session cookies** for whatever Eric logged into through the dashboard (chatgpt.com, claude.ai, anything else), which is exactly what lets the Cloud AI archive pull conversations without API keys. Consequences: the profile directories are as sensitive as the vault and are never synced or backed up by the indexer (they sit under the data dir, not a root); the screencast WebSocket and every `/api/browser/*` and `/api/cloud/*` route sit behind the same auth as the terminal (bearer token or tailnet owner identity); input from the browser is validated (whitelisted message shapes, bounded coordinates, http/https URLs only) before it reaches CDP; and the archive itself (markdown under the Deck repo) contains conversation text but no credentials. Close a profile from the UI or delete its directory to log out everywhere.
+
 ## 8. Explicitly NOT protected
 
 Written down so nobody oversells this later:

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { parseHash, navigate, api, activeNode, activeNodeName, setActiveNode, type Route } from "./lib/api";
-import { ShieldIcon, ServerIcon, FolderIcon, TerminalIcon, GitIcon, LayersIcon, BotIcon, PulseIcon, GridIcon } from "./lib/icons";
+import { ShieldIcon, ServerIcon, FolderIcon, TerminalIcon, GitIcon, LayersIcon, BotIcon, PulseIcon, GridIcon, CloudIcon } from "./lib/icons";
+import { Cloud } from "./views/Cloud";
 import { Home } from "./views/Home";
 import type { Overview } from "./lib/control";
 import { Projects } from "./views/Projects";
@@ -23,6 +24,7 @@ const NAV = [
   { view: "files", label: "Files", icon: FolderIcon },
   { view: "term", label: "Sessions", icon: TerminalIcon },
   { view: "cmux", label: "cmux", icon: GridIcon },
+  { view: "cloud", label: "Cloud", icon: CloudIcon },
 ];
 
 type FleetSummary = { self: { nodeId: string; name: string; commit?: string }; nodes: { id: string; name: string; online: boolean }[] };
@@ -95,6 +97,7 @@ export function App() {
       {route.view === "edit" && <Editor params={route.params} onLocked={lock} key={`edit-${nodeGen}-${nodeId}`} />}
       {route.view === "term" && <Term params={route.params} key={`term-${nodeGen}-${nodeId}`} />}
       {route.view === "cmux" && <Cmux onLocked={lock} key={`cmux-${nodeGen}-${nodeId}`} />}
+      {route.view === "cloud" && <Cloud params={route.params} onLocked={lock} key={`cloud-${nodeGen}-${nodeId}`} />}
     </>
   );
 
