@@ -61,6 +61,7 @@ pick agent and runner, and reports `reasons` + `pinned` for the chips. `ui/lib/s
 (explicit node addressing, `useLiveSessions` polls every online node); `ui/views/Term.tsx` is tabs-over-sessions;
 `ui/lib/terms.ts` keeps `openTerminal` for other views. `/api/term` (ephemeral PTY) still exists for the fleet proxy
 and tests. `CYBERDECK_SESSIONS_TMUX=0` forces the pty runner (the e2e daemons set it so test sessions die with them).
-Starting a `cc` session pre-accepts Claude Code's folder-trust prompt for that cwd (`trustClaudeDir` writes
-`projects[<cwd>].hasTrustDialogAccepted` into `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`), so the agent
+Starting a `cc` session pre-accepts Claude Code's folder-trust and external-CLAUDE.md-imports prompts for that cwd
+(`trustClaudeDir` writes `projects[<cwd>].hasTrustDialogAccepted` + `hasClaudeMdExternalIncludesApproved/WarningShown`
+into `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`; an explicit earlier "no" to imports is kept), so the agent
 starts straight into the prompt. Tests: `tests/sessions.test.ts`, `tests/harness.test.ts`, e2e "prompt bar"/"sessions survive".

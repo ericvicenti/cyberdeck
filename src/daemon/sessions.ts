@@ -40,9 +40,11 @@ export function expandHome(p: string | undefined | null): string {
   return p;
 }
 
-/** Claude Code asks "do you trust this folder?" on first launch in a directory and records the answer in
- *  its config (`projects[<dir>].hasTrustDialogAccepted`). A session started from Cyberdeck is the owner
- *  launching into their own checkout, so pre-record the acceptance and skip the prompt. */
+/** Claude Code asks "do you trust this folder?" (and, when a CLAUDE.md imports a file outside the cwd,
+ *  "allow external CLAUDE.md imports?") on first launch in a directory and records the answers in its config
+ *  (`projects[<dir>].hasTrustDialogAccepted`, `.hasClaudeMdExternalIncludesApproved`). A session started
+ *  from Cyberdeck is the owner launching into their own checkout, so pre-record both and skip the prompts.
+ *  An explicit earlier "no" to external imports (warning shown, not approved) is left alone. */
 export function trustClaudeDir(cwd: string): boolean {
   const file = process.env.CLAUDE_CONFIG_DIR ? join(process.env.CLAUDE_CONFIG_DIR, ".claude.json") : join(homedir(), ".claude.json");
   try {
@@ -51,8 +53,10 @@ export function trustClaudeDir(cwd: string): boolean {
     if (!cfg || typeof cfg !== "object") return false;
     cfg.projects = cfg.projects && typeof cfg.projects === "object" ? cfg.projects : {};
     const entry = cfg.projects[cwd] && typeof cfg.projects[cwd] === "object" ? cfg.projects[cwd] : {};
-    if (entry.hasTrustDialogAccepted === true) return true;
-    cfg.projects[cwd] = { allowedTools: [], ...entry, hasTrustDialogAccepted: true };
+    const declinedImports = entry.hasClaudeMdExternalIncludesWarningShown === true && entry.hasClaudeMdExternalIncludesApproved === false;
+    const next = { allowedTools: [], ...entry, hasTrustDialogAccepted: true, ...(declinedImports ? {} : { hasClaudeMdExternalIncludesApproved: true, hasClaudeMdExternalIncludesWarningShown: true }) };
+    if (JSON.stringify(next) === JSON.stringify({ allowedTools: [], ...entry })) return true;
+    cfg.projects[cwd] = next;
     mkdirSync(dirname(file), { recursive: true });
     const tmp = `${file}.cyberdeck-${process.pid}.tmp`;
     writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });

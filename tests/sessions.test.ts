@@ -135,6 +135,8 @@ test("starting a cc session pre-accepts Claude Code's folder trust for that dire
     const s = await create({ cwd: "~", cmd: "echo trusted", tool: "cc", runner: "pty" });
     const cfg = JSON.parse(readFileSync(join(dir, ".claude.json"), "utf8"));
     expect(cfg.projects[s.cwd].hasTrustDialogAccepted).toBe(true);
+    expect(cfg.projects[s.cwd].hasClaudeMdExternalIncludesApproved).toBe(true);
+    expect(cfg.projects[s.cwd].hasClaudeMdExternalIncludesWarningShown).toBe(true);
     expect(cfg.projects["/elsewhere"].allowedTools).toEqual(["Bash"]); // existing entries untouched
     expect(cfg.numStartups).toBe(3);
     await srv.api(`/api/sessions/${s.id}`, { method: "DELETE" });
@@ -142,6 +144,13 @@ test("starting a cc session pre-accepts Claude Code's folder trust for that dire
     const t = await create({ cwd: "/", cmd: "echo nope", tool: "shell", runner: "pty" });
     expect(JSON.parse(readFileSync(join(dir, ".claude.json"), "utf8")).projects["/"]).toBeUndefined();
     await srv.api(`/api/sessions/${t.id}`, { method: "DELETE" });
+    // an explicit earlier "no" to external imports is respected
+    writeFileSync(join(dir, ".claude.json"), JSON.stringify({ projects: { "/": { hasClaudeMdExternalIncludesWarningShown: true, hasClaudeMdExternalIncludesApproved: false } } }));
+    const v = await create({ cwd: "/", cmd: "echo x", tool: "cc", runner: "pty" });
+    const root = JSON.parse(readFileSync(join(dir, ".claude.json"), "utf8")).projects["/"];
+    expect(root.hasTrustDialogAccepted).toBe(true);
+    expect(root.hasClaudeMdExternalIncludesApproved).toBe(false);
+    await srv.api(`/api/sessions/${v.id}`, { method: "DELETE" });
     // an unparseable config is left alone rather than clobbered
     writeFileSync(join(dir, ".claude.json"), "{not json");
     const u = await create({ cwd: "~", cmd: "echo x", tool: "cc", runner: "pty" });
