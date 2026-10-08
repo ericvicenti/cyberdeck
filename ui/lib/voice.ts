@@ -55,7 +55,7 @@ const voicePost = <T,>(route: VoiceRoute | null, path: string, body: unknown): P
   voiceApi<T>(route, path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
 const ROUTE_KEY = "cyberdeck-voice-route";
-const askVoiceNode = (route: VoiceRoute) => voiceApi<VoiceConfig>(route, "/api/voice/config").then((config) => ({ route, config })).catch(() => null);
+const askVoiceNode = (route: VoiceRoute) => voiceApi<VoiceConfig>(route, "/api/voice/config", { signal: AbortSignal.timeout(8000) }).then((config) => ({ route, config })).catch(() => null);
 
 /** The first other node of the fleet (this daemon included, when a remote node is in view) with voice set up. */
 async function findVoiceNode(): Promise<{ route: VoiceRoute; config: VoiceConfig } | null> {
@@ -72,7 +72,9 @@ async function findVoiceNode(): Promise<{ route: VoiceRoute; config: VoiceConfig
     ...(viewed ? [{ node: "local", name: fleet.self?.name ?? "this node" }] : []),
     ...(fleet.nodes ?? []).filter((n) => n.online && n.id !== viewed).map((n) => ({ node: n.id, name: n.name })),
   ];
-  const found = (await Promise.all(routes.map(askVoiceNode))).find((a) => a?.config.configured) ?? null;
+  // The first node that says yes wins: a peer that is slow to answer (or to fail) must not hold the call up.
+  const asked = routes.map((route) => askVoiceNode(route).then((a) => (a?.config.configured ? a : Promise.reject(new Error("no voice")))));
+  const found = await Promise.any(asked).catch(() => null);
   try { if (found) localStorage.setItem(ROUTE_KEY, JSON.stringify(found.route)); } catch {}
   return found;
 }
