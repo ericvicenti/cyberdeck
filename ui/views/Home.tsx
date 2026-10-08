@@ -6,6 +6,8 @@ import { api, post, navigate, setActiveNode, fmtBytes, fmtAgo, ApiError } from "
 import { ServerIcon, FolderIcon, TerminalIcon, GitIcon } from "../lib/icons";
 import type { Overview } from "../lib/control";
 import type { Dashboard, UsageSummary } from "../../src/daemon/api/dashboard";
+import type { CodexResets } from "../../src/daemon/codexrpc";
+import { apiOn, startSession } from "../lib/sessions";
 import { Widget, Meter, StackBar, DayBars, HUD, severity, fmtIn, fmtDuration, fmtInt } from "../components/Widgets";
 
 type NodeStatus = {
@@ -25,15 +27,62 @@ type PairingCode = { code: string; expiresAt: number; urls: string[] };
 
 // ------------------------------------------------------------ usage widget ----
 
-function UsageWidget({ title, usage, testId }: { title: string; usage: UsageSummary | undefined; testId: string }) {
+const fmtDay = (ms: number | string | null) => (ms == null ? "" : new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" }));
+const fmtWhen = (iso: string) => new Date(iso).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
+
+/** Usage limits are per account, not per machine: `node` is whichever fleet machine answered
+ *  (this one when it is signed in), and it is also where a refresh or a reset runs. */
+function UsageWidget({ title, usage, testId, node, nodeName, isSelf, onRefresh }: { title: string; usage: UsageSummary | undefined; testId: string; node: string; nodeName: string; isSelf: boolean; onRefresh: () => Promise<void> }) {
   const u = usage;
-  const meta = u?.fetchedAt ? `${u.source === "sessions" ? "from transcript · " : ""}${fmtAgo(u.fetchedAt)}` : u?.error ? "unavailable" : "loading";
+  const [refreshing, setRefreshing] = useState(false);
+  const [note, setNote] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  // Codex reset: null = idle, "loading" = fetching the credits, else the confirmation
+  const [confirm, setConfirm] = useState<null | "loading" | CodexResets>(null);
+  const [spending, setSpending] = useState(false);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try { await onRefresh(); setNote(null); }
+    catch (e) { setNote({ kind: "err", text: `Couldn't refresh: ${e instanceof Error ? e.message : e}` }); }
+    finally { setRefreshing(false); }
+  };
+  const askCodexReset = async () => {
+    setNote(null);
+    setConfirm("loading");
+    try { setConfirm(await apiOn<CodexResets>(node, "/api/usage/codex/resets")); }
+    catch (e) { setConfirm(null); setNote({ kind: "err", text: `Couldn't read your resets: ${e instanceof Error ? e.message : e}` }); }
+  };
+  const spendCodexReset = async (creditId: string | undefined) => {
+    setSpending(true);
+    try {
+      // one key per click: a retried request cannot spend a second credit
+      const r = await apiOn<{ outcome: string; message: string }>(node, "/api/usage/codex/reset", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ creditId, idempotencyKey: crypto.randomUUID() }) });
+      setNote({ kind: r.outcome === "reset" ? "ok" : "err", text: r.message });
+      setConfirm(null);
+      await onRefresh().catch(() => {});
+    } catch (e) {
+      setNote({ kind: "err", text: `Reset failed, nothing confirmed: ${e instanceof Error ? e.message : e}` });
+    } finally {
+      setSpending(false);
+    }
+  };
+  const openClaudeReset = async (command: string) => {
+    setNote(null);
+    try { await startSession({ node, nodeName, cmd: `claude '${command}'`, tool: "cc", title: "limit reset", prompt: command }); }
+    catch (e) { setNote({ kind: "err", text: `Couldn't open Claude Code on ${nodeName}: ${e instanceof Error ? e.message : e}` }); }
+  };
+
+  const meta = u?.fetchedAt ? `${u.source === "sessions" ? "from transcript · " : ""}${fmtAgo(u.fetchedAt)}${isSelf ? "" : ` · via ${nodeName}`}` : u?.error ? "unavailable" : "loading";
+  const rs = u?.resets ?? null;
+  const next = confirm && confirm !== "loading" ? confirm.credits[0] : undefined;
   return (
     <Widget title={title} testId={testId} meta={<span className="flex items-center gap-2">{u?.plan && <span className="hud-badge text-zinc-400">{u.plan.replace(/^default_claude_/, "").replace(/_/g, " ")}</span>}{meta}</span>}>
       {u && u.available ? (
         <div>
           {u.limits.map((l) => (
-            <Meter key={l.id} label={l.label} percent={l.percent} active={l.active} right={<span>{l.percent}%{l.resetsAt ? <span className="text-zinc-600"> · resets {fmtIn(l.resetsAt)}</span> : null}</span>} />
+            <div key={l.id} title={l.resetsAt ? `resets ${new Date(l.resetsAt).toLocaleString()}` : undefined}>
+              <Meter label={l.label} percent={l.percent} active={l.active} right={<span>{l.percent}% used{l.resetsAt ? <span className="text-zinc-600"> · resets {fmtIn(l.resetsAt)} ({fmtWhen(l.resetsAt)})</span> : null}</span>} />
+            </div>
           ))}
           {u.credits && (u.credits.unlimited || u.credits.balance != null) && (
             <div className="mt-2 flex justify-between text-[10px] text-zinc-500">
@@ -50,6 +99,53 @@ function UsageWidget({ title, usage, testId }: { title: string; usage: UsageSumm
           <div className="mt-2 text-[10px] text-zinc-500">{u?.error ?? "…"}</div>
         </div>
       )}
+
+      <div className="mt-3 border-t border-zinc-800 pt-3" data-testid={`${testId}-resets`}>
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0 text-[11px] text-zinc-300">
+            {rs?.via === "api" && (
+              <span>
+                {rs.available} reset{rs.available === 1 ? "" : "s"} available
+                <span className="text-zinc-500"> · {rs.applicable === 0 ? "no limit reached, nothing to reset yet" : rs.applicable == null ? "refills every Codex limit" : `${rs.applicable} usable now`}</span>
+              </span>
+            )}
+            {rs?.via === "cli" && <span>{rs.kind === "session" ? "Session limit reset" : "Limit reset"}<span className="text-zinc-500"> · {rs.kind === "session" ? "once a week, weekly limit still applies" : "refills your limits"} · confirmed in Claude Code</span></span>}
+            {!rs && <span className="text-zinc-500">{u?.tool === "codex" && u.source !== "api" ? "resets unknown (usage API unavailable)" : "no reset available"}</span>}
+          </div>
+          <div className="flex shrink-0 gap-1.5">
+            {rs?.via === "api" && confirm === null && (
+              <button type="button" data-testid={`${testId}-use-reset`} disabled={rs.applicable === 0} title={rs.applicable === 0 ? "Usable once a Codex limit is reached" : "Spend one reset credit"} onClick={askCodexReset} className="hud-chip neon-green disabled:opacity-40">Use a reset</button>
+            )}
+            {rs?.via === "cli" && <button type="button" data-testid={`${testId}-use-reset`} onClick={() => openClaudeReset(rs.command)} className="hud-chip neon-green" title={`Opens Claude Code on ${nodeName} running ${rs.command}`}>Use my reset</button>}
+            <button type="button" className="hud-chip disabled:opacity-50" onClick={refresh} disabled={refreshing}>{refreshing ? "…" : "Refresh"}</button>
+          </div>
+        </div>
+        {confirm === "loading" && <div className="mt-2 text-[10px] text-zinc-500">reading your resets…</div>}
+        {confirm && confirm !== "loading" && (
+          <div className="mt-2 rounded-sm bg-zinc-950/70 p-2 text-[11px]" data-testid={`${testId}-confirm`}>
+            {next ? (
+              <>
+                <div className="text-zinc-200">Use your reset? <span className="text-zinc-500">This refills your Codex limits now and cannot be undone.</span></div>
+                <ul className="mt-1.5 space-y-0.5 text-[10px] text-zinc-400">
+                  {confirm.credits.map((c, i) => (
+                    <li key={c.id} className="flex justify-between gap-2">
+                      <span>{i === 0 ? "▸ " : "  "}{c.title}{i === 0 ? " (this one)" : ""}</span>
+                      <span className="text-zinc-500">{c.expiresAt ? `use by ${fmtDay(c.expiresAt)}` : "no expiry"}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-2 flex gap-1.5">
+                  <button type="button" disabled={spending} onClick={() => spendCodexReset(next.id)} className="hud-chip neon-green disabled:opacity-50">{spending ? "Resetting…" : "Yes, use my reset"}</button>
+                  <button type="button" disabled={spending} onClick={() => setConfirm(null)} className="hud-chip">No, keep it</button>
+                </div>
+              </>
+            ) : (
+              <div className="flex items-center justify-between text-zinc-400">No reset credit is available right now. <button type="button" className="hud-chip" onClick={() => setConfirm(null)}>ok</button></div>
+            )}
+          </div>
+        )}
+        {note && <p role={note.kind === "err" ? "alert" : "status"} className={`mt-2 text-[10px] ${note.kind === "ok" ? "text-emerald-400" : "text-amber-400"}`}>{note.text}</p>}
+      </div>
     </Widget>
   );
 }
@@ -173,6 +269,7 @@ export function Home({ onLocked }: { onLocked: () => void }) {
   // undefined = not answered yet, null = this node has no Deck repo (404)
   const [control, setControl] = useState<Overview | null | undefined>(undefined);
   const [dash, setDash] = useState<Dashboard | null>(null);
+  /** Dashboards of the paired nodes, by node id. */
   const [peerDash, setPeerDash] = useState<Record<string, Dashboard>>({});
   const [code, setCode] = useState<PairingCode | null>(null);
   const [peerUrl, setPeerUrl] = useState("");
@@ -180,9 +277,10 @@ export function Home({ onLocked }: { onLocked: () => void }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
-  // Home is always about the node serving this UI, so every fetch here is `local: true`: it must not
-  // follow the active-node selector, or the self card / Storage / Backup widgets would show the
-  // remote node's numbers under this node's name (two nodes with identical storage).
+  // Home shows the whole fleet no matter which node the switcher has selected. It asks the node
+  // serving this page for its own numbers (`local: true` = do not reroute the call through the
+  // selected node, which used to show that node's disk twice) and asks every paired node for theirs
+  // through `/api/nodes/:id/proxy/...`. Each row is labelled with the machine that answered.
   const load = async () => {
     try {
       const [f, s] = await Promise.all([api<FleetInfo>("/api/fleet/nodes"), api<NodeStatus>("/api/status", { local: true })]);
@@ -202,7 +300,8 @@ export function Home({ onLocked }: { onLocked: () => void }) {
     }
     try {
       const f = await api<FleetInfo>("/api/fleet/nodes");
-      const entries = await Promise.all(f.nodes.filter((n) => n.online).map(async (n) => [n.name, await api<Dashboard>(`/api/nodes/${n.id}/proxy/dashboard`).catch(() => null)] as const));
+      setInfo(f);
+      const entries = await Promise.all(f.nodes.filter((n) => n.online).map(async (n) => [n.id, await api<Dashboard>(`/api/nodes/${n.id}/proxy/dashboard`).catch(() => null)] as const));
       setPeerDash(Object.fromEntries(entries.filter((e): e is readonly [string, Dashboard] => e[1] != null)));
     } catch {}
   };
@@ -240,13 +339,50 @@ export function Home({ onLocked }: { onLocked: () => void }) {
   };
 
   const selfName = info?.self.name ?? "local";
-  const r = dash?.redundancy;
-  const b = dash?.backup;
-  const sys = dash?.system;
-  const disks: { node: string; d: Dashboard["disks"][number] }[] = [
-    ...(dash?.disks ?? []).map((d) => ({ node: selfName, d })),
-    ...Object.entries(peerDash).flatMap(([node, pd]) => pd.disks.map((d) => ({ node, d }))),
+  // Every machine in the fleet: this node, each paired node (online or not), then the hosts the
+  // Deck manifest lists that run no Cyberdeck node (their numbers are unknown, but they are shown).
+  type Machine = { id: string; name: string; self: boolean; node: boolean; online: boolean | null; dash: Dashboard | null; kind?: string };
+  const machines: Machine[] = [
+    { id: "", name: selfName, self: true, node: true, online: true, dash },
+    ...(info?.nodes ?? []).map((n) => ({ id: n.id, name: n.name, self: false, node: true, online: n.online, dash: n.online ? peerDash[n.id] ?? null : null })),
   ];
+  for (const h of control?.status?.hosts ?? []) {
+    const known = machines.find((m) => m.name.toLowerCase() === h.name.toLowerCase());
+    if (known) known.kind = h.kind;
+    else machines.push({ id: `host:${h.name}`, name: h.name, self: false, node: false, online: h.online, dash: null, kind: h.kind });
+  }
+  const reporting = machines.filter((m) => m.dash);
+  const sum = (f: (d: Dashboard) => number) => reporting.reduce((a, m) => a + f(m.dash!), 0);
+
+  // limits belong to the account: take them from this node, or from the first machine that is signed in
+  const usageFrom = (tool: "claude" | "codex") => {
+    const m = reporting.find((x) => x.dash!.usage[tool].available && x.dash!.usage[tool].source === "api") ?? reporting.find((x) => x.dash!.usage[tool].available) ?? machines[0];
+    return { m, usage: m.dash?.usage[tool] };
+  };
+  const cc = usageFrom("claude");
+  const cx = usageFrom("codex");
+  const refreshUsage = (m: Machine) => async () => {
+    const fresh = await apiOn<Dashboard>(m.id, "/api/dashboard?fresh=1");
+    if (m.self) setDash(fresh); else setPeerDash((p) => ({ ...p, [m.id]: fresh }));
+  };
+
+  const r = reporting.length
+    ? {
+        safe: sum((d) => d.redundancy.safe), attention: sum((d) => d.redundancy.attention), atRisk: sum((d) => d.redundancy.atRisk),
+        remoteless: sum((d) => d.redundancy.remoteless), dirty: sum((d) => d.redundancy.dirty), unpushed: sum((d) => d.redundancy.unpushed),
+        exposedBytes: sum((d) => d.redundancy.exposedBytes), dataBytes: sum((d) => d.redundancy.dataBytes), dataCacheBytes: sum((d) => d.redundancy.dataCacheBytes),
+        lastScanAt: reporting.reduce<number | null>((a, m) => (m.dash!.redundancy.lastScanAt && (a == null || m.dash!.redundancy.lastScanAt > a) ? m.dash!.redundancy.lastScanAt : a), null),
+      }
+    : undefined;
+  const b = dash?.backup;
+  const disks = machines.filter((m) => m.node).flatMap((m) => (m.dash ? m.dash.disks.map((d) => ({ m, d: d as Dashboard["disks"][number] | null })) : [{ m, d: null }]));
+  const volumes = disks.filter((x) => x.d).length;
+  // prompts per day, summed over every reporting machine
+  const activity = (() => {
+    const days = new Map<string, { date: string; cc: number; cx: number }>();
+    for (const m of reporting) for (const a of m.dash!.activity) { const row = days.get(a.date) ?? { date: a.date, cc: 0, cx: 0 }; row.cc += a.cc; row.cx += a.cx; days.set(a.date, row); }
+    return [...days.values()].sort((x, y) => x.date.localeCompare(y.date));
+  })();
   const svcRows = control?.services?.rows ?? [];
   const svcByHost = new Map<string, typeof svcRows>();
   for (const row of svcRows) svcByHost.set(row.host, [...(svcByHost.get(row.host) ?? []), row]);
@@ -269,8 +405,8 @@ export function Home({ onLocked }: { onLocked: () => void }) {
 
         <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="dashboard">
           {/* row 1: usage, backup */}
-          <UsageWidget title="Claude Code" usage={dash?.usage.claude} testId="widget-claude" />
-          <UsageWidget title="Codex" usage={dash?.usage.codex} testId="widget-codex" />
+          <UsageWidget title="Claude Code + Fable" usage={cc.usage} testId="widget-claude" node={cc.m.id} nodeName={cc.m.name} isSelf={cc.m.self} onRefresh={refreshUsage(cc.m)} />
+          <UsageWidget title="Codex" usage={cx.usage} testId="widget-codex" node={cx.m.id} nodeName={cx.m.name} isSelf={cx.m.self} onRefresh={refreshUsage(cx.m)} />
 
           <Widget title="Backup" tone={b?.configured ? "cyan" : "magenta"} testId="widget-backup" onClick={() => navigate("data")} meta={b ? (b.lastSnapshotAt ? `last snapshot ${fmtAgo(b.lastSnapshotAt)}` : "no snapshots") : "…"}>
             <div className="flex items-center gap-2 text-[11px]">
@@ -303,20 +439,21 @@ export function Home({ onLocked }: { onLocked: () => void }) {
           </Widget>
 
           {/* row 2: storage, repo safety, activity */}
-          <Widget title="Storage" testId="widget-storage" meta={disks.length ? `${disks.length} volume${disks.length === 1 ? "" : "s"}` : "…"} onClick={() => navigate("data")}>
-            {disks.length === 0 && <Meter label="/" percent={null} />}
-            {disks.map(({ node, d }) => (
+          <Widget title="Storage" testId="widget-storage" meta={volumes ? `${volumes} volume${volumes === 1 ? "" : "s"} · ${machines.filter((m) => m.node).length} machines` : "…"} onClick={() => navigate("data")}>
+            {disks.map(({ m, d }) => d ? (
               <Meter
-                key={`${node}:${d.filesystem}:${d.mount}`}
-                label={<span>{node} <span className="text-zinc-500">{d.mount}</span></span>}
+                key={`${m.id}:${d.filesystem}:${d.mount}`}
+                label={<span>{m.name} <span className="text-zinc-500">{d.mount}</span></span>}
                 percent={d.percent}
                 sev={severity(d.percent, 80, 92)}
                 right={<span>{fmtBytes(d.freeBytes)} free <span className="text-zinc-600">of {fmtBytes(d.totalBytes)}</span></span>}
               />
+            ) : (
+              <Meter key={m.id} label={<span className="text-zinc-500">{m.name}</span>} percent={null} right={m.self ? "…" : m.online ? "no data yet" : "offline"} />
             ))}
           </Widget>
 
-          <Widget title="Repo safety" testId="widget-redundancy" meta={r?.lastScanAt ? `scanned ${fmtAgo(r.lastScanAt)}` : "no scan yet"} onClick={() => navigate("data")}>
+          <Widget title="Repo safety" testId="widget-redundancy" meta={r?.lastScanAt ? `${reporting.length} machine${reporting.length === 1 ? "" : "s"} · scanned ${fmtAgo(r.lastScanAt)}` : "no scan yet"} onClick={() => navigate("data")}>
             <StackBar
               parts={[
                 { label: "safe", value: r?.safe ?? 0, color: HUD.green },
@@ -336,12 +473,20 @@ export function Home({ onLocked }: { onLocked: () => void }) {
                 </div>
               ))}
             </div>
+            <ul className="mt-2 space-y-0.5 text-[10px]">
+              {reporting.map((m) => { const x = m.dash!.redundancy; return (
+                <li key={m.id} className="flex justify-between gap-2 text-zinc-400">
+                  <span className="truncate">{m.name}</span>
+                  <span className="shrink-0 font-mono tabular-nums">{x.repos} repos · <span className={x.atRisk ? "text-red-400" : "text-zinc-500"}>{x.atRisk} at risk</span> · <span className={x.attention ? "text-amber-400" : "text-zinc-500"}>{x.attention} attention</span></span>
+                </li>
+              ); })}
+            </ul>
             {r && <div className="mt-2 text-[10px] text-zinc-500">user data {fmtBytes(r.dataBytes)} · caches {fmtBytes(r.dataCacheBytes)}</div>}
           </Widget>
 
-          <Widget title="Agent activity" testId="widget-activity" meta={`prompts · ${dash?.activity.length ?? 14} days · ${selfName}`} onClick={() => navigate("agents")}>
+          <Widget title="Agent activity" testId="widget-activity" meta={`prompts · ${activity.length || 14} days · ${reporting.length > 1 ? `${reporting.length} machines` : selfName}`} onClick={() => navigate("agents")}>
             <DayBars
-              days={dash?.activity ?? []}
+              days={activity}
               series={[
                 { key: "cc", label: "cc", color: HUD.cyan },
                 { key: "cx", label: "cx", color: HUD.magenta },
@@ -397,10 +542,25 @@ export function Home({ onLocked }: { onLocked: () => void }) {
             </ul>
           </Widget>
 
-          {/* row 4: this machine */}
-          <Widget title={`System · ${selfName}`} testId="widget-system" meta={sys ? `up ${fmtDuration(sys.uptimeSec)} · ${sys.cpus} cpus` : "…"}>
-            <Meter label="load (1m)" percent={sys ? Math.min(100, Math.round((sys.load[0] / sys.cpus) * 100)) : null} right={sys ? `${sys.load[0].toFixed(2)} · ${sys.load[1].toFixed(2)} · ${sys.load[2].toFixed(2)}` : "—"} />
-            <Meter label="memory" percent={sys ? Math.round(((sys.totalMem - sys.freeMem) / sys.totalMem) * 100) : null} right={sys ? `${fmtBytes(sys.totalMem - sys.freeMem)} of ${fmtBytes(sys.totalMem)}` : "—"} />
+          {/* row 4: every machine */}
+          <Widget title="Systems" testId="widget-system" className="md:col-span-2 xl:col-span-3" meta={`${machines.filter((m) => m.online).length}/${machines.length} machines up`}>
+            <div className="grid gap-x-6 gap-y-1 md:grid-cols-2 xl:grid-cols-3">
+              {machines.map((m) => { const sy = m.dash?.system; const disk = m.dash?.disks[0]; return (
+                <div key={m.id} className="py-1" data-testid={`system-${m.name.toLowerCase()}`}>
+                  <div className="flex items-baseline justify-between gap-2 text-[11px]">
+                    <span className="flex min-w-0 items-center gap-1.5 truncate text-zinc-200"><span className={`led ${m.online ? "led-on" : m.online === false ? "led-err" : "led-off"}`} />{m.name}{m.self && <span className="text-[10px] text-emerald-400">this machine</span>}{m.kind && <span className="text-[10px] text-zinc-600">{m.kind}</span>}</span>
+                    <span className="shrink-0 text-[10px] text-zinc-500">{sy ? `up ${fmtDuration(sy.uptimeSec)} · ${sy.cpus} cpus` : !m.node ? (m.online ? "reachable · no Cyberdeck node" : m.online === false ? "unreachable · no Cyberdeck node" : "no Cyberdeck node") : m.online ? "…" : "offline"}</span>
+                  </div>
+                  {sy && (
+                    <>
+                      <Meter label="load" percent={Math.min(100, Math.round((sy.load[0] / sy.cpus) * 100))} right={sy.load[0].toFixed(2)} />
+                      <Meter label="memory" percent={Math.round(((sy.totalMem - sy.freeMem) / sy.totalMem) * 100)} right={`${fmtBytes(sy.totalMem - sy.freeMem)} of ${fmtBytes(sy.totalMem)}`} />
+                      {disk && <Meter label="disk" percent={disk.percent} sev={severity(disk.percent, 80, 92)} right={`${fmtBytes(disk.freeBytes)} free`} />}
+                    </>
+                  )}
+                </div>
+              ); })}
+            </div>
           </Widget>
         </div>
 

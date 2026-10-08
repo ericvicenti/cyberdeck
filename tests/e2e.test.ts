@@ -105,6 +105,12 @@ test("shell renders: title bar, activity bar, home dashboard", async () => {
   expect(await page.textContent('[data-testid="widget-claude"]')).toContain("session");
   expect(await page.textContent('[data-testid="widget-backup"]')).toContain("not configured");
   expect(await page.textContent('[data-testid="widget-activity"]')).toContain("cc");
+  // every machine gets a row in Systems; with no peers that is just this one
+  await waitFor(async () => (await page.textContent('[data-testid="widget-system"]'))?.includes("memory") ?? false);
+  expect(await page.textContent('[data-testid="system-e2e-node"]')).toContain("this machine");
+  // the reset row is always there; offline it says so instead of offering a button
+  expect(await page.isVisible('[data-testid="widget-codex-resets"]')).toBe(true);
+  expect(await page.isVisible('[data-testid="widget-codex-use-reset"]')).toBe(false);
 });
 
 test("desk view: talk button and the not-configured card render", async () => {
@@ -433,6 +439,13 @@ test("fleet: pair a second node via the UI and browse it", async () => {
   await page.waitForSelector('[data-testid="self-card"]');
   await waitFor(async () => /(?<!\d)1\s*repos/.test((await page.textContent('[data-testid="self-card"]')) ?? ""));
   expect(await page.textContent('[data-testid="self-card"]')).toContain("this machine");
+  // ...while the fleet-wide widgets list both machines, each under its own name
+  await waitFor(async () => (await page.textContent('[data-testid="system-second-box"]'))?.includes("memory") ?? false, 20000);
+  const storage = (await page.textContent('[data-testid="widget-storage"]')) ?? "";
+  expect(storage).toContain("e2e-node");
+  expect(storage).toContain("2 machines");
+  expect(await page.textContent('[data-testid="system-second-box"]')).toContain("memory");
+  expect(await page.textContent('[data-testid="system-e2e-node"]')).toContain("this machine");
   // back to local
   await page.selectOption('[data-testid="node-switcher"]', "");
 }, 45000);

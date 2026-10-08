@@ -4,7 +4,9 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { startTestServer, testConfig, tmpHomeDir, type TestServer } from "./helpers";
-import { normalizeClaudeUsage, normalizeCodexUsage, codexUsageFromSessions, parseDf, mergeVolumes, activityByDay, backupStatus } from "../src/daemon/api/dashboard";
+import { normalizeClaudeUsage, normalizeCodexUsage, codexUsageFromSessions, parseDf, mergeVolumes, activityByDay, backupStatus, claudeResetOffer } from "../src/daemon/api/dashboard";
+import { normalizeCodexResets } from "../src/daemon/codexrpc";
+import { readFileSync, existsSync } from "fs";
 
 const { dir, cleanup } = tmpHomeDir("dashboard");
 const claudeHome = join(dir, "claude");
@@ -175,5 +177,90 @@ describe("GET /api/dashboard", () => {
   });
   test("requires auth", async () => {
     expect((await fetch(`${srv.base}/api/dashboard`)).status).toBe(401);
+  });
+});
+
+describe("limit resets", () => {
+  test("codex usage carries the reset credits; none when the account has none", () => {
+    const base = { plan_type: "pro", rate_limit: { primary_window: { used_percent: 100, limit_window_seconds: 604800, reset_at: 1791948812 } } };
+    expect(normalizeCodexUsage({ ...base, rate_limit_reset_credits: { available_count: 3, applicable_available_count: 0 } }).resets).toEqual({ via: "api", available: 3, applicable: 0 });
+    expect(normalizeCodexUsage({ ...base, rate_limit_reset_credits: { available_count: 2 } }).resets).toEqual({ via: "api", available: 2, applicable: null });
+    expect(normalizeCodexUsage({ ...base, rate_limit_reset_credits: { available_count: 0, applicable_available_count: 0 } }).resets).toBeNull();
+    expect(normalizeCodexUsage(base).resets).toBeNull();
+  });
+
+  test("claude offers /limit-reset only when Claude Code's cached flags enable it", () => {
+    const file = join(dir, "claude-flags.json");
+    expect(claudeResetOffer(join(dir, "missing.json"))).toBeNull();
+    writeFileSync(file, JSON.stringify({ cachedGrowthBookFeatures: { tengu_nifty_lemur: { enabled: true } } }));
+    expect(claudeResetOffer(file)).toEqual({ via: "cli", command: "/limit-reset", kind: "session" });
+    writeFileSync(file, JSON.stringify({ cachedGrowthBookFeatures: { tengu_nifty_lemur: { enabled: true }, tengu_cedar_ember: { enabled: true } } }));
+    expect(claudeResetOffer(file)).toEqual({ via: "cli", command: "/limit-reset", kind: "limits" });
+    writeFileSync(file, JSON.stringify({ cachedGrowthBookFeatures: { tengu_nifty_lemur: { enabled: false } } }));
+    expect(claudeResetOffer(file)).toBeNull();
+    writeFileSync(file, "not json");
+    expect(claudeResetOffer(file)).toBeNull();
+  });
+
+  test("reset credits: only available ones, soonest expiry first", () => {
+    const r = normalizeCodexResets({ rateLimitResetCredits: { availableCount: 2, credits: [
+      { id: "b", status: "available", expiresAt: 200, title: "Full reset" },
+      { id: "a", status: "available", expiresAt: 100, title: "" },
+      { id: "c", status: "redeemed", expiresAt: 50 },
+    ] } });
+    expect(r.available).toBe(2);
+    expect(r.credits.map((c) => c.id)).toEqual(["a", "b"]);
+    expect(r.credits[0]).toMatchObject({ title: "Rate limit reset", expiresAt: 100_000 });
+    expect(normalizeCodexResets({})).toEqual({ available: 0, credits: [] });
+  });
+
+  describe("routes, through a stub codex app-server", () => {
+    let srv: TestServer;
+    const log = join(dir, "codex-consumes.jsonl");
+    beforeAll(() => {
+      process.env.CYBERDECK_CODEX_APP_SERVER = JSON.stringify(["bun", join(import.meta.dir, "fixtures", "codex", "app-server.ts")]);
+      process.env.CODEX_STUB_LOG = log;
+      srv = startTestServer(testConfig());
+    });
+    afterAll(() => { srv.stop(); delete process.env.CYBERDECK_CODEX_APP_SERVER; delete process.env.CODEX_STUB_LOG; });
+    const postJson = (path: string, body: unknown) => srv.api(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+    test("GET lists the spendable credits", async () => {
+      const res = await srv.api("/api/usage/codex/resets");
+      expect(res.status).toBe(200);
+      const r = await res.json();
+      expect(r.available).toBe(2);
+      expect(r.credits.map((c: any) => c.id)).toEqual(["RateLimitResetCredit_soon", "RateLimitResetCredit_late"]);
+    });
+
+    test("POST spends exactly the named credit with the caller's idempotency key", async () => {
+      const res = await postJson("/api/usage/codex/reset", { creditId: "RateLimitResetCredit_soon", idempotencyKey: "click-0001-abcd" });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ outcome: "reset", message: "Codex limits reset." });
+      const calls = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+      expect(calls).toEqual([{ idempotencyKey: "click-0001-abcd", creditId: "RateLimitResetCredit_soon" }]);
+    });
+
+    test("POST reports a non-reset outcome honestly and rejects a malformed credit id before calling codex", async () => {
+      const used = await postJson("/api/usage/codex/reset", { creditId: "RateLimitResetCredit_used" });
+      expect(await used.json()).toMatchObject({ outcome: "alreadyRedeemed" });
+      const before = readFileSync(log, "utf8");
+      const bad = await postJson("/api/usage/codex/reset", { creditId: "x; rm -rf /" });
+      expect(bad.status).toBe(400);
+      expect(readFileSync(log, "utf8")).toBe(before);
+    });
+
+    test("requires auth", async () => {
+      expect((await fetch(`${srv.base}/api/usage/codex/reset`, { method: "POST" })).status).toBe(401);
+      expect(existsSync(log)).toBe(true);
+    });
+  });
+
+  test("the routes stay off when usage lookups are disabled and no stub is set", async () => {
+    const srv = startTestServer(testConfig());
+    try {
+      expect((await srv.api("/api/usage/codex/resets")).status).toBe(503);
+      expect((await srv.api("/api/usage/codex/reset", { method: "POST" })).status).toBe(503);
+    } finally { srv.stop(); }
   });
 });

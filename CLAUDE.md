@@ -29,6 +29,12 @@ use `bun` for everything.
   Codex falls back to the newest transcript's `rate_limits`), disks, system, prompts-per-day, repo redundancy
   and the backup placeholder (`config.backup`, ROADMAP M2). 60 s usage cache; `CYBERDECK_USAGE_NET=0` keeps
   tests off the keychain and the network. UI: `ui/views/Home.tsx` + `ui/components/Widgets.tsx`.
+  Home is fleet-wide: it reads this node with `api(path, { local: true })` (never rerouted by the node switcher)
+  and every paired node through `/api/nodes/:id/proxy/dashboard`, then lists each machine by name (Storage,
+  Systems, Repo safety; Activity and safety totals are sums; Deck hosts without a node appear in Systems).
+  Limit resets: Codex credits are listed/spent through the official `codex app-server` (`src/daemon/codexrpc.ts`,
+  routes `/api/usage/codex/resets|reset`, stub `tests/fixtures/codex/app-server.ts` via `CYBERDECK_CODEX_APP_SERVER`);
+  Claude's is only granted to Claude Code, so the button opens a `claude '/limit-reset'` session.
 - `docs/` — the knowledgebase. `docs/BRIEF.md` is the authoritative vision;
   `docs/ARCHITECTURE.md` is canonical for schema/API; `docs/ROADMAP.md` tracks milestones.
   Keep docs in sync when changing schema or routes.

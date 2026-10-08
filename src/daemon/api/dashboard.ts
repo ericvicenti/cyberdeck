@@ -1,5 +1,7 @@
 // Home dashboard: everything the widgets on the home page need in one call.
 //   GET /api/dashboard  -> { at, usage: {claude, codex}, disks, system, activity, redundancy, backup }
+//   GET  /api/usage/codex/resets -> the Codex rate-limit reset credits (with expiry)
+//   POST /api/usage/codex/reset  -> spend one, through the official `codex app-server`
 //
 // Usage limits come from the same sign-ins the CLIs use (Claude Code's OAuth token in the
 // macOS keychain or ~/.claude/.credentials.json; Codex's ~/.codex/auth.json) and are
@@ -14,6 +16,8 @@ import { join } from "path";
 import { homedir, loadavg, totalmem, freemem, uptime, cpus, platform } from "os";
 import type { CyberdeckConfig } from "../config";
 import { CYBERDECK_HOME } from "../config";
+import { readCodexResets, consumeCodexReset, type CodexResetOutcome } from "../codexrpc";
+import { randomUUID } from "crypto";
 
 export const USAGE_CACHE_MS = 60_000;
 const FETCH_TIMEOUT_MS = 10_000;
@@ -22,6 +26,8 @@ const ACTIVITY_DAYS = 14;
 export const CLAUDE_HOME = () => process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
 export const CODEX_HOME = () => process.env.CODEX_HOME ?? join(homedir(), ".codex");
 const netAllowed = () => process.env.CYBERDECK_USAGE_NET !== "0";
+/** The reset routes follow the same switch, except when a test points them at a stub app-server. */
+const resetsAllowed = () => netAllowed() || Boolean(process.env.CYBERDECK_CODEX_APP_SERVER);
 
 // ---------------------------------------------------------------- types ----
 
@@ -35,6 +41,15 @@ export type UsageLimit = {
   /** The limit the provider says is currently the binding one. */
   active: boolean;
 };
+/** How this account's free limit resets can be spent.
+ *  - `api`: Codex reset credits; the dashboard spends one via POST /api/usage/codex/reset.
+ *    `applicable` is how many would do something right now (0 when no limit is reached).
+ *  - `cli`: Claude Code only honours a reset from inside Claude Code, so the dashboard opens
+ *    a session running `command` and the confirmation happens there. `kind` says what it
+ *    refills: the 5-hour session limit (once a week) or all limits (granted resets). */
+export type UsageResets =
+  | { via: "api"; available: number; applicable: number | null }
+  | { via: "cli"; command: string; kind: "session" | "limits" };
 export type UsageSummary = {
   tool: "claude" | "codex";
   /** Whether we have numbers to show at all. */
@@ -45,6 +60,8 @@ export type UsageSummary = {
   /** When the numbers were captured (ms); for the sessions fallback, the transcript's timestamp. */
   fetchedAt: number | null;
   source: "api" | "sessions" | "none";
+  /** null: nothing to spend / not offered on this account. */
+  resets: UsageResets | null;
   error?: string;
 };
 export type DiskInfo = { mount: string; filesystem: string; totalBytes: number; usedBytes: number; freeBytes: number; percent: number; paths: string[] };
@@ -113,7 +130,7 @@ export function normalizeClaudeUsage(json: any, plan: string | null, fetchedAt =
     add("weekly_opus", "weekly · Opus", 10080, json?.seven_day_opus);
     add("weekly_sonnet", "weekly · Sonnet", 10080, json?.seven_day_sonnet);
   }
-  return { tool: "claude", available: limits.length > 0, plan, limits, credits: null, fetchedAt, source: "api" };
+  return { tool: "claude", available: limits.length > 0, plan, limits, credits: null, fetchedAt, source: "api", resets: null };
 }
 
 /** Shape of GET https://chatgpt.com/backend-api/wham/usage into our limits list. */
@@ -133,7 +150,9 @@ export function normalizeCodexUsage(json: any, fetchedAt = Date.now()): UsageSum
     top.active = true;
   }
   const credits = json?.credits ? { balance: json.credits.balance != null && json.credits.balance !== "" ? Number(json.credits.balance) : null, unlimited: Boolean(json.credits.unlimited) } : null;
-  return { tool: "codex", available: limits.length > 0, plan: json?.plan_type ?? null, limits, credits, fetchedAt, source: "api" };
+  const rc = json?.rate_limit_reset_credits;
+  const resets: UsageResets | null = rc && Number(rc.available_count) > 0 ? { via: "api", available: Number(rc.available_count), applicable: Number.isFinite(rc.applicable_available_count) ? Number(rc.applicable_available_count) : null } : null;
+  return { tool: "codex", available: limits.length > 0, plan: json?.plan_type ?? null, limits, credits, fetchedAt, source: "api", resets };
 }
 
 /** The `rate_limits` object Codex writes into its session transcripts (token_count events). */
@@ -148,10 +167,23 @@ export function normalizeCodexSessionLimits(rl: any, at: number): UsageSummary {
   add("secondary", rl?.secondary);
   if (limits.length) limits.reduce((a, b) => (b.percent > a.percent ? b : a)).active = true;
   const credits = rl?.credits ? { balance: rl.credits.balance != null && rl.credits.balance !== "" ? Number(rl.credits.balance) : null, unlimited: Boolean(rl.credits.unlimited) } : null;
-  return { tool: "codex", available: limits.length > 0, plan: rl?.plan_type ?? null, limits, credits, fetchedAt: at, source: "sessions" };
+  return { tool: "codex", available: limits.length > 0, plan: rl?.plan_type ?? null, limits, credits, fetchedAt: at, source: "sessions", resets: null };
 }
 
-const none = (tool: "claude" | "codex", error: string): UsageSummary => ({ tool, available: false, plan: null, limits: [], credits: null, fetchedAt: null, source: "none", error });
+const none = (tool: "claude" | "codex", error: string): UsageSummary => ({ tool, available: false, plan: null, limits: [], credits: null, fetchedAt: null, source: "none", resets: null, error });
+
+/** Whether Claude Code offers `/limit-reset` to this account, from the feature flags it caches in
+ *  its own config file (`~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`). The reset itself
+ *  is only granted to Claude Code, so the dashboard's button opens a session that runs the command. */
+export function claudeResetOffer(configFile = process.env.CLAUDE_CONFIG_DIR ? join(process.env.CLAUDE_CONFIG_DIR, ".claude.json") : join(homedir(), ".claude.json")): UsageResets | null {
+  try {
+    if (!existsSync(configFile)) return null;
+    const flags = JSON.parse(readFileSync(configFile, "utf8"))?.cachedGrowthBookFeatures ?? {};
+    if (flags.tengu_cedar_ember?.enabled === true) return { via: "cli", command: "/limit-reset", kind: "limits" };
+    if (flags.tengu_nifty_lemur?.enabled === true) return { via: "cli", command: "/limit-reset", kind: "session" };
+  } catch {}
+  return null;
+}
 
 // ----------------------------------------------------------- credentials ----
 
@@ -436,7 +468,7 @@ export function registerDashboardRoutes(app: Hono, db: Database, cfg: CyberdeckC
     const [claude, codex, disks, system] = await Promise.all([usage("claude", fresh), usage("codex", fresh), diskInfo(cfg), systemInfo()]);
     const body: Dashboard = {
       at: Date.now(),
-      usage: { claude, codex },
+      usage: { claude: { ...claude, resets: claude.resets ?? claudeResetOffer() }, codex },
       disks,
       system,
       activity: activityByDay(),
@@ -445,4 +477,33 @@ export function registerDashboardRoutes(app: Hono, db: Database, cfg: CyberdeckC
     };
     return c.json(body);
   });
+
+  // ---- Codex rate-limit reset credits (spent through the official app-server) ----
+  app.get("/api/usage/codex/resets", async (c) => {
+    if (!resetsAllowed()) return c.json({ error: "usage lookups disabled" }, 503);
+    try { return c.json(await readCodexResets()); }
+    catch (err) { return c.json({ error: String(err instanceof Error ? err.message : err) }, 502); }
+  });
+
+  // One click = one idempotency key, so a retried request can never spend two credits.
+  app.post("/api/usage/codex/reset", async (c) => {
+    if (!resetsAllowed()) return c.json({ error: "usage lookups disabled" }, 503);
+    const b = await c.req.json().catch(() => ({}));
+    const creditId = typeof b.creditId === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(b.creditId) ? b.creditId : undefined;
+    if (b.creditId != null && !creditId) return c.json({ error: "bad creditId" }, 400);
+    const key = typeof b.idempotencyKey === "string" && /^[A-Za-z0-9_-]{8,128}$/.test(b.idempotencyKey) ? b.idempotencyKey : randomUUID();
+    let outcome: CodexResetOutcome;
+    try { outcome = await consumeCodexReset(key, creditId); }
+    catch (err) { return c.json({ error: String(err instanceof Error ? err.message : err) }, 502); }
+    cache.delete("codex"); // the next dashboard read shows the refilled limits
+    return c.json({ outcome, message: RESET_MESSAGES[outcome] });
+  });
 }
+
+const RESET_MESSAGES: Record<CodexResetOutcome, string> = {
+  reset: "Codex limits reset.",
+  nothingToReset: "Nothing to reset: no Codex limit is reached, so no credit was used.",
+  noCredit: "No reset credit available.",
+  alreadyRedeemed: "That reset was already used.",
+  unknown: "Codex answered with an outcome this version does not know; check the limits above.",
+};

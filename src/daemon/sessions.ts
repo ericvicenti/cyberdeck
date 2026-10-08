@@ -68,7 +68,7 @@ export function trustClaudeDir(cwd: string): boolean {
   }
 }
 
-function loginShell(): string {
+export function loginShell(): string {
   return process.env.SHELL && existsSync(process.env.SHELL) ? process.env.SHELL : process.platform === "darwin" ? "/bin/zsh" : "/bin/bash";
 }
 
