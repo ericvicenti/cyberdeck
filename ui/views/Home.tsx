@@ -81,7 +81,8 @@ function UsageWidget({ title, usage, testId, node, nodeName, isSelf, onRefresh }
         <div>
           {u.limits.map((l) => (
             <div key={l.id} title={l.resetsAt ? `resets ${new Date(l.resetsAt).toLocaleString()}` : undefined}>
-              <Meter label={l.label} percent={l.percent} active={l.active} right={<span>{l.percent}% used{l.resetsAt ? <span className="text-zinc-600"> · resets {fmtIn(l.resetsAt)} ({fmtWhen(l.resetsAt)})</span> : null}</span>} />
+              <Meter label={l.label} percent={l.percent} active={l.active} right={<span>{l.percent}% used{l.resetsAt ? <span className="text-zinc-600"> · {fmtIn(l.resetsAt)}</span> : null}</span>} />
+              {l.resetsAt && <div className="-mt-0.5 text-right text-[10px] text-zinc-600">resets {fmtWhen(l.resetsAt)}</div>}
             </div>
           ))}
           {u.credits && (u.credits.unlimited || u.credits.balance != null) && (
@@ -101,8 +102,8 @@ function UsageWidget({ title, usage, testId, node, nodeName, isSelf, onRefresh }
       )}
 
       <div className="mt-3 border-t border-zinc-800 pt-3" data-testid={`${testId}-resets`}>
-        <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0 text-[11px] text-zinc-300">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0 basis-full text-[11px] text-zinc-300">
             {rs?.via === "api" && (
               <span>
                 {rs.available} reset{rs.available === 1 ? "" : "s"} available
