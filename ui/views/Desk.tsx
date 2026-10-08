@@ -15,6 +15,8 @@ type VoiceStatus = {
   agent?: { id: string; name?: string };
   sessionId?: string;
   health?: unknown;
+  /** The Casework voice profile calls carry (Cartesia voice id + rate) and whether the runtime token to apply it is on hand. */
+  profile?: { voice: string; speed: number; runtimeToken: boolean };
 };
 type TranscriptHistory = { supported: boolean; messages?: { role: "user" | "assistant"; text: string; at?: number }[] };
 
@@ -225,6 +227,7 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
               <span className="hud-chip text-zinc-300" title={status?.agent?.id ?? ""}><span className={`led ${agentName ? "led-on" : "led-off"}`} />agent {agentName ? agentName.slice(0, 18) : "—"}</span>
               <span className="hud-chip text-zinc-300" title={sessionId ?? ""}><span className={`led ${sessionId ? "led-run" : "led-off"}`} />session {sessionId ? sessionId.slice(0, 8) : "—"}</span>
               {configured && <button onClick={resetSession} disabled={busy !== ""} data-testid="voice-new-session" className="hud-chip text-zinc-300 hover:text-zinc-100 disabled:opacity-40">{busy === "reset" ? "resetting…" : "new session"}</button>}
+              {status?.profile && <span className="hud-chip text-zinc-300" data-testid="voice-profile" title={status.profile.runtimeToken ? `Cartesia voice ${status.profile.voice} at ${status.profile.speed}x, applied to every call` : `Cartesia voice ${status.profile.voice}: no runtime token on this node, calls keep the worker's default voice`}><span className={`led ${status.profile.runtimeToken ? "led-on" : "led-warn"}`} />voice {status.profile.voice.slice(0, 8)} ×{status.profile.speed}</span>}
               <span className="hud-chip text-zinc-300"><span className="led led-on" />node {nodeName || "—"}</span>
               {status?.identity && <span className="hud-chip text-zinc-300" title={status.identity.principal ?? ""}><span className={`led ${status.identity.available ? "led-on" : "led-warn"}`} />identity {status.identity.available ? (status.identity.principal ?? "ok").slice(0, 12) : "missing"}</span>}
             </div>

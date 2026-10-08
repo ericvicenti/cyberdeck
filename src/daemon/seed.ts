@@ -27,13 +27,20 @@ export type SeedStatus = {
   lastCallAt?: number;
   /** The daily fleet check-in trigger (`dogfood()`), read back from the agents server; absent when none. */
   dogfood?: DogfoodStatus;
+  /** The voice profile calls will carry (from companion.json) and whether the runtime token to apply it is on hand. */
+  profile?: VoiceProfile & { runtimeToken: boolean; source: string };
 };
 
 export type DogfoodStatus = { triggerId: string; name: string; enabled: boolean; lastFiredAt?: number; lastError?: string; nextSummary?: string };
 export type DogfoodOptions = { timezone?: string; timeOfDay?: string };
 type TriggerInfo = { id: string; name: string; enabled: boolean; source: any; lastFiredAt?: number; lastError?: string; createdAt?: number };
 
-export type VoiceSession = { sessionId: string; url: string; token: string; room: string; identity: string; expiresAt: number };
+/** Cartesia voice id + speaking rate, as the Casework host keeps it in companion.json (`profile`). */
+export type VoiceProfile = { voice: string; speed: number };
+/** What happened to the profile for one call: applied through the agents server's runtime route, or why not. */
+export type VoiceProfileResult = VoiceProfile & { applied: boolean; error?: string };
+
+export type VoiceSession = { sessionId: string; url: string; token: string; room: string; identity: string; expiresAt: number; profile?: VoiceProfileResult };
 
 export type TranscriptMessage = { seq: number; role: "user" | "assistant"; text: string; at: number };
 export type Transcript = { supported: boolean; sessionId?: string; messages: TranscriptMessage[]; hasMoreBefore?: boolean; error?: string };
@@ -60,6 +67,11 @@ export class SeedError extends Error {
 }
 
 export const COMPANION_FILE = join(homedir(), "Library", "Application Support", "CaseworkSeed", "companion.json");
+/** The experiments agents server's env file; `SEED_AGENTS_VOICE_INTERNAL_TOKEN` in it guards its internal voice routes. */
+export const RUNTIME_FILE = join(homedir(), "Library", "Application Support", "CaseworkSeed", "runtime.json");
+const RUNTIME_TIMEOUT_MS = 5_000;
+// Mirrors the agents server's own validation (voice.ts #handleRuntime) so a bad profile is skipped here, not 400'd there.
+const VOICE_ID_RE = /^[a-zA-Z0-9-]{1,100}$/;
 const MCP_SERVER_NAME = "cyberdeck";
 export const DOGFOOD_TRIGGER_NAME = "cyberdeck-fleet-checkin";
 export const DOGFOOD_PROMPT =
@@ -94,6 +106,8 @@ export type SeedBridgeOptions = {
   home?: string;
   /** Casework Companion state to adopt (default the CaseworkSeed app-support file). */
   companionFile?: string;
+  /** Agents-server env file holding SEED_AGENTS_VOICE_INTERNAL_TOKEN (default the CaseworkSeed runtime.json). */
+  runtimeFile?: string;
   /** Injected fetch (tests). */
   fetch?: typeof fetch;
 };
@@ -120,6 +134,7 @@ export class SeedBridge {
   readonly config: SeedConfig;
   readonly stateFile: string;
   readonly companionFile: string;
+  readonly runtimeFile: string;
   #port: number;
   #token: string;
   #fetch: typeof fetch;
@@ -140,6 +155,7 @@ export class SeedBridge {
     const home = opts.home ?? CYBERDECK_HOME;
     this.stateFile = join(home, "seed.json");
     this.companionFile = opts.companionFile ?? COMPANION_FILE;
+    this.runtimeFile = opts.runtimeFile ?? RUNTIME_FILE;
     this.#state = this.#load();
     // Agent/session from config.json seed a fresh state file (setup overwrites them in seed.json).
     if (!this.#state.agentId && opts.config.agentId) this.#state.agentId = opts.config.agentId;
@@ -275,6 +291,8 @@ export class SeedBridge {
       const dogfood = await this.#dogfoodStatus().catch(() => undefined);
       if (dogfood) s.dogfood = dogfood;
     }
+    const profile = this.voiceProfile();
+    if (profile) s.profile = { ...profile, runtimeToken: this.#runtimeToken() !== null, source: this.companionFile };
     return s;
   }
 
@@ -407,8 +425,50 @@ export class SeedBridge {
     return this.#agentName;
   }
 
-  #readCompanion(): { agentId?: string; sessionId?: string } | null {
+  #readCompanion(): { agentId?: string; sessionId?: string; profile?: { voice?: unknown; speed?: unknown } } | null {
     try { return existsSync(this.companionFile) ? JSON.parse(readFileSync(this.companionFile, "utf8")) : null; } catch { return null; }
+  }
+
+  // ---- voice profile --------------------------------------------------------------------------
+
+  /** The profile the Casework host set (companion.json `profile`); null when absent or malformed. */
+  voiceProfile(): VoiceProfile | null {
+    const p = this.#readCompanion()?.profile;
+    if (!p || typeof p.voice !== "string" || !VOICE_ID_RE.test(p.voice) || typeof p.speed !== "number" || !(p.speed >= 0.6 && p.speed <= 2)) return null;
+    return { voice: p.voice, speed: p.speed };
+  }
+
+  /** CYBERDECK_SEED_VOICE_INTERNAL_TOKEN, else SEED_AGENTS_VOICE_INTERNAL_TOKEN from the runtime file. Never logged. */
+  #runtimeToken(): string | null {
+    const env = process.env.CYBERDECK_SEED_VOICE_INTERNAL_TOKEN?.trim();
+    if (env) return env;
+    try {
+      if (!existsSync(this.runtimeFile)) return null;
+      const t = (JSON.parse(readFileSync(this.runtimeFile, "utf8")) as { SEED_AGENTS_VOICE_INTERNAL_TOKEN?: unknown }).SEED_AGENTS_VOICE_INTERNAL_TOKEN;
+      return typeof t === "string" && t.trim() ? t.trim() : null;
+    } catch { return null; }
+  }
+
+  /**
+   * Tell the agents server's voice runtime which voice to speak with in `room` (POST /api/voice/runtime,
+   * the same call the casework-host script makes). Failures never fail the call: the room still works
+   * with the worker's default voice, and the result says why.
+   */
+  async #applyProfile(room: string, profile: VoiceProfile): Promise<VoiceProfileResult> {
+    const token = this.#runtimeToken();
+    if (!token) return { ...profile, applied: false, error: `no voice runtime token (${this.runtimeFile})` };
+    try {
+      const res = await this.#fetch(`${this.config.agentsUrl}/api/voice/runtime`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ room, profile }),
+        signal: AbortSignal.timeout(RUNTIME_TIMEOUT_MS),
+      });
+      if (!res.ok) return { ...profile, applied: false, error: `voice runtime HTTP ${res.status}` };
+      return { ...profile, applied: true };
+    } catch (e) {
+      return { ...profile, applied: false, error: e instanceof Error ? e.message : String(e) };
+    }
   }
 
   // ---- sessions -------------------------------------------------------------------------------
@@ -453,7 +513,10 @@ export class SeedBridge {
     const r = await this.action<{ url: string; token: string; room: string; identity: string; expiresAt: number }>({ _: "CreateVoiceSession", sessionId });
     this.#state.lastCallAt = Date.now();
     this.#save();
-    return { sessionId, url: r.url, token: r.token, room: r.room, identity: r.identity, expiresAt: r.expiresAt };
+    const wanted = this.voiceProfile();
+    const profile = wanted ? await this.#applyProfile(r.room, wanted) : undefined;
+    if (profile && !profile.applied) console.error(`voice: profile not applied to ${r.room}: ${profile.error}`);
+    return { sessionId, url: r.url, token: r.token, room: r.room, identity: r.identity, expiresAt: r.expiresAt, ...(profile ? { profile } : {}) };
   }
 
   /** Recent user/assistant messages of the current session (GetSession's transcript tail; cheap). */

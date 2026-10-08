@@ -111,8 +111,8 @@ the node token (`~/.cyberdeck/token`) requires a re-run so the secret on the age
 | Route | Key | Returns |
 |---|---|---|
 | `GET /api/voice/config` | pairing | `{configured, provider: 'livekit' \| 'none', engine: 'seed', reason?, agentId?, sessionId?}` |
-| `POST /api/voice/livekit` | pairing | `{sessionId, url, token, room, identity, expiresAt}` from `CreateVoiceSession`; `503 {error: 'voice not configured', reason}` when unconfigured; `502 {error}` on a server failure |
-| `GET /api/voice/status` | pairing | `{configured, reason?, agentsUrl, identity: {name, available, principal?, error?}, agent?: {id, name?}, sessionId?, health: {ok, voice, protocol, version, error?, checkedAt}, mcpRegisteredAt?, lastCallAt?}` |
+| `POST /api/voice/livekit` | pairing | `{sessionId, url, token, room, identity, expiresAt, profile?}` from `CreateVoiceSession`; `profile: {voice, speed, applied, error?}` says whether the voice profile below reached the room; `503 {error: 'voice not configured', reason}` when unconfigured; `502 {error}` on a server failure |
+| `GET /api/voice/status` | pairing | `{configured, reason?, agentsUrl, identity: {name, available, principal?, error?}, agent?: {id, name?}, sessionId?, health: {ok, voice, protocol, version, error?, checkedAt}, mcpRegisteredAt?, lastCallAt?, profile?: {voice, speed, runtimeToken, source}}` |
 | `POST /api/voice/session/reset` | pairing | `{sessionId, previous?}`: a new session for the next call |
 | `GET /api/voice/transcript?limit=` | pairing | `{supported: true, sessionId?, messages: [{seq, role, text, at}], hasMoreBefore}`: user/assistant text of the current session (`GetSession`'s tail, cheap) |
 | `POST /api/voice/dogfood` | node token | `{triggerId, name, enabled, lastFiredAt?, lastError?, nextSummary?, created}`: the daily fleet check-in trigger (below); body `{timezone?, timeOfDay?}` |
@@ -134,10 +134,31 @@ the room, and recreates the session if the server no longer has it.
 cyberdeck seed status          # server health, identity, agent, session, last call; exit 1 when not ready
 cyberdeck seed setup [--new]   # see above
 cyberdeck seed reset-session   # next call starts a fresh session
-cyberdeck seed call            # smoke test: mint a room and print it (token withheld); nothing joins it
+cyberdeck seed call            # smoke test: mint a room and print it (token withheld, profile result included); nothing joins it
 cyberdeck seed transcript [n]  # last n user/assistant messages
 cyberdeck seed dogfood [--tz Europe/Madrid] [--at 07:00]   # daily fleet check-in trigger (idempotent)
 ```
+
+## Voice profile
+
+The Casework host keeps Eric's chosen voice in `~/Library/Application Support/CaseworkSeed/companion.json`
+as `profile: {voice: <Cartesia voice id>, speed}`. The agents server applies a profile per room through
+its internal runtime route (`POST /api/voice/runtime {room, profile}`, bearer
+`SEED_AGENTS_VOICE_INTERNAL_TOKEN`), which the worker consults when it speaks. Every
+`POST /api/voice/livekit` now does what the casework-host script did: right after `CreateVoiceSession`
+it reads the profile from `companion.json`, reads the token from `SEED_AGENTS_VOICE_INTERNAL_TOKEN` in
+`~/Library/Application Support/CaseworkSeed/runtime.json` (the experiments server's env file; env
+`CYBERDECK_SEED_VOICE_INTERNAL_TOKEN` overrides, tests pass a `runtimeFile`), and posts
+`{room, profile}` with a 5 s timeout. The call never fails on this step: the response's `profile`
+says `applied: true`, or `applied: false` with the reason (`no voice runtime token (...)`,
+`voice runtime HTTP 401`, a timeout), and the room speaks with the worker's default voice. A profile
+that would not pass the server's validation (voice id `[a-zA-Z0-9-]{1,100}`, speed 0.6 to 2) is
+skipped silently and `profile` is absent.
+
+`status` reports `profile: {voice, speed, runtimeToken, source}` whenever `companion.json` has a valid
+profile, so `cyberdeck seed status` and the Desk's bridge strip ("voice 13ff5deb x1") show which voice
+calls will use and whether the token to apply it is on hand (amber LED when it is not). Nodes other
+than the one running the experiments server have neither file and carry no profile.
 
 ## Dogfood: the daily fleet check-in
 
@@ -160,10 +181,8 @@ hands out is its own (today a LAN `ws://` address), so the caller must be able t
 
 ## Not done
 
-- **Voice profile** (Cartesia voice id and speed in `companion.json`) is not applied: that goes
-  through the agents server's internal runtime endpoint (`/api/voice/runtime`, bearer
-  `SEED_AGENTS_VOICE_INTERNAL_TOKEN`), which Cyberdeck does not hold. The companion keeps whatever
-  profile the Casework host set.
+- **Voice profile editing**: Cyberdeck applies the profile but has no UI or route to change it; the
+  Casework host's `set_voice` tool (or editing `companion.json`) is still how it is chosen.
 - **Production agents server** is not wired: the default is the local experiments instance. Pointing
   `seed.agentsUrl` at a hosted server also needs the MCP URL to be reachable from there
   (docs/AGENTS.md, Reachability) and that server to run a voice pipeline.

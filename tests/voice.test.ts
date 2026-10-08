@@ -22,6 +22,7 @@ const EXPECTED_PRINCIPAL = blobs.principalToString(blobs.nobleKeyPairFromSeed(Ui
 const KEY = "casework-pairing-key-for-voice-tests";
 const FIXTURES = join(import.meta.dir, "fixtures", "casework");
 const COMPANION_ID = "companion-agent-1";
+const RUNTIME_TOKEN = "internal-voice-runtime-token";
 
 type Action = Record<string, any>;
 function fakeAgents(opts: { voice: boolean }) {
@@ -31,6 +32,7 @@ function fakeAgents(opts: { voice: boolean }) {
   const secrets = new Map<string, Uint8Array>();
   const mcp = new Map<string, Record<string, any>>();
   const triggers = new Map<string, Record<string, any>[]>();
+  const runtimeCalls: { auth: string | null; body: any }[] = [];
   let n = 0;
   const err = (status: number, message: string) => new Response(cbor.encode({ _: "Error", message }) as unknown as BodyInit, { status, headers: { "content-type": "application/cbor" } });
   const ok = (body: unknown) => new Response(cbor.encode(body) as unknown as BodyInit, { headers: { "content-type": "application/cbor" } });
@@ -40,6 +42,15 @@ function fakeAgents(opts: { voice: boolean }) {
     async fetch(req) {
       const url = new URL(req.url);
       if (url.pathname === "/api/health") return Response.json({ status: "ok", version: "fake", protocol: 3, voice: opts.voice });
+      // The internal voice runtime route (bearer = SEED_AGENTS_VOICE_INTERNAL_TOKEN), validated like the real one.
+      if (url.pathname === "/api/voice/runtime" && req.method === "POST") {
+        const body = await req.json().catch(() => null);
+        runtimeCalls.push({ auth: req.headers.get("authorization"), body });
+        if (req.headers.get("authorization") !== `Bearer ${RUNTIME_TOKEN}`) return Response.json({ error: "Unauthorized" }, { status: 401 });
+        const pr = body?.profile;
+        if (pr && (typeof pr.voice !== "string" || !/^[a-zA-Z0-9-]{1,100}$/.test(pr.voice) || typeof pr.speed !== "number" || pr.speed < 0.6 || pr.speed > 2)) return Response.json({ error: "Invalid voice profile" }, { status: 400 });
+        return Response.json({ pid: 1, rooms: [] });
+      }
       if (url.pathname !== "/api/message" || req.method !== "POST") return Response.json({ error: "nope" }, { status: 404 });
       if (!(req.headers.get("content-type") ?? "").startsWith("application/cbor")) return err(415, "Content-Type must be application/cbor");
       const env: any = cbor.decode(new Uint8Array(await req.arrayBuffer()));
@@ -87,17 +98,20 @@ function fakeAgents(opts: { voice: boolean }) {
       }
     },
   });
-  return { url: `http://127.0.0.1:${server.port}`, actions, agents, sessions, secrets, mcp, triggers, stop: () => void server.stop(true) };
+  return { url: `http://127.0.0.1:${server.port}`, actions, agents, sessions, secrets, mcp, triggers, runtimeCalls, stop: () => void server.stop(true) };
 }
 
 type Node = { base: string; wsBase: string; home: string; stop: () => void; cleanup: () => void };
-function startNode(agentsUrl: string, prefix: string, companion?: object): Node {
+function startNode(agentsUrl: string, prefix: string, companion?: object, runtimeToken?: string): Node {
   const { dir, cleanup } = tmpHomeDir(prefix);
   const companionFile = join(dir, "companion.json");
   if (companion) writeFileSync(companionFile, JSON.stringify(companion));
+  // Always point at a file inside the temp home so the test never reads this Mac's real runtime.json.
+  const runtimeFile = join(dir, "runtime.json");
+  if (runtimeToken) writeFileSync(runtimeFile, JSON.stringify({ SEED_AGENTS_VOICE_INTERNAL_TOKEN: runtimeToken, SEED_AGENTS_HTTP_PORT: "3053" }));
   const db = new Database(":memory:");
   initSchema(db);
-  const s = createServer(db, testConfig({ port: 4777, seed: { agentsUrl } }), TEST_TOKEN, "stw-test", { caseworkKey: KEY, caseworkExperiencesDir: FIXTURES, persistOwner: false, cloudSync: false, seed: { home: dir, companionFile } });
+  const s = createServer(db, testConfig({ port: 4777, seed: { agentsUrl } }), TEST_TOKEN, "stw-test", { caseworkKey: KEY, caseworkExperiencesDir: FIXTURES, persistOwner: false, cloudSync: false, seed: { home: dir, companionFile, runtimeFile } });
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: s.fetch, websocket: s.websocket });
   return { base: `http://127.0.0.1:${server.port}`, wsBase: `ws://127.0.0.1:${server.port}`, home: dir, stop: () => { s.sessions.close(); void server.stop(true); }, cleanup };
 }
@@ -114,14 +128,16 @@ function welcome(node: Node): Promise<any> {
 }
 
 let voiced: ReturnType<typeof fakeAgents>, muted: ReturnType<typeof fakeAgents>;
-let a: Node, b: Node;
+let a: Node, b: Node, c: Node;
 beforeAll(() => {
   voiced = fakeAgents({ voice: true });
   muted = fakeAgents({ voice: false });
-  a = startNode(voiced.url, "voice-a", { agentId: COMPANION_ID, sessionId: "old-companion-session", profile: { voice: "v", speed: 1 } });
+  a = startNode(voiced.url, "voice-a", { agentId: COMPANION_ID, sessionId: "old-companion-session", profile: { voice: "v", speed: 1 } }, RUNTIME_TOKEN);
   b = startNode(muted.url, "voice-b");
+  // Same companion and profile, but a runtime token the agents server rejects.
+  c = startNode(voiced.url, "voice-c", { agentId: COMPANION_ID, profile: { voice: "v-other", speed: 1.2 } }, "stale-token");
 });
-afterAll(() => { for (const n of [a, b]) { n.stop(); n.cleanup(); } voiced.stop(); muted.stop(); });
+afterAll(() => { for (const n of [a, b, c]) { n.stop(); n.cleanup(); } voiced.stop(); muted.stop(); });
 
 describe("seed config", () => {
   test("defaults, file values, then env overrides", () => {
@@ -211,6 +227,8 @@ describe("configured node", () => {
     const w = await welcome(a);
     expect(w.type).toBe("welcome");
     expect(w.voice).toMatchObject({ configured: true, provider: "livekit" });
+    const s = await (await req(a, KEY, "/api/voice/status")).json();
+    expect(s.profile).toEqual({ voice: "v", speed: 1, runtimeToken: true, source: join(a.home, "companion.json") });
   });
   test("livekit with the pairing key returns url/token/room and records the call", async () => {
     const before = voiced.actions.length;
@@ -225,6 +243,36 @@ describe("configured node", () => {
     expect(voiced.actions.slice(before).map((x) => x._)).toEqual(["GetSession", "CreateVoiceSession"]);
     expect(typeof JSON.parse(readFileSync(join(a.home, "seed.json"), "utf8")).lastCallAt).toBe("number");
     expect((await (await req(a, TEST_TOKEN, "/api/voice/status")).json()).lastCallAt).toBeGreaterThan(0);
+    // The companion's voice profile went to the runtime route for exactly this room, with the internal token.
+    expect(j.profile).toEqual({ voice: "v", speed: 1, applied: true });
+    const rt = voiced.runtimeCalls[voiced.runtimeCalls.length - 1]!;
+    expect(rt.auth).toBe(`Bearer ${RUNTIME_TOKEN}`);
+    expect(rt.body).toEqual({ room: j.room, profile: { voice: "v", speed: 1 } });
+  });
+  test("a rejected runtime token leaves the call working and reports the profile as not applied", async () => {
+    expect((await req(c, TEST_TOKEN, "/api/voice/setup", { method: "POST" })).status).toBe(200);
+    const s = await (await req(c, KEY, "/api/voice/status")).json();
+    expect(s.profile).toMatchObject({ voice: "v-other", speed: 1.2, runtimeToken: true });
+    const calls = voiced.runtimeCalls.length;
+    const r = await req(c, KEY, "/api/voice/livekit", { method: "POST" });
+    expect(r.status).toBe(200);
+    const j = await r.json();
+    expect(j.room).toMatch(/^room-session-/);
+    expect(j.profile).toEqual({ voice: "v-other", speed: 1.2, applied: false, error: "voice runtime HTTP 401" });
+    expect(voiced.runtimeCalls.length).toBe(calls + 1);
+    expect(voiced.runtimeCalls[calls]!.auth).toBe("Bearer stale-token");
+    // A malformed profile is skipped before it reaches the server; no token on disk is reported too.
+    writeFileSync(join(c.home, "companion.json"), JSON.stringify({ agentId: COMPANION_ID, profile: { voice: "not a voice id!", speed: 1 } }));
+    const bad = await (await req(c, KEY, "/api/voice/livekit", { method: "POST" })).json();
+    expect(bad.profile).toBeUndefined();
+    expect(voiced.runtimeCalls.length).toBe(calls + 1);
+    expect((await (await req(c, KEY, "/api/voice/status")).json()).profile).toBeUndefined();
+    writeFileSync(join(c.home, "companion.json"), JSON.stringify({ agentId: COMPANION_ID, profile: { voice: "v-other", speed: 1.2 } }));
+    writeFileSync(join(c.home, "runtime.json"), JSON.stringify({}));
+    const none = await (await req(c, KEY, "/api/voice/livekit", { method: "POST" })).json();
+    expect(none.profile).toMatchObject({ voice: "v-other", applied: false });
+    expect(none.profile.error).toContain("no voice runtime token");
+    expect(voiced.runtimeCalls.length).toBe(calls + 1);
   });
   test("transcript returns user and assistant text only", async () => {
     const t = await (await req(a, KEY, "/api/voice/transcript?limit=5")).json();
