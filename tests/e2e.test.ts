@@ -423,6 +423,16 @@ test("fleet: pair a second node via the UI and browse it", async () => {
   expect(await page.isVisible('[data-testid="row-readme.md"]')).toBe(true);
   // status bar shows we are remote
   expect(await page.textContent('[data-testid="statusbar-node"]')).toContain("second-box");
+  // the Fleet page's "this machine" card still describes the local node (one repo after this
+  // scan), not the active remote node (no roots, 0 repos)
+  mkdirSync(join(play, "repo-one"));
+  Bun.spawnSync(["git", "init", "-q", join(play, "repo-one")]);
+  await fetch(`${BASE}/api/scan`, { method: "POST", headers: { authorization: `Bearer ${TOKEN}` } });
+  await waitFor(async () => ((await (await fetch(`${BASE}/api/status?token=${TOKEN}`)).json()).repos ?? 0) >= 1);
+  await page.goto(`${BASE}/#/fleet`);
+  await page.waitForSelector('[data-testid="self-card"]');
+  await waitFor(async () => /(?<!\d)1\s*repos/.test((await page.textContent('[data-testid="self-card"]')) ?? ""));
+  expect(await page.textContent('[data-testid="self-card"]')).toContain("this machine");
   // back to local
   await page.selectOption('[data-testid="node-switcher"]', "");
 }, 45000);

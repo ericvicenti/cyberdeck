@@ -56,10 +56,10 @@ function UsageWidget({ title, usage, testId }: { title: string; usage: UsageSumm
 
 // ---------------------------------------------------------------- node card ----
 
-function NodeCard(props: { name: string; subtitle: string; online: boolean; status: NodeStatus | null; isSelf?: boolean; onBrowse?: () => void; onTerminal?: () => void; onRepos?: () => void; onUnpair?: () => void }) {
+function NodeCard(props: { name: string; subtitle: string; online: boolean; status: NodeStatus | null; isSelf?: boolean; onBrowse?: () => void; onTerminal?: () => void; onRepos?: () => void; onUnpair?: () => void; testId?: string }) {
   const s = props.status;
   return (
-    <div className="hud-card p-4">
+    <div className="hud-card p-4" data-testid={props.testId}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2.5">
           <div className={`rounded-lg p-2 ${props.online ? "bg-emerald-500/10 text-emerald-400" : "bg-zinc-800 text-zinc-500"}`}>
@@ -137,7 +137,7 @@ function CaseworkCard() {
   const [err, setErr] = useState("");
   const [copied, setCopied] = useState("");
   const load = async () => {
-    try { setPairing(await api<CaseworkPairing>(`/api/casework/pairing?url=${encodeURIComponent(location.origin)}`)); setErr(""); }
+    try { setPairing(await api<CaseworkPairing>(`/api/casework/pairing?url=${encodeURIComponent(location.origin)}`, { local: true })); setErr(""); }
     catch (e) { setErr(e instanceof ApiError && e.status === 403 ? "sign in with the token or over the tailnet to see the pairing key" : String(e)); }
   };
   useEffect(() => { void load(); const t = setInterval(() => void load(), 15_000); return () => clearInterval(t); }, []);
@@ -180,12 +180,15 @@ export function Home({ onLocked }: { onLocked: () => void }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
+  // Home is always about the node serving this UI, so every fetch here is `local: true`: it must not
+  // follow the active-node selector, or the self card / Storage / Backup widgets would show the
+  // remote node's numbers under this node's name (two nodes with identical storage).
   const load = async () => {
     try {
-      const [f, s] = await Promise.all([api<FleetInfo>("/api/fleet/nodes"), api<NodeStatus>("/api/status")]);
+      const [f, s] = await Promise.all([api<FleetInfo>("/api/fleet/nodes"), api<NodeStatus>("/api/status", { local: true })]);
       setInfo(f);
       setSelfStatus(s);
-      api<Overview>("/api/control/overview").then(setControl).catch((e) => { if (e instanceof ApiError && e.status === 404) setControl(null); });
+      api<Overview>("/api/control/overview", { local: true }).then(setControl).catch((e) => { if (e instanceof ApiError && e.status === 404) setControl(null); });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) onLocked();
     }
@@ -193,7 +196,7 @@ export function Home({ onLocked }: { onLocked: () => void }) {
   // The dashboard is heavier (usage APIs, df); poll it on its own, slower clock.
   const loadDash = async () => {
     try {
-      setDash(await api<Dashboard>("/api/dashboard"));
+      setDash(await api<Dashboard>("/api/dashboard", { local: true }));
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) onLocked();
     }
@@ -409,6 +412,7 @@ export function Home({ onLocked }: { onLocked: () => void }) {
             subtitle={info?.self.urls.join("  ·  ") || "no LAN address"}
             online
             isSelf
+            testId="self-card"
             status={selfStatus}
             onRepos={() => goto("", "", "data")}
             onBrowse={() => goto("", "", "files")}

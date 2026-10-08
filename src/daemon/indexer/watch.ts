@@ -32,6 +32,15 @@ export function startWatcher(db: Database, cfg: CyberdeckConfig, debounceMs = 15
         if (filename && IGNORE.test(`/${filename}/`)) return;
         schedule();
       });
+      // A watcher can fail after it is set up (Linux: ENOSPC once the inotify
+      // watch limit is hit on a big tree). Unhandled, that error event kills
+      // the whole daemon; instead drop this root and rely on the hourly scan.
+      w.on("error", (err) => {
+        console.error(`watch on ${root} failed, falling back to periodic scans:`, err instanceof Error ? err.message : err);
+        try { w.close(); } catch {}
+        const i = watchers.indexOf(w);
+        if (i >= 0) watchers.splice(i, 1);
+      });
       watchers.push(w);
     } catch (err) {
       console.error(`could not watch ${root}:`, err);

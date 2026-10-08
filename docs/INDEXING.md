@@ -112,7 +112,10 @@ API.
 - **Linux:** inotify via Bun FFI (`inotify_init1`/`inotify_add_watch`), recursive-watch
   managed in TS with a watch-descriptor→path map. Cap at `fs.inotify.max_user_watches`;
   if roots exceed the cap, degrade that root to polling (stat-walk every 15 min) and
-  surface a UI warning suggesting the sysctl bump.
+  surface a UI warning suggesting the sysctl bump. *Implemented today:* `fs.watch`
+  recursive per root (`src/daemon/indexer/watch.ts`); an `error` event on a watcher
+  (Linux `ENOSPC` once `max_user_watches` is exhausted) closes that watcher and logs it,
+  and the root falls back to the hourly full scan instead of taking the daemon down.
 - Events are **coalesced** into a debounced dirty-set: `Map<path, firstSeenAt>` flushed
   when a path has been quiet for 5 s or dirty for 60 s. Flush enqueues a `partial` scan
   job rooted at each dirty path (deduped by prefix — if `/a` and `/a/b` are both dirty,

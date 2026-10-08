@@ -25,10 +25,14 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(scoped(path), {
-    ...init,
-    headers: { authorization: `Bearer ${token()}`, ...init?.headers },
+/** `local: true` always talks to the daemon serving this page, even when a remote node is active. */
+export type ApiInit = RequestInit & { local?: boolean };
+
+export async function api<T>(path: string, init?: ApiInit): Promise<T> {
+  const { local, ...rest } = init ?? {};
+  const res = await fetch(local ? path : scoped(path), {
+    ...rest,
+    headers: { authorization: `Bearer ${token()}`, ...rest.headers },
   });
   if (!res.ok) {
     let message = `${res.status}`;

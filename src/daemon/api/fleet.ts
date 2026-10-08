@@ -63,7 +63,11 @@ export function registerFleetRoutes(
   const tailnetInfo = async () => (extras.tailscale ? await extras.tailscale.self() : null);
 
   /** URL peers should dial us at: the MagicDNS name when on a tailnet, else the LAN address closest to the peer. */
-  const selfUrl = async (peerUrl?: string): Promise<string> => {
+  const selfUrl = async (peerUrl?: string, dialedAs?: string): Promise<string> => {
+    // Bound to one explicit address (127.0.0.1 in tests, or a pinned LAN IP): that is the
+    // only place peers can reach us, so never advertise the tailnet name or another interface.
+    // `dialedAs` is the Host a peer just reached us at, which beats cfg.port when that is 0 (ephemeral).
+    if (cfg.bind !== "tailscale" && cfg.bind !== "lan") return dialedAs ? `http://${dialedAs}` : `http://${cfg.bind}:${cfg.port}`;
     const self = await tailnetInfo();
     if (self?.dnsName) return `http://${self.dnsName}:${cfg.port}`;
     const myUrls = lanUrls(cfg.port);
@@ -102,7 +106,7 @@ export function registerFleetRoutes(
     if (viaCode) pairing = null; // single use
     if (!body.nodeId || !body.url || !body.token) return c.json({ error: "missing fields" }, 400);
     upsertNode(body.nodeId, String(body.name ?? "node"), String(body.url), String(body.token));
-    return c.json({ nodeId, name: cfg.nodeName, token: myToken, urls: lanUrls(cfg.port), url: await selfUrl(String(body.url)) });
+    return c.json({ nodeId, name: cfg.nodeName, token: myToken, urls: lanUrls(cfg.port), url: await selfUrl(String(body.url), c.req.header("host")) });
   });
 
   // Initiate pairing from this side: we call the peer's /complete. With a
