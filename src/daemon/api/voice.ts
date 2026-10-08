@@ -40,8 +40,10 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
 
   app.get("/api/voice/status", async (c) => c.json(await bridge.status()));
 
+  // Body {room?}: a live call's room is switched to the new session too (the caller keeps talking).
   app.post("/api/voice/session/reset", async (c) => {
-    try { return c.json(await bridge.resetSession()); }
+    const body = await c.req.json().catch(() => ({}));
+    try { return c.json(await bridge.resetSession({ room: typeof body?.room === "string" ? body.room : undefined })); }
     catch (e) { return c.json(errorBody(e), errorStatus(e)); }
   });
 

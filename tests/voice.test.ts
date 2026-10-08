@@ -315,7 +315,20 @@ describe("configured node", () => {
     const reset = await (await req(a, KEY, "/api/voice/session/reset", { method: "POST" })).json();
     expect(reset.previous).toBe("session-next");
     expect(reset.sessionId).not.toBe("session-next");
+    expect(reset.room).toBeUndefined();
     expect(JSON.parse(readFileSync(join(a.home, "seed.json"), "utf8")).sessionId).toBe(reset.sessionId);
+  });
+  test("reset with a live room tells the voice runtime to move the room to the new session", async () => {
+    const calls = voiced.runtimeCalls.length;
+    const r = await (await req(a, KEY, "/api/voice/session/reset", { method: "POST", body: JSON.stringify({ room: "room-live-1" }) })).json();
+    expect(r.room).toEqual({ name: "room-live-1", switched: true });
+    expect(voiced.runtimeCalls.length).toBe(calls + 1);
+    expect(voiced.runtimeCalls[calls]!).toEqual({ auth: `Bearer ${RUNTIME_TOKEN}`, body: { room: "room-live-1", sessionId: r.sessionId } });
+    // Node c's token is rejected: the session still resets, the room keeps the old one and the response says so.
+    writeFileSync(join(c.home, "runtime.json"), JSON.stringify({ SEED_AGENTS_VOICE_INTERNAL_TOKEN: "stale-token" }));
+    const bad = await (await req(c, KEY, "/api/voice/session/reset", { method: "POST", body: JSON.stringify({ room: "room-live-2" }) })).json();
+    expect(bad.sessionId).toMatch(/^session-/);
+    expect(bad.room).toEqual({ name: "room-live-2", switched: false, error: "voice runtime HTTP 401" });
   });
   test("setup --new creates a fresh Cyberdeck agent instead of keeping the adopted one", async () => {
     const j = await (await req(a, TEST_TOKEN, "/api/voice/setup", { method: "POST", body: JSON.stringify({ new: true }) })).json();

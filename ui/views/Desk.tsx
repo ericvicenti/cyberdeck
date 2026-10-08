@@ -120,15 +120,18 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
       await Promise.all([v.refreshConfig(), loadStatus()]);
     }
   };
+  // A live call is not hung up: the daemon tells the voice runtime to move the room to the new session.
   const resetSession = async () => {
-    if (v.phase !== "idle" && v.phase !== "error") v.stop();
+    const liveRoom = v.phase === "live" ? v.room : null;
+    if (!liveRoom && v.phase !== "idle" && v.phase !== "error") v.stop();
     setBusy("reset");
     setNote(null);
     try {
-      const r = await post<{ sessionId?: string }>("/api/voice/session/reset", {});
+      const r = await post<{ sessionId?: string; room?: { name: string; switched: boolean; error?: string } }>("/api/voice/session/reset", liveRoom ? { room: liveRoom } : {});
       v.clearTranscript();
       setHistory([]);
-      setNote(r.sessionId ? `new session ${r.sessionId.slice(0, 8)}` : "new session");
+      const id = r.sessionId ? `new session ${r.sessionId.slice(0, 8)}` : "new session";
+      setNote(r.room ? (r.room.switched ? `${id} · the call moved to it` : `${id} · this call stays on the old one (${r.room.error ?? "not switched"})`) : id);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) onLocked();
       setNote(String(e instanceof Error ? e.message : e));

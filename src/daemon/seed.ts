@@ -455,19 +455,24 @@ export class SeedBridge {
    * with the worker's default voice, and the result says why.
    */
   async #applyProfile(room: string, profile: VoiceProfile): Promise<VoiceProfileResult> {
+    const r = await this.#runtime({ room, profile });
+    return { ...profile, applied: r.ok, ...(r.error ? { error: r.error } : {}) };
+  }
+
+  /** One POST to the agents server's internal voice runtime route; never throws, never logs the token. */
+  async #runtime(body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
     const token = this.#runtimeToken();
-    if (!token) return { ...profile, applied: false, error: `no voice runtime token (${this.runtimeFile})` };
+    if (!token) return { ok: false, error: `no voice runtime token (${this.runtimeFile})` };
     try {
       const res = await this.#fetch(`${this.config.agentsUrl}/api/voice/runtime`, {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ room, profile }),
+        body: JSON.stringify(body),
         signal: AbortSignal.timeout(RUNTIME_TIMEOUT_MS),
       });
-      if (!res.ok) return { ...profile, applied: false, error: `voice runtime HTTP ${res.status}` };
-      return { ...profile, applied: true };
+      return res.ok ? { ok: true } : { ok: false, error: `voice runtime HTTP ${res.status}` };
     } catch (e) {
-      return { ...profile, applied: false, error: e instanceof Error ? e.message : String(e) };
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
   }
 
@@ -499,11 +504,23 @@ export class SeedBridge {
     return created.sessionId;
   }
 
-  async resetSession(): Promise<{ sessionId: string; previous?: string }> {
+  /**
+   * Start a fresh session for the next call. With `room` (a live call's LiveKit room) the agents server's
+   * voice runtime is told to switch that room to the new session too, so the caller keeps talking without
+   * hanging up; `room.switched` says whether that worked (the call goes on with the old session if not).
+   */
+  async resetSession(opts: { room?: string } = {}): Promise<{ sessionId: string; previous?: string; room?: { name: string; switched: boolean; error?: string } }> {
     if (!this.#state.agentId) throw new SeedError("no agent set up: run `cyberdeck seed setup`");
     const previous = this.#state.sessionId;
     const sessionId = await this.#createSession();
-    return { sessionId, ...(previous ? { previous } : {}) };
+    const room = opts.room?.trim() ? await this.#switchRoom(opts.room.trim(), sessionId) : undefined;
+    if (room && !room.switched) console.error(`voice: room ${room.name} kept its session: ${room.error}`);
+    return { sessionId, ...(previous ? { previous } : {}), ...(room ? { room } : {}) };
+  }
+
+  async #switchRoom(name: string, sessionId: string): Promise<{ name: string; switched: boolean; error?: string }> {
+    const r = await this.#runtime({ room: name, sessionId });
+    return { name, switched: r.ok, ...(r.error ? { error: r.error } : {}) };
   }
 
   // ---- voice ----------------------------------------------------------------------------------

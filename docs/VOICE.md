@@ -113,7 +113,7 @@ the node token (`~/.cyberdeck/token`) requires a re-run so the secret on the age
 | `GET /api/voice/config` | pairing | `{configured, provider: 'livekit' \| 'none', engine: 'seed', reason?, agentId?, sessionId?}` |
 | `POST /api/voice/livekit` | pairing | `{sessionId, url, token, room, identity, expiresAt, profile?}` from `CreateVoiceSession`; `profile: {voice, speed, applied, error?}` says whether the voice profile below reached the room; `503 {error: 'voice not configured', reason}` when unconfigured; `502 {error}` on a server failure |
 | `GET /api/voice/status` | pairing | `{configured, reason?, agentsUrl, identity: {name, available, principal?, error?}, agent?: {id, name?}, sessionId?, health: {ok, voice, protocol, version, error?, checkedAt}, mcpRegisteredAt?, lastCallAt?, profile?: {voice, speed, runtimeToken, source}}` |
-| `POST /api/voice/session/reset` | pairing | `{sessionId, previous?}`: a new session for the next call |
+| `POST /api/voice/session/reset` | pairing | `{sessionId, previous?, room?}`: a new session for the next call; body `{room?}` names a live call's LiveKit room, which the voice runtime is then switched to the new session (`room: {name, switched, error?}`), so the caller keeps talking |
 | `GET /api/voice/transcript?limit=` | pairing | `{supported: true, sessionId?, messages: [{seq, role, text, at}], hasMoreBefore}`: user/assistant text of the current session (`GetSession`'s tail, cheap) |
 | `POST /api/voice/dogfood` | node token | `{triggerId, name, enabled, lastFiredAt?, lastError?, nextSummary?, created}`: the daily fleet check-in trigger (below); body `{timezone?, timeOfDay?}` |
 | `POST /api/voice/setup` | node token | the setup result above (`{agent: {id, name?, origin: kept\|adopted\|created}, sessionId, mcp: {name, url, state, tools?, error?}, warnings}`); body `{new?, adopt?, name?}` |
@@ -187,5 +187,6 @@ hands out is its own (today a LAN `ws://` address), so the caller must be able t
   `seed.agentsUrl` at a hosted server also needs the MCP URL to be reachable from there
   (docs/AGENTS.md, Reachability) and that server to run a voice pipeline.
 - **Transcript** is the session's durable events, not the live call: the LiveKit transcription
-  events arrive on the client, not through this daemon.
+  events arrive on the client (the Desk shows them live and reloads the durable tail when the call
+  ends), not through this daemon.
 - No web Desk UI section here: the UI half lives in `ui/` and talks to the same routes.

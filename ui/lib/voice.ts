@@ -19,6 +19,8 @@ type LivekitGrant = { url: string; token: string; room: string; identity: string
 export type Voice = {
   phase: VoicePhase;
   agentState: AgentState;
+  /** The LiveKit room of the current call (null when not connected); the Desk hands it to session resets. */
+  room: string | null;
   /** Readable reason for `phase === 'error'`; cleared by the next start. */
   error?: string;
   /** Last `/api/voice/config` answer; null until loaded, `configured:false` + `reason` when voice is off. */
@@ -78,6 +80,7 @@ export function useVoice({ onLocked }: { onLocked?: () => void } = {}): Voice {
   const [config, setConfig] = useState<VoiceConfig | null>(null);
   const [configError, setConfigError] = useState<string | undefined>();
   const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
+  const [roomName, setRoomName] = useState<string | null>(null);
   const [level, setLevel] = useState(0);
   const [muted, setMuted] = useState(false);
   const [greet, setGreetState] = useState<boolean>(() => {
@@ -148,6 +151,7 @@ export function useVoice({ onLocked }: { onLocked?: () => void } = {}): Voice {
   const resetLive = useCallback(() => {
     setAgentState("initializing");
     setMuted(false);
+    setRoomName(null);
     stopAnalyser();
   }, [stopAnalyser]);
 
@@ -261,6 +265,7 @@ export function useVoice({ onLocked }: { onLocked?: () => void } = {}): Voice {
       // Browsers may hold playback until a gesture; the tap that started us counts.
       void current.startAudio().catch(() => {});
       roomRef.current = current;
+      setRoomName(grant.room);
       setPhase("live");
       phaseRef.current = "live";
       if (greetRef.current) void current.localParticipant.sendText("Hi", { topic: "lk.chat" }).catch(() => {});
@@ -302,5 +307,5 @@ export function useVoice({ onLocked }: { onLocked?: () => void } = {}): Voice {
     };
   }, [stop]);
 
-  return { phase, agentState, error, config, configError, transcript, level, muted, greet, setGreet, start, stop, toggle, toggleMute, refreshConfig, clearTranscript };
+  return { phase, agentState, room: roomName, error, config, configError, transcript, level, muted, greet, setGreet, start, stop, toggle, toggleMute, refreshConfig, clearTranscript };
 }
