@@ -4,7 +4,7 @@
 // not configured, the card explains why and offers the one-time setup.
 import { useEffect, useRef, useState } from "react";
 import { api, post, ApiError } from "../lib/api";
-import { useVoice, micAllowedHere, type TranscriptLine, type AgentState, type VoicePhase } from "../lib/voice";
+import { useVoice, voiceApi, micAllowedHere, type TranscriptLine, type AgentState, type VoicePhase } from "../lib/voice";
 import { MicIcon } from "../lib/icons";
 
 type VoiceStatus = {
@@ -68,7 +68,7 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
 
   const loadStatus = async () => {
     try {
-      setStatus(await api<VoiceStatus>("/api/voice/status"));
+      setStatus(await voiceApi<VoiceStatus>(v.route, "/api/voice/status"));
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) onLocked();
       else setStatus(null);
@@ -76,7 +76,7 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
   };
   const loadHistory = async () => {
     try {
-      const t = await api<TranscriptHistory>("/api/voice/transcript?limit=20");
+      const t = await voiceApi<TranscriptHistory>(v.route, "/api/voice/transcript?limit=20");
       if (!t.supported || !t.messages) { setHistory([]); return; }
       setHistory(t.messages.map((m, i) => ({ id: `h:${i}:${m.at ?? ""}`, who: m.role === "user" ? "me" : "agent", text: m.text, final: true, at: m.at ?? 0 })));
     } catch {
@@ -85,11 +85,14 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
   };
   useEffect(() => {
     api<{ nodeName?: string }>("/api/status").then((s) => setNodeName(s.nodeName ?? "")).catch(() => {});
-    void loadStatus();
   }, []);
+  // Status and history come from wherever the calls go, which is only known once the config is in.
+  useEffect(() => {
+    void loadStatus();
+  }, [v.route?.node]);
   useEffect(() => {
     if (v.config?.configured) void loadHistory();
-  }, [v.config?.configured]);
+  }, [v.config?.configured, v.route?.node]);
   // After a call ends, the session on the agents server holds the full exchange: reload it
   // and drop the live lines so nothing shows twice.
   useEffect(() => {
@@ -127,7 +130,7 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
     setBusy("reset");
     setNote(null);
     try {
-      const r = await post<{ sessionId?: string; room?: { name: string; switched: boolean; error?: string } }>("/api/voice/session/reset", liveRoom ? { room: liveRoom } : {});
+      const r = await voiceApi<{ sessionId?: string; room?: { name: string; switched: boolean; error?: string } }>(v.route, "/api/voice/session/reset", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(liveRoom ? { room: liveRoom } : {}) });
       v.clearTranscript();
       setHistory([]);
       const id = r.sessionId ? `new session ${r.sessionId.slice(0, 8)}` : "new session";
@@ -231,7 +234,7 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
               <span className="hud-chip text-zinc-300" title={sessionId ?? ""}><span className={`led ${sessionId ? "led-run" : "led-off"}`} />session {sessionId ? sessionId.slice(0, 8) : "—"}</span>
               {configured && <button onClick={resetSession} disabled={busy !== ""} data-testid="voice-new-session" className="hud-chip text-zinc-300 hover:text-zinc-100 disabled:opacity-40">{busy === "reset" ? "resetting…" : "new session"}</button>}
               {status?.profile && <span className="hud-chip text-zinc-300" data-testid="voice-profile" title={status.profile.runtimeToken ? `Cartesia voice ${status.profile.voice} at ${status.profile.speed}x, applied to every call` : `Cartesia voice ${status.profile.voice}: no runtime token on this node, calls keep the worker's default voice`}><span className={`led ${status.profile.runtimeToken ? "led-on" : "led-warn"}`} />voice {status.profile.voice.slice(0, 8)} ×{status.profile.speed}</span>}
-              <span className="hud-chip text-zinc-300"><span className="led led-on" />node {nodeName || "—"}</span>
+              <span className="hud-chip text-zinc-300" data-testid="voice-node" title={v.route ? `${nodeName || "This node"} has no voice bridge: calls go through ${v.route.name}` : ""}><span className="led led-on" />node {nodeName || "—"}{v.route ? ` → ${v.route.name}` : ""}</span>
               {status?.identity && <span className="hud-chip text-zinc-300" title={status.identity.principal ?? ""}><span className={`led ${status.identity.available ? "led-on" : "led-warn"}`} />identity {status.identity.available ? (status.identity.principal ?? "ok").slice(0, 12) : "missing"}</span>}
             </div>
             {configured && note && <p className="mt-2 text-[11px] text-zinc-400" data-testid="voice-note">{note}</p>}

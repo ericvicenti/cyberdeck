@@ -172,12 +172,25 @@ trigger is created; edit it in the agent's Triggers tab afterwards.
 
 All of these go through the local daemon's HTTP API with the node token, like the other commands.
 
+## Nodes without voice
+
+The agents server runs on one machine (today Yacht), so every other node's `/api/voice/config` says
+`configured: false`. The web Desk does not stop there: when the node in view has no voice,
+`ui/lib/voice.ts` (`findVoiceNode`) asks the other nodes of the fleet (`/api/fleet/nodes`, online
+ones, plus this daemon when a remote node is in view) for their voice config through the proxy and
+sends the call, status, transcript and session reset to the first one that is configured. The
+bridge strip then reads `node Starlight → Yacht`. "Run setup" still targets the node in view, and the
+not-configured card only shows when no reachable node has voice (a stopped Tailscale looks like
+that: every paired node is offline).
+
 ## Browser microphone and HTTPS
 
 Browsers only expose `getUserMedia` on secure origins, so the web Desk can place calls from
 `http://localhost:4777` on the node itself but not from a plain-HTTP tailnet address. Run
 `cyberdeck serve` and use `https://<node>.<tailnet>.ts.net`. The LiveKit `url` the experiments server
 hands out is its own (today a LAN `ws://` address), so the caller must be able to reach that too.
+An https page cannot open that plain `ws://` address at all (mixed content), so today the Desk only
+places calls from `http://localhost:4777`; over https it fails with a message that says so.
 
 ## Not done
 
