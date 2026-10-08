@@ -66,12 +66,16 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
   const listRef = useRef<HTMLDivElement>(null);
   const wasLive = useRef(false);
 
+  const statusLoad = useRef(0);
   const loadStatus = async () => {
+    // A slower answer from the node that was asked before the route changed must not win.
+    const load = ++statusLoad.current;
     try {
-      setStatus(await voiceApi<VoiceStatus>(v.route, "/api/voice/status"));
+      const s = await voiceApi<VoiceStatus>(v.route, "/api/voice/status");
+      if (load === statusLoad.current) setStatus(s);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) onLocked();
-      else setStatus(null);
+      else if (load === statusLoad.current) setStatus(null);
     }
   };
   const loadHistory = async () => {
@@ -87,9 +91,10 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
     api<{ nodeName?: string }>("/api/status").then((s) => setNodeName(s.nodeName ?? "")).catch(() => {});
   }, []);
   // Status and history come from wherever the calls go, which is only known once the config is in.
+  const resolved = v.config !== null;
   useEffect(() => {
-    void loadStatus();
-  }, [v.route?.node]);
+    if (resolved) void loadStatus();
+  }, [resolved, v.route?.node]);
   useEffect(() => {
     if (v.config?.configured) void loadHistory();
   }, [v.config?.configured, v.route?.node]);

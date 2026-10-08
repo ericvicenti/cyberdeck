@@ -54,17 +54,27 @@ export function voiceApi<T>(route: VoiceRoute | null, path: string, init?: ApiIn
 const voicePost = <T,>(route: VoiceRoute | null, path: string, body: unknown): Promise<T> =>
   voiceApi<T>(route, path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
+const ROUTE_KEY = "cyberdeck-voice-route";
+const askVoiceNode = (route: VoiceRoute) => voiceApi<VoiceConfig>(route, "/api/voice/config").then((config) => ({ route, config })).catch(() => null);
+
 /** The first other node of the fleet (this daemon included, when a remote node is in view) with voice set up. */
 async function findVoiceNode(): Promise<{ route: VoiceRoute; config: VoiceConfig } | null> {
   const viewed = activeNode();
+  // The node that took the last call answers in milliseconds; the fleet listing probes every peer first.
+  try {
+    const last = JSON.parse(localStorage.getItem(ROUTE_KEY) ?? "null") as VoiceRoute | null;
+    const again = last?.node && last.node !== (viewed || "local") ? await askVoiceNode(last) : null;
+    if (again?.config.configured) return again;
+  } catch {}
   const fleet = await api<{ self?: { name?: string }; nodes?: { id: string; name: string; online?: boolean }[] }>("/api/fleet/nodes").catch(() => null);
   if (!fleet) return null;
   const routes: VoiceRoute[] = [
     ...(viewed ? [{ node: "local", name: fleet.self?.name ?? "this node" }] : []),
     ...(fleet.nodes ?? []).filter((n) => n.online && n.id !== viewed).map((n) => ({ node: n.id, name: n.name })),
   ];
-  const answers = await Promise.all(routes.map((route) => voiceApi<VoiceConfig>(route, "/api/voice/config").then((config) => ({ route, config })).catch(() => null)));
-  return answers.find((a) => a?.config.configured) ?? null;
+  const found = (await Promise.all(routes.map(askVoiceNode))).find((a) => a?.config.configured) ?? null;
+  try { if (found) localStorage.setItem(ROUTE_KEY, JSON.stringify(found.route)); } catch {}
+  return found;
 }
 
 type LiveKit = typeof import("livekit-client");
