@@ -83,3 +83,12 @@ Starting a `cc` session pre-accepts Claude Code's folder-trust and external-CLAU
 (`trustClaudeDir` writes `projects[<cwd>].hasTrustDialogAccepted` + `hasClaudeMdExternalIncludesApproved/WarningShown`
 into `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`; an explicit earlier "no" to imports is kept), so the agent
 starts straight into the prompt. Tests: `tests/sessions.test.ts`, `tests/harness.test.ts`, e2e "prompt bar"/"sessions survive".
+
+Casework Desk (the iPad/iPhone app, `docs/CASEWORK.md`): every node is its workflow server (`src/daemon/api/casework.ts`). The
+home scene `casework/cyberdeck.tsx` runs the entire web UI in the app's WebView (Deck tab) plus native tabs; `CASEWORK_APPS`
+are example apps served as their own scenes, first the kitchen sink (`casework/kitchen-sink.tsx` + `casework/kitchen/`, media in
+`casework/samples/` at `/samples/:name`). Its web half is Applications → Kitchen sink (`ui/views/CaseworkConsole.tsx`, a console
+peer on `/control`: presets, commands, events, WebRTC call signalling). Experiences may import only `NATIVE_MODULES`; every
+top-level `casework/*.tsx` is compiled as a module, so shared pieces go in a subfolder. A kiosk node stacks `screen-remote` over
+the deck. The owner's tailnet device is fully trusted even when its page carries the scoped pairing key. Tests:
+`tests/casework.test.ts`, `tests/casework-apps.test.ts`, e2e "applications: the Casework kitchen sink".

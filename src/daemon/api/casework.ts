@@ -11,19 +11,23 @@
 //   PUT  /api/media/:name             uploads from the device; GET /api/media/:name
 //   WS   /control                     first frame {type:"hello", role:"device"|"console", token, info}
 //                                     -> {type:"welcome", id, scene, revision, voice, devices}; then
-//                                     ping/pong, scene, command/result, event, modules.changed, peer.left
+//                                     ping/pong, scene, command/result, event, modules.changed, peer.left,
+//                                     signal (WebRTC call relay between a device and a console), call.request
+// On top of the home scene the node serves example apps (CASEWORK_APPS): the Casework kitchen sink is
+// `casework/kitchen-sink.tsx`, its web half is the Applications view (ui/views/CaseworkConsole.tsx).
 // The app authenticates with a pairing key. We accept a dedicated key stored at
 // ~/.cyberdeck/casework-key (so the phone never holds the main token) or the
 // main bearer token; the key is scoped to the routes the app needs (see caseworkAllows).
 import type { Hono } from "hono";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from "fs";
+import { homedir } from "os";
 import { join } from "path";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { CYBERDECK_HOME } from "../config";
 import { qrSvg } from "../casework/qr";
 
 export type Scene = { title: string; subtitle?: string; accent?: string; tree: unknown };
-type Peer = { id: string; role: "device" | "console"; info?: unknown; send: (msg: unknown) => void; close: () => void };
+type Peer = { id: string; role: "device" | "console"; info?: unknown; scene: string; send: (msg: unknown) => void; close: () => void };
 type Compiled = { source: string; hash: string; updatedAt: number };
 
 // Modules the app's native registry can resolve (src/runtime/modules.ts in remote-control).
@@ -37,6 +41,16 @@ export const NATIVE_MODULES = [
 ];
 const NATIVE = new Set(NATIVE_MODULES);
 export const EXPERIENCES_DIR = join(import.meta.dir, "../../../casework");
+
+/** Example apps that run natively inside the Casework Desk app: each is a scene around one experience module. */
+export type CaseworkApp = { id: string; name: string; description: string; module: string; title: string; subtitle: string; accent: string; aliases?: string[] };
+export const CASEWORK_APPS: CaseworkApp[] = [{
+  id: "kitchen-sink", name: "Kitchen sink", module: "kitchen-sink", aliases: ["kitchen"],
+  description: "The whole Casework native toolkit as one example app: camera and QR, audio, calls, video, GL, sensors, files, web.",
+  title: "The possibility lab.", subtitle: "An entire native toolkit. An experience delivered live from Cyberdeck.", accent: "#b6f36a",
+}];
+export const HOME_SCENE = "cyberdeck";
+const appFor = (name: string) => CASEWORK_APPS.find((a) => a.id === name || a.aliases?.includes(name));
 const KEY_FILE = join(CYBERDECK_HOME, "casework-key");
 const MEDIA_DIR = join(CYBERDECK_HOME, "casework-media");
 const NAME_RE = /^[a-zA-Z0-9_-]+$/;
@@ -56,7 +70,9 @@ const safeEq = (a: string, b: string) => { const x = Buffer.from(a), y = Buffer.
 /** Routes a casework-scoped key may reach: what the app and its experiences need, nothing else. */
 export function caseworkAllows(method: string, path: string): boolean {
   const get = method === "GET", post = method === "POST";
-  if (path === "/api/auth/whoami" || path === "/api/state" || path === "/api/experience-status" || path === "/api/status" || path === "/api/casework/me") return get;
+  if (path === "/api/auth/whoami" || path === "/api/state" || path === "/api/experience-status" || path === "/api/status" || path === "/api/casework/me" || path === "/api/applications") return get;
+  // The kitchen sink's Agent tab: the Casework Seed bridge behind this node (when one is configured).
+  if (path.startsWith("/api/seed/")) return get || post;
   if (path === "/api/kiosk/stream") return get;
   if (path === "/api/audio") return get || post; // the remote's volume buttons
   if (path.startsWith("/api/modules/")) return get;
@@ -119,19 +135,53 @@ export type CaseworkDeps = {
   voice?: () => Promise<{ configured: boolean; provider: "livekit" | "none"; reason?: string }>;
   /** The https origin that serves this daemon on the tailnet (`cyberdeck serve`), for the phone's Desk link. */
   secureOrigin?: () => Promise<string | null>;
+  /** Casework Seed bridge for the kitchen sink's Agent tab (config `casework`, or SEED_BRIDGE_URL). */
+  seedBridge?: { url?: string; tokenFile?: string };
 };
+
+/** Serve a file with byte ranges: iOS's native player will not play a video without them. */
+function rangedFile(file: string, range: string | undefined, type: string): Response {
+  const f = Bun.file(file), size = f.size;
+  const m = /^bytes=(\d*)-(\d*)$/.exec(range ?? "");
+  const headers: Record<string, string> = { "content-type": type, "accept-ranges": "bytes", "cache-control": "public, max-age=3600" };
+  if (!m || (!m[1] && !m[2])) return new Response(f, { headers: { ...headers, "content-length": String(size) } });
+  const start = m[1] ? Number(m[1]) : Math.max(0, size - Number(m[2]));
+  const end = m[1] && m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
+  if (start > end || start >= size) return new Response(null, { status: 416, headers: { "content-range": `bytes */${size}` } });
+  return new Response(f.slice(start, end + 1), { status: 206, headers: { ...headers, "content-range": `bytes ${start}-${end}/${size}`, "content-length": String(end - start + 1) } });
+}
+const SAMPLE_TYPES: Record<string, string> = { mp4: "video/mp4", wav: "audio/wav", m4a: "audio/mp4", mp3: "audio/mpeg", jpg: "image/jpeg", png: "image/png" };
 
 export function registerCaseworkRoutes(app: Hono, deps: CaseworkDeps) {
   const dir = deps.experiencesDir ?? EXPERIENCES_DIR;
   let key = deps.key ?? loadCaseworkKey();
   const matches = (supplied: string) => safeEq(supplied, key) || safeEq(supplied, deps.token);
-  const scene = (): Scene => ({ title: "Cyberdeck", subtitle: `${deps.nodeName} · fleet control`, accent: "#22d3ee", tree: { type: "RemoteModule", props: { name: deps.kiosk ? "screen-remote" : "cyberdeck" } } });
+  const module = (name: string) => ({ type: "RemoteModule", props: { name } });
+  // Home is the whole deck. A kiosk node (enuc) puts its screen remote on top: that module opens full screen
+  // on its own and leaves the deck underneath when it is closed.
+  const scene = (): Scene => ({ title: "Cyberdeck", subtitle: `${deps.nodeName} · the whole deck`, accent: "#22d3ee", tree: deps.kiosk ? { type: "Column", children: [module("screen-remote"), module("cyberdeck")] } : module("cyberdeck") });
+  /** A scene by name: home (`cyberdeck`; `casework` is what the original experiences call home) or an example app. */
+  const sceneNamed = (name: string): { name: string; scene: Scene } | null => {
+    if (name === HOME_SCENE || name === "casework" || name === "home") return { name: HOME_SCENE, scene: scene() };
+    const a = appFor(name);
+    return a ? { name: a.id, scene: { title: a.title, subtitle: a.subtitle, accent: a.accent, tree: module(a.module) } } : null;
+  };
+  /** Navigate devices (one, or all) to a scene. Navigation is per device and momentary: a reconnect lands on home. */
+  const show = (name: string, deviceId?: string): { name: string; sent: number } | null => {
+    const next = sceneNamed(name);
+    if (!next) return null;
+    let sent = 0;
+    for (const p of peers.values()) if (p.role === "device" && (!deviceId || p.id === deviceId)) { p.scene = next.name; p.send({ type: "scene", scene: next.scene, revision: ++revision }); sent++; }
+    if (sent) broadcast({ type: "devices", devices: devices() }, "console");
+    return { name: next.name, sent };
+  };
   let revision = Date.now();
   const peers = new Map<string, Peer>();
   const events: unknown[] = [];
   const compiled = new Map<string, Compiled>();
   const errors = new Map<string, string>();
-  const devices = () => [...peers.values()].filter((p) => p.role === "device").map((p) => ({ id: p.id, info: p.info }));
+  const devices = () => [...peers.values()].filter((p) => p.role === "device").map((p) => ({ id: p.id, info: p.info, scene: p.scene }));
+  const consoles = () => [...peers.values()].filter((p) => p.role === "console").length;
   const broadcast = (msg: unknown, role?: Peer["role"]) => { for (const p of peers.values()) if (!role || p.role === role) p.send(msg); };
   const record = (event: unknown) => { events.push(event); if (events.length > 100) events.shift(); broadcast({ type: "event", event }, "console"); };
   const voice = async () => { try { return deps.voice ? await deps.voice() : { configured: false, provider: "none" as const }; } catch (e) { return { configured: false, provider: "none" as const, reason: String(e) }; } };
@@ -152,7 +202,7 @@ export function registerCaseworkRoutes(app: Hono, deps: CaseworkDeps) {
   void validate().catch(() => {});
 
   app.get("/health", (c) => c.json({ ok: true }));
-  app.get("/api/state", async (c) => c.json({ scene: scene(), revision, devices: devices(), events, presets: ["cyberdeck"], voice: await voice() }));
+  app.get("/api/state", async (c) => c.json({ scene: scene(), revision, devices: devices(), events, presets: [HOME_SCENE, ...CASEWORK_APPS.map((a) => a.id)], voice: await voice() }));
   app.get("/api/experience-status", (c) => c.json(status()));
   app.post("/api/experiences/validate", async (c) => c.json(await validate()));
   app.post("/api/experiences/error", async (c) => {
@@ -177,7 +227,43 @@ export function registerCaseworkRoutes(app: Hono, deps: CaseworkDeps) {
     for (const p of peers.values()) if (p.role === "device" && (!body.deviceId || p.id === body.deviceId)) { p.send({ type: "command", id, action: { name: action.name, args: action.args ?? {} } }); sent++; }
     return c.json({ id, sent }, sent ? 202 : 409);
   });
-  app.post("/api/preset/:name", (c) => { if (c.req.param("name") !== "cyberdeck") return c.json({ error: "unknown preset" }, 404); revision++; broadcast({ type: "scene", scene: scene(), revision }); return c.json({ revision }); });
+  // Send a scene (home or an example app) to every device, or to one with {deviceId}.
+  app.post("/api/preset/:name", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const r = show(c.req.param("name"), typeof body.deviceId === "string" && body.deviceId ? body.deviceId : undefined);
+    if (!r) return c.json({ error: "unknown preset" }, 404);
+    return c.json({ revision, scene: r.name, sent: r.sent });
+  });
+  // Sample media the kitchen sink plays (a generated test pattern and chime). The native players send no
+  // Authorization header, so like the UI these sit outside /api: tailnet-gated, not token-gated.
+  app.get("/samples/:name", (c) => {
+    const name = c.req.param("name");
+    const type = SAMPLE_TYPES[name.split(".").pop() ?? ""];
+    const file = join(dir, "samples", name);
+    if (!/^[a-zA-Z0-9_-]{1,60}\.[a-z0-9]{2,4}$/.test(name) || !type || !existsSync(file)) return c.json({ error: "not found" }, 404);
+    return rangedFile(file, c.req.header("range"), type);
+  });
+  // The kitchen sink's Agent tab talks to the Casework Seed bridge; its credential never reaches the device.
+  app.all("/api/seed/*", async (c) => {
+    const base = deps.seedBridge?.url || process.env.SEED_BRIDGE_URL;
+    if (!base) return c.json({ error: "Seed agent is not configured on this node (config casework.url)." }, 502);
+    const route = c.req.path.slice("/api/seed".length);
+    if (!/^\/[a-z/-]{1,60}$/.test(route) || !["GET", "POST"].includes(c.req.method)) return c.json({ error: "bad request" }, 400);
+    try {
+      const token = readFileSync(deps.seedBridge?.tokenFile || join(homedir(), "Library/Application Support/CaseworkSeed/bridge-token"), "utf8").trim();
+      // The app calls this the screen context; the bridge files it under the voice room.
+      let target = route, body: string | undefined = c.req.method === "POST" ? await c.req.text() : undefined;
+      if (route === "/screen-context") {
+        const b = JSON.parse(body || "{}");
+        if (typeof b.room !== "string" || typeof b.scene !== "string" || !b.scene.trim() || b.scene.length > 120 || [b.section, b.detail, b.resource].some((v) => v !== undefined && (typeof v !== "string" || v.length > 240))) return c.json({ error: "bad request" }, 400);
+        target = "/voice/context";
+        body = JSON.stringify({ room: b.room, context: JSON.stringify({ scene: b.scene, section: b.section, detail: b.detail, resource: b.resource }), capturedAt: Date.now() });
+      }
+      const r = await fetch(`${base.replace(/\/$/, "")}${target}${new URL(c.req.url).search}`, { method: c.req.method, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body, signal: AbortSignal.timeout(300_000) });
+      const result = await r.json().catch(() => ({ error: `Seed returned HTTP ${r.status}` }));
+      return c.json(r.ok ? result : { error: result.error || `Seed returned HTTP ${r.status}` }, r.ok ? 200 : 502);
+    } catch (e) { return c.json({ error: e instanceof Error ? e.message : String(e) }, 502); }
+  });
   app.put("/api/media/:name", async (c) => {
     const name = c.req.param("name");
     if (!/^[a-zA-Z0-9_.-]{1,120}$/.test(name) || name.startsWith(".")) return c.json({ error: "bad name" }, 400);
@@ -216,6 +302,12 @@ export function registerCaseworkRoutes(app: Hono, deps: CaseworkDeps) {
     for (const p of [...peers.values()]) if (p.role === "device") p.close();
     return c.json({ rotated: true });
   });
+  // The QR the kitchen sink's Camera tab scans: the decoded text comes back as a `camera.barcode` event.
+  app.get("/api/casework/demo-qr", (c) => {
+    if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);
+    const text = `CYBERDECK: scanned on the iPad, received by ${deps.nodeName}`;
+    return c.json({ text, qr: qrSvg(text, { scale: 6, dark: "#07080c", light: "#ffffff" }) });
+  });
   app.get("/api/casework/me", (c) => c.json({ node: deps.nodeName, devices: devices(), events: events.slice(-20) }));
   app.get("/api/casework/devices", (c) => c.json({ devices: devices(), events: events.slice(-50) }));
   // Bounded, non-interactive command for the app's Run screen.
@@ -250,24 +342,33 @@ export function registerCaseworkRoutes(app: Hono, deps: CaseworkDeps) {
           if (msg.type !== "hello" || typeof msg.token !== "string" || !matches(msg.token) || !["device", "console"].includes(msg.role)) { try { ws.close(4001, "Invalid pairing"); } catch {} return; }
           clearTimeout(timer);
           const id = randomUUID();
-          peer = { id, role: msg.role, info: msg.info, send: (m) => { try { ws.send(JSON.stringify(m)); } catch {} }, close: () => { try { ws.close(1000, "key rotated"); } catch {} } };
+          peer = { id, role: msg.role, info: msg.info, scene: HOME_SCENE, send: (m) => { try { ws.send(JSON.stringify(m)); } catch {} }, close: () => { try { ws.close(1000, "key rotated"); } catch {} } };
           peers.set(id, peer);
           const p = peer;
           // The welcome carries voice availability, which may need a (cached) agents-server probe.
           void voice().then((v) => { if (peers.get(id) === p) p.send({ type: "welcome", id, scene: scene(), revision, voice: v, devices: devices() }); });
           broadcast({ type: "devices", devices: devices() }, "console");
-          record({ name: "device.connected", at: Date.now(), deviceId: id, info: msg.info });
+          if (msg.role === "device") record({ name: "device.connected", at: Date.now(), deviceId: id, info: msg.info });
           return;
         }
         if (msg.type === "ping") { peer.send({ type: "pong", at: msg.at }); return; }
+        // WebRTC call signalling between a device and a console (the web Kitchen sink console answers calls).
+        if (msg.type === "signal") {
+          const target = typeof msg.to === "string" ? peers.get(msg.to) : undefined;
+          if (target && target.role !== peer.role) target.send({ type: "signal", from: peer.id, signal: msg.signal });
+          else peer.send({ type: "error", error: "Call peer is unavailable" });
+          return;
+        }
         if (peer.role === "device" && msg.type === "event") {
           record({ deviceId: peer.id, at: Date.now(), name: msg.name, data: msg.data });
-          if (msg.name === "scene" && msg.data?.name === "cyberdeck") peer.send({ type: "scene", scene: scene(), revision: ++revision });
-          if (msg.name === "call.request") peer.send({ type: "error", error: "Calls are not available on Cyberdeck" });
+          if (msg.name === "scene" && typeof msg.data?.name === "string") show(msg.data.name, peer.id);
+          if (msg.name === "call.request") {
+            if (consoles()) broadcast({ type: "call.request", from: peer.id, video: Boolean(msg.data?.video) }, "console");
+            else peer.send({ type: "error", error: "Open Cyberdeck → Applications → Kitchen sink in a browser to receive the call" });
+          }
           return;
         }
         if (peer.role === "device" && msg.type === "result") { record({ deviceId: peer.id, at: Date.now(), ...msg }); return; }
-        if (msg.type === "signal") peer.send({ type: "error", error: "Call peer is unavailable" });
       },
       onClose() {
         clearTimeout(timer);
@@ -276,5 +377,5 @@ export function registerCaseworkRoutes(app: Hono, deps: CaseworkDeps) {
     };
   }));
 
-  return { matches, allows: caseworkAllows, devices, validate, currentKey: () => key };
+  return { matches, allows: caseworkAllows, devices, validate, show, apps: () => CASEWORK_APPS, currentKey: () => key };
 }

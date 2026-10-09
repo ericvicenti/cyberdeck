@@ -94,8 +94,16 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   let casework: ReturnType<typeof registerCaseworkRoutes> | null = null; // assigned below; consulted at request time
   const authenticate = async (c: any): Promise<AuthInfo | null> => {
     if (tokenOk(c)) return { method: "token" };
+    // The owner's own device stays fully trusted when it also carries the scoped Casework key (the app's
+    // WebView stores it as the page token): the key narrows access for a holder who has nothing else, it
+    // never downgrades the owner.
+    const owned = await tailnetIdentity(c);
+    if (owned) return owned;
     const bearer = (c.req.header("authorization") ?? "").replace(/^Bearer /, "");
     if (bearer && casework && casework.matches(bearer)) return { method: "casework" };
+    return null;
+  };
+  const tailnetIdentity = async (c: any): Promise<AuthInfo | null> => {
     const ip = peerIp(c);
     if (!ip || !owner) return null;
     // `tailscale serve` (HTTPS front door) proxies from loopback and stamps the
@@ -196,7 +204,8 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
     return c.json({ started: true });
   });
 
-  app.get("/api/applications", (c) => c.json({ applications: cfg.applications ?? [] }));
+  // Web applications configured on this machine plus the example apps that run in the Casework Desk app.
+  app.get("/api/applications", (c) => c.json({ applications: cfg.applications ?? [], casework: { apps: casework?.apps() ?? [], devices: casework?.devices() ?? [], kiosk: Boolean(cfg.kiosk?.enabled) } }));
   registerKioskRoutes(app, cfg, upgradeWebSocket, (c) => Boolean(authByReq.get(c.req.raw)));
   registerAudioRoutes(app, opts.audio ?? audioBackend());
   registerFsRoutes(app);
@@ -207,7 +216,7 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   const isFullAuth = (c: { req: { raw: Request } }) => { const m = authByReq.get(c.req.raw)?.method; return m === "token" || m === "tailscale"; };
   // Seed agents bridge: voice calls from the Casework app / web Desk go to a Seed agent (docs/VOICE.md).
   const seed = new SeedBridge({ config: seedConfig(cfg), port: cfg.port, token, home: opts.seed?.home, companionFile: opts.seed?.companionFile, runtimeFile: opts.seed?.runtimeFile });
-  casework = registerCaseworkRoutes(app, { token, nodeName: cfg.nodeName, kiosk: cfg.kiosk?.enabled, upgradeWebSocket, isFullAuth, experiencesDir: opts.caseworkExperiencesDir, key: opts.caseworkKey, voice: () => seed.voiceSummary(), secureOrigin: () => ts.serveOrigin(cfg.port) });
+  casework = registerCaseworkRoutes(app, { token, nodeName: cfg.nodeName, kiosk: cfg.kiosk?.enabled, upgradeWebSocket, isFullAuth, experiencesDir: opts.caseworkExperiencesDir, key: opts.caseworkKey, voice: () => seed.voiceSummary(), secureOrigin: () => ts.serveOrigin(cfg.port), seedBridge: cfg.casework });
   registerVoiceRoutes(app, seed, { isFullAuth, serveOrigin: (port) => ts.serveOrigin(port) });
   registerDashboardRoutes(app, db, cfg);
   const network = registerNetworkRoutes(app, db, cfg);

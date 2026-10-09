@@ -127,6 +127,18 @@ on each browser/origin. Search uses the current development-mode limit of ten re
 rate-limit responses honor Retry-After. No Spotify credentials enter daemon config or Git.
 
 
+### Casework: the whole deck on the iPad, and the kitchen sink
+
+Pair the Casework Desk app with any node (Home → Casework Desk, or Applications → Connect Casework
+remote; Tailscale on, scan the QR, **Use this server**). The app opens on **Deck**: the entire
+Cyberdeck web UI in its native WebView, with a full-screen mode. **Apps** lists the example apps that
+run natively on the device; the first is the **Kitchen sink**, the complete Casework capability gallery
+(camera and QR, audio, calls, native video, the GL game, sensors, files, web), served by this node.
+
+In any browser, **Applications → Kitchen sink** is its console: send the app to a paired device, switch
+its tabs, scan a QR with its camera, watch its motion, uploads and events arrive, and place or answer
+calls. Details: `docs/CASEWORK.md`.
+
 ### Enuc desktop and buoy remote
 
 Enuc opens the full Cyberdeck Home at login. **Applications → Afterglow** embeds the

@@ -9,6 +9,9 @@ export interface CyberdeckConfig {
   /** Optional applications and physical fullscreen browser on this machine. */
   applications?: { id: string; name: string; description: string; url: string }[];
   kiosk?: { enabled: boolean };
+  /** Casework Seed bridge behind the kitchen sink's Agent tab (`/api/seed/*`); the token file defaults to
+   *  ~/Library/Application Support/CaseworkSeed/bridge-token. */
+  casework?: { url?: string; tokenFile?: string };
   /** Small, staggered peer throughput probes, at most once per peer every six hours. */
   network?: { automatic?: boolean };
   nodeName: string;

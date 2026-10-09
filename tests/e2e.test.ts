@@ -164,6 +164,49 @@ test("desk view: a paired node with voice takes the call when this one has none"
   }
 }, 30000);
 
+test("applications: the Casework kitchen sink is an example app with a live console", async () => {
+  await page.click('[data-testid="nav-applications"]');
+  await page.waitForSelector('[data-testid="app-kitchen-sink"]');
+  expect(await page.textContent('[data-testid="app-kitchen-sink"]')).toContain("Casework example");
+  await page.click('[data-testid="app-kitchen-sink"]');
+  await page.waitForSelector('[data-testid="casework-pair"] svg');
+  expect(await page.textContent('[data-testid="casework-console"]')).toContain("No device is connected");
+
+  // A device pairs (what the Casework Desk app does over /control) and the console picks it up live.
+  const { key } = await (await fetch(`${BASE}/api/casework/pairing?token=${TOKEN}`)).json();
+  const frames: any[] = [];
+  const device = new WebSocket(`ws://127.0.0.1:${PORT}/control`);
+  device.onmessage = (ev) => frames.push(JSON.parse(String(ev.data)));
+  await new Promise<void>((r) => { device.onopen = () => { device.send(JSON.stringify({ type: "hello", role: "device", token: key, info: { name: "buoy", model: "iPad Pro" } })); r(); }; });
+  await waitFor(async () => frames.some((f) => f.type === "welcome"));
+  await page.waitForSelector('[data-testid="casework-send"]');
+  expect(await page.textContent('select[aria-label="Device"]')).toContain("buoy");
+
+  // Send the app: the device is told to show the kitchen-sink module, and the console knows it is there.
+  await page.click('[data-testid="casework-send"]');
+  await waitFor(async () => frames.some((f) => f.type === "scene" && f.scene.tree.props.name === "kitchen-sink"));
+  await waitFor(async () => (await page.textContent('[data-testid="casework-send"]'))?.includes("is open on the device") ?? false);
+  // A console button becomes a native command on the device; what the device reports shows up on the page.
+  await page.click('button:has-text("Camera + QR")');
+  await waitFor(async () => frames.some((f) => f.type === "command" && f.action.name === "demo.tab" && f.action.args.name === "Camera + QR"));
+  device.send(JSON.stringify({ type: "event", name: "camera.barcode", data: { type: "qr", data: "CYBERDECK: scanned" } }));
+  await waitFor(async () => (await page.textContent('[data-testid="casework-scanned"]'))?.includes("CYBERDECK: scanned") ?? false);
+  expect(await page.textContent('[data-testid="casework-events"]')).toContain("camera.barcode");
+  device.close();
+  await waitFor(async () => (await page.textContent('[data-testid="casework-console"]'))?.includes("No device is connected") ?? false);
+
+  // Inside the Casework Desk app's WebView the same card opens the app natively on that device.
+  const inApp = await browser.newPage({ viewport: { width: 1024, height: 1366 } });
+  await inApp.addInitScript(() => { (window as any).posted = []; (window as any).ReactNativeWebView = { postMessage: (m: string) => (window as any).posted.push(m) }; });
+  await inApp.goto(`${BASE}/#t=${TOKEN}`);
+  await inApp.waitForSelector("text=Fleet");
+  await inApp.goto(`${BASE}/#/applications`);
+  await inApp.click('[data-testid="app-kitchen-sink-native"]');
+  expect(await inApp.evaluate(() => (window as any).posted)).toEqual([JSON.stringify({ cyberdeck: "scene", name: "kitchen-sink" })]);
+  await inApp.close();
+  await page.click('[data-testid="nav-fleet"]');
+}, 30000);
+
 test("data view: user data inventory + repos table", async () => {
   await page.click('[data-testid="nav-data"]');
   await page.waitForSelector("text=Repositories");

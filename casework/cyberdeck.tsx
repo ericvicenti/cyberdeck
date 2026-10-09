@@ -2,7 +2,8 @@
 // (Bun.build, CommonJS, native modules external) and served at /api/modules/cyberdeck.
 // Only modules from the app's native registry may be imported here.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { WebView } from 'react-native-webview';
 import { useRuntime } from '@remote/runtime';
 
 const C = { bg: '#07080c', panel: '#0b0d14', line: '#1b2230', text: '#d7dde6', dim: '#7c8798', cyan: '#22d3ee', magenta: '#e879f9', green: '#a3e635', amber: '#fbbf24', red: '#f87171' };
@@ -31,7 +32,9 @@ const ago = (iso?: string) => { if (!iso) return ''; const s = Math.max(0, (Date
 
 export default function Cyberdeck() {
   const { connection, status } = useRuntime();
-  const [tab, setTab] = useState<'talk' | 'fleet' | 'agents' | 'sessions' | 'run'>('talk');
+  const [tab, setTab] = useState<'deck' | 'apps' | 'talk' | 'fleet' | 'agents' | 'sessions' | 'run'>('deck');
+  // The web deck's current route, kept here so the inline and the full-screen WebView open on the same page.
+  const [route, setRoute] = useState('#/');
   const [nodes, setNodes] = useState<Node[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [busy, setBusy] = useState(false);
@@ -48,7 +51,7 @@ export default function Cyberdeck() {
 
   const tasks = overview?.collab?.tasks ?? [], runs = overview?.collab?.runs ?? [];
   const servicesDown = overview?.services?.rows.filter((r) => r.ok === false).length ?? 0;
-  const tabs: [typeof tab, string][] = [['talk', 'Talk'], ['fleet', 'Fleet'], ['agents', 'Agents'], ['sessions', 'Sessions'], ['run', 'Run']];
+  const tabs: [typeof tab, string][] = [['deck', 'Deck'], ['apps', 'Apps'], ['talk', 'Talk'], ['fleet', 'Fleet'], ['agents', 'Agents'], ['sessions', 'Sessions'], ['run', 'Run']];
   return <View style={{ gap: 14, backgroundColor: C.bg }}>
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
       <Led on={status === 'connected'} /><Text style={{ color: C.text, fontWeight: '700', letterSpacing: 3 }}>CYBERDECK</Text>
@@ -58,11 +61,83 @@ export default function Cyberdeck() {
     </View>
     <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>{tabs.map(([key, label]) => <Pressable key={key} onPress={() => setTab(key)} style={{ paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: tab === key ? '#102a33' : 'transparent', borderWidth: 1, borderColor: tab === key ? C.cyan : C.line }}><Text style={{ color: tab === key ? C.cyan : C.dim, fontSize: 12, letterSpacing: 1, fontWeight: '700' }}>{label.toUpperCase()}</Text></Pressable>)}</View>
     {error ? <Text style={{ color: C.red }}>{error}</Text> : null}
+    {tab === 'deck' ? <DeckTab route={route} setRoute={setRoute} /> : null}
+    {tab === 'apps' ? <AppsTab json={json} openWeb={(next) => { setRoute(next); setTab('deck'); }} /> : null}
     {tab === 'talk' ? <TalkTab json={json} /> : null}
     {tab === 'fleet' ? <FleetTab nodes={nodes} overview={overview} servicesDown={servicesDown} tasks={tasks} /> : null}
     {tab === 'agents' ? <AgentsTab tasks={tasks} runs={runs} json={json} refresh={refresh} /> : null}
     {tab === 'sessions' ? <SessionsTab json={json} /> : null}
     {tab === 'run' ? <RunTab json={json} /> : null}
+  </View>;
+}
+
+// ---- Deck: the entire Cyberdeck web UI (every view the browser has) in the app's native WebView.
+// No credential is handed to the page: a device on the tailnet as the owner is trusted by the daemon as it
+// is in Safari, and anything else gets the web UI's own token prompt. The page talks back through
+// window.ReactNativeWebView.postMessage({ cyberdeck: 'scene', name }) to open a native example app.
+function DeckTab({ route, setRoute }: { route: string; setRoute: (r: string) => void }) {
+  const { connection, run } = useRuntime();
+  const { height } = useWindowDimensions();
+  const [full, setFull] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const [failed, setFailed] = useState('');
+  const [trusted, setTrusted] = useState<boolean | null>(null);
+  const origin = (connection?.pairing.url ?? '').replace(/\/$/, '');
+  // Where the page was last, without re-rendering (and so reloading) the WebView on every navigation.
+  const last = useRef(route);
+  useEffect(() => {
+    if (!origin) return;
+    let alive = true;
+    // Asked without the pairing key on purpose: this is what the page itself will be allowed.
+    fetch(`${origin}/api/auth/whoami`).then((r) => r.json()).then((w) => { if (alive) setTrusted(w?.method === 'tailscale' || w?.method === 'token'); }).catch(() => { if (alive) setTrusted(null); });
+    return () => { alive = false; };
+  }, [origin, retry]);
+  if (!origin) return <ActivityIndicator color={C.cyan} />;
+  const reload = () => { setFailed(''); setRoute(last.current); setRetry((n) => n + 1); };
+  const toggle = (next: boolean) => { setRoute(last.current); setFull(next); };
+  const onMessage = (event: { nativeEvent: { data: string } }) => {
+    try { const m = JSON.parse(event.nativeEvent.data); if (m?.cyberdeck === 'scene' && typeof m.name === 'string') { setFull(false); void run({ name: 'scene', args: { name: m.name } }).catch(() => {}); } } catch { /* not ours */ }
+  };
+  const view = failed
+    ? <View style={{ flex: 1, padding: 24, gap: 12 }}><Text style={{ color: C.text }}>Cannot load Cyberdeck from {origin}.</Text><Text style={{ color: C.dim }}>{failed}</Text><Button label="reload" onPress={reload} /></View>
+    : <WebView key={`${retry}-${full ? 'full' : 'inline'}`} source={{ uri: `${origin}/${route}` }} style={{ flex: 1, backgroundColor: C.bg }} originWhitelist={['*']} allowsInlineMediaPlayback mediaPlaybackRequiresUserAction={false} allowsBackForwardNavigationGestures onMessage={onMessage}
+        onNavigationStateChange={(nav: { url?: string }) => { const at = nav.url?.startsWith(origin + '/') ? nav.url.slice(origin.length + 1) : ''; if (at.startsWith('#')) last.current = at; }}
+        onError={(e: { nativeEvent: { description?: string } }) => setFailed(e.nativeEvent.description ?? 'load error')}
+        onShouldStartLoadWithRequest={(r: { url: string }) => { if (r.url === 'about:blank' || r.url.startsWith(origin + '/') || r.url === origin) return true; void Linking.openURL(r.url).catch(() => {}); return false; }} />;
+  const bar = <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+    <Led on={failed ? false : trusted} /><Text style={{ color: C.dim, fontSize: 12, flex: 1 }} numberOfLines={1}>{trusted === false ? 'not trusted on the tailnet: paste the node token on the page, or sign this device into Tailscale as the owner' : origin}</Text>
+    <Button label="reload" color={C.dim} onPress={reload} /><Button label={full ? 'exit full screen' : 'full screen'} onPress={() => toggle(!full)} />
+  </View>;
+  return <View style={{ gap: 10 }}>
+    {full ? <Text style={{ color: C.dim }}>Cyberdeck is open full screen.</Text> : <>{bar}<View style={{ height: Math.max(480, height - 190), borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: C.line }}>{view}</View></>}
+    <Modal visible={full} presentationStyle="fullScreen" animationType="fade" supportedOrientations={['portrait', 'landscape-left', 'landscape-right']} onRequestClose={() => toggle(false)}>
+      <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: 28, paddingHorizontal: 10, paddingBottom: 14, gap: 8 }}>{bar}{full ? view : null}</View>
+    </Modal>
+  </View>;
+}
+
+// ---- Apps: what Applications shows in the browser. Example apps are native scenes served by this node
+// (the Casework kitchen sink); web applications open inside the Deck tab.
+type CaseworkApp = { id: string; name: string; description: string };
+type WebApp = { id: string; name: string; description: string; url: string };
+function AppsTab({ json, openWeb }: { json: <T,>(p: string, i?: RequestInit) => Promise<T>; openWeb: (route: string) => void }) {
+  const { run } = useRuntime();
+  const [apps, setApps] = useState<{ applications: WebApp[]; casework?: { apps: CaseworkApp[] } } | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => { json<{ applications: WebApp[]; casework?: { apps: CaseworkApp[] } }>('/api/applications').then(setApps).catch((e) => setError(String(e))); }, [json]);
+  const card = (key: string, name: string, description: string, action: string, color: string, onPress: () => void) => <Pressable key={key} accessibilityRole="button" accessibilityLabel={`Open ${name}`} onPress={onPress} style={{ ...panel, flexGrow: 1, flexBasis: 280, borderColor: color }}>
+    <Text style={{ color: C.text, fontSize: 20, fontWeight: '700' }}>{name}</Text><Text style={{ color: C.dim, lineHeight: 20 }}>{description}</Text><Text style={{ color, fontWeight: '600' }}>{action} →</Text>
+  </Pressable>;
+  return <View style={{ gap: 12 }}>
+    {error ? <Text style={{ color: C.red }}>{error}</Text> : null}
+    {!apps && !error ? <ActivityIndicator color={C.cyan} /> : null}
+    <Label color={C.green}>Example apps · native on this device</Label>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>{(apps?.casework?.apps ?? []).map((a) => card(a.id, a.name, a.description, 'Open here', C.green, () => { void run({ name: 'scene', args: { name: a.id } }).catch((e) => setError(String(e))); }))}</View>
+    <Label>Applications · in the deck</Label>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+      {card('applications', 'All applications', 'The Applications page of the web deck, with every app configured on this node.', 'Open in Deck', C.cyan, () => openWeb('#/applications'))}
+      {(apps?.applications ?? []).map((a) => card(a.id, a.name, a.description, 'Open in Deck', C.cyan, () => openWeb(`#/applications?app=${encodeURIComponent(a.id)}`)))}
+    </View>
   </View>;
 }
 
