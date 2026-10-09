@@ -162,6 +162,7 @@ export class SessionManager {
   }
 
   async create(opts: CreateOpts): Promise<SessionInfo> {
+    if (opts.tool === "seed" || opts.runner === "agent") throw new Error("Seed queries must use the agents server");
     const id = randomBytes(4).toString("hex");
     let cwd = expandHome(opts.cwd);
     let warning: string | null = null;

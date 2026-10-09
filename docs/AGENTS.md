@@ -93,7 +93,21 @@ The agents server has to be able to open a connection to the node:
 Alternatively run the agents server on the tailnet (the self-hosted option in Seed's
 `apps/agents.md`) and skip the public route altogether.
 
-## Session sources (planned)
+## New queries
+
+The query bar defaults to Seed agents. `/api/harness/caps` reports `seed: true` when this node's
+configured agents server is healthy, the local signing identity loads, and MCP setup is complete.
+The planner picks a ready node; an explicit node pin fails visibly if unavailable. Browser clients
+reach a remote node through Cyberdeck's authenticated fleet proxy. The agents server stays private.
+
+On first query, `SeedBridge` creates a dedicated `Cyberdeck Queries` agent with the existing
+`cyberdeck` MCP grant and configured model. Its id is stored as `queryAgentId` in `seed.json`.
+The Sessions API signs CreateSession, MessageSession, GetSession, ListSessions, StopSession,
+UpdateSession and DeleteSession actions. Query ids carry a `seed-` prefix in Cyberdeck;
+transcripts and lifecycle stay on the Seed server. All reads and writes require normal Cyberdeck
+authentication; the Casework voice pairing key cannot use the query routes. Voice state is separate.
+
+## Cross-agent session index (planned)
 
 The Deck session index covers cc and cx transcripts. Seed agent sessions live in the agents
 server's `session_events` table and are the next source (DESIGN.md §9 phase 4 in the Deck

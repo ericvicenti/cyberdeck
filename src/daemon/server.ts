@@ -1,3 +1,5 @@
+import { registerKioskRoutes } from "./api/kiosk";
+import { registerAudioRoutes, audioBackend, type AudioBackend } from "./api/audio";
 import { Hono } from "hono";
 import { createBunWebSocket } from "hono/bun";
 import { serveStatic } from "hono/bun";
@@ -19,9 +21,10 @@ import { registerCmuxRoutes } from "./api/cmux";
 import { registerMcpRoutes } from "./api/mcp";
 import { registerCaseworkRoutes } from "./api/casework";
 import { registerVoiceRoutes } from "./api/voice";
-import { SeedBridge } from "./seed";
+import { SeedBridge, SeedError } from "./seed";
 import { nodeStatus } from "./status";
 import { registerSessionRoutes } from "./api/sessions";
+import { registerNetworkRoutes } from "./api/network";
 import { registerDashboardRoutes } from "./api/dashboard";
 import { registerBrowserRoutes } from "./api/browser";
 import { registerCloudRoutes } from "./api/cloud";
@@ -49,12 +52,19 @@ export type ServerOptions = {
   cloudSync?: boolean;
   /** Seed bridge overrides (tests): where seed.json lives, which companion.json to adopt, which runtime.json holds the voice token. */
   seed?: { home?: string; companionFile?: string; runtimeFile?: string };
+  /** System volume backend (tests inject a fake; default: wpctl on Linux, osascript on macOS). */
+  audio?: AudioBackend;
 };
 
 export function createServer(db: Database, cfg: CyberdeckConfig, token: string, nodeId = "stw-dev", opts: ServerOptions = {}) {
   cleanupHlsCache();
   const { upgradeWebSocket, websocket } = createBunWebSocket();
   const app = new Hono();
+  app.onError((error, c) => {
+    if (error instanceof SeedError) return c.json({ error: error.message }, error.status === 404 ? 404 : 502);
+    console.error(error);
+    return c.json({ error: "Internal server error" }, 500);
+  });
   const ts = opts.tailscale ?? new Tailscale();
 
   // Node owner (tailscale login). Detected once when unset and persisted so a
@@ -186,6 +196,9 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
     return c.json({ started: true });
   });
 
+  app.get("/api/applications", (c) => c.json({ applications: cfg.applications ?? [] }));
+  registerKioskRoutes(app, cfg, upgradeWebSocket, (c) => Boolean(authByReq.get(c.req.raw)));
+  registerAudioRoutes(app, opts.audio ?? audioBackend());
   registerFsRoutes(app);
   registerMediaRoutes(app, token);
   registerFleetRoutes(app, db, cfg, nodeId, token, upgradeWebSocket, { tailscale: ts, authedViaTailscale });
@@ -194,9 +207,10 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   const isFullAuth = (c: { req: { raw: Request } }) => { const m = authByReq.get(c.req.raw)?.method; return m === "token" || m === "tailscale"; };
   // Seed agents bridge: voice calls from the Casework app / web Desk go to a Seed agent (docs/VOICE.md).
   const seed = new SeedBridge({ config: seedConfig(cfg), port: cfg.port, token, home: opts.seed?.home, companionFile: opts.seed?.companionFile, runtimeFile: opts.seed?.runtimeFile });
-  casework = registerCaseworkRoutes(app, { token, nodeName: cfg.nodeName, upgradeWebSocket, isFullAuth, experiencesDir: opts.caseworkExperiencesDir, key: opts.caseworkKey, voice: () => seed.voiceSummary(), secureOrigin: () => ts.serveOrigin(cfg.port) });
+  casework = registerCaseworkRoutes(app, { token, nodeName: cfg.nodeName, kiosk: cfg.kiosk?.enabled, upgradeWebSocket, isFullAuth, experiencesDir: opts.caseworkExperiencesDir, key: opts.caseworkKey, voice: () => seed.voiceSummary(), secureOrigin: () => ts.serveOrigin(cfg.port) });
   registerVoiceRoutes(app, seed, { isFullAuth, serveOrigin: (port) => ts.serveOrigin(port) });
   registerDashboardRoutes(app, db, cfg);
+  const network = registerNetworkRoutes(app, db, cfg);
   registerMcpRoutes(app, db, cfg, control, { status, version: VERSION });
 
   // Live sessions (daemon-owned PTYs). tmux-backed ones survive restarts; a
@@ -204,7 +218,7 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   const sessions = new SessionManager(db);
   sessions.recover().catch((err) => console.error("session recovery failed:", err));
   setUpdateGuard(() => { const n = sessions.fragileCount(); return n ? `${n} live session(s) would be killed` : null; });
-  registerSessionRoutes(app, sessions, upgradeWebSocket, (c) => Boolean(authByReq.get(c.req.raw)));
+  registerSessionRoutes(app, sessions, upgradeWebSocket, (c) => Boolean(authByReq.get(c.req.raw)), seed);
 
   // Remote browser (persistent headless Chromium per profile) + the Cloud AI archive that drives it.
   registerBrowserRoutes(app, browsers, upgradeWebSocket, (c) => Boolean(authByReq.get(c.req.raw)));
@@ -249,5 +263,5 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   app.use("/*", serveStatic({ root: UI_DIST }));
   app.get("*", serveStatic({ path: join(UI_DIST, "index.html") }));
 
-  return { fetch: app.fetch, websocket, sessions };
+  return { fetch: app.fetch, websocket, sessions, network };
 }

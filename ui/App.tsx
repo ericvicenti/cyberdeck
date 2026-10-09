@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { parseHash, navigate, api, activeNode, activeNodeName, setActiveNode, type Route } from "./lib/api";
-import { ShieldIcon, ServerIcon, FolderIcon, TerminalIcon, GitIcon, LayersIcon, BotIcon, PulseIcon, GridIcon, CloudIcon, MicIcon } from "./lib/icons";
+import { ShieldIcon, ServerIcon, FolderIcon, TerminalIcon, GitIcon, LayersIcon, BotIcon, PulseIcon, GridIcon, CloudIcon, MicIcon, MusicIcon } from "./lib/icons";
+import { Spotify } from "./views/Spotify";
 import { Cloud } from "./views/Cloud";
+import { Applications } from "./views/Applications";
+import { ScreenRemote } from "./views/ScreenRemote";
 import { Home } from "./views/Home";
 import { Desk } from "./views/Desk";
 import type { Overview } from "./lib/control";
@@ -19,6 +22,8 @@ import { applyInstallTarget } from "./lib/pwa";
 
 const NAV = [
   { view: "fleet", label: "Home", icon: ServerIcon },
+  { view: "applications", label: "Applications", icon: GridIcon },
+  { view: "spotify", label: "Spotify", icon: MusicIcon },
   { view: "desk", label: "Desk", icon: MicIcon },
   { view: "projects", label: "Projects", icon: LayersIcon },
   { view: "agents", label: "Agents", icon: BotIcon },
@@ -34,6 +39,8 @@ type FleetSummary = { self: { nodeId: string; name: string; commit?: string }; n
 
 export function App() {
   const [route, setRoute] = useState<Route>(parseHash());
+  const [spotifyOpened, setSpotifyOpened] = useState(route.view === "spotify");
+  useEffect(() => { if (route.view === "spotify") setSpotifyOpened(true); }, [route.view]);
   const [locked, setLocked] = useState(false);
   const [fleet, setFleet] = useState<FleetSummary | null>(null);
   const [nodeGen, setNodeGen] = useState(0); // bump to remount views on node switch
@@ -77,6 +84,7 @@ export function App() {
     };
   }, [locked]);
 
+  if (route.view === "remote") return <ScreenRemote />;
   if (locked) return <TokenGate />;
   const lock = () => setLocked(true);
   const isActive = (v: string) => route.view === v || (v === "files" && route.view === "edit");
@@ -94,6 +102,7 @@ export function App() {
   const view = (
     <>
       {route.view === "fleet" && <Home onLocked={lock} key={`fleet-${nodeGen}`} />}
+      {route.view === "applications" && <Applications params={route.params} onLocked={lock} />}
       {route.view === "desk" && <Desk onLocked={lock} key={`desk-${nodeGen}-${nodeId}`} />}
       {route.view === "projects" && <Projects params={route.params} onLocked={lock} key={`projects-${nodeGen}-${nodeId}`} />}
       {route.view === "agents" && <Agents params={route.params} onLocked={lock} key={`agents-${nodeGen}-${nodeId}`} />}
@@ -157,11 +166,11 @@ export function App() {
           ))}
         </aside>
 
-        <main className="min-w-0 flex-1 overflow-hidden">{view}</main>
+        <main className="min-w-0 flex-1 overflow-hidden">{view}{spotifyOpened && <Spotify visible={route.view === "spotify"} />}</main>
       </div>
 
       {/* sticky prompt bar: start sessions from anywhere; live sessions strip */}
-      <PromptBar route={route} nodeName={fleet?.self.name ?? "local"} />
+      {route.view !== "applications" && <PromptBar route={route} nodeName={fleet?.self.name ?? "local"} />}
 
       {/* status bar (desktop) */}
       <footer className="hud-chrome hidden h-6 shrink-0 items-center gap-4 border-t px-3 text-[10px] uppercase tracking-wider text-zinc-500 sm:flex">
@@ -178,13 +187,13 @@ export function App() {
       </footer>
 
       {/* bottom nav (mobile) */}
-      <nav className="hud-chrome flex shrink-0 border-t pb-[env(safe-area-inset-bottom)] sm:hidden">
+      <nav className="hud-chrome flex shrink-0 overflow-x-auto border-t pb-[env(safe-area-inset-bottom)] sm:hidden">
         {NAV.map((item) => (
           <button
             key={item.view}
             onClick={() => navigate(item.view)}
             data-testid={`mnav-${item.view}`}
-            className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[9px] uppercase tracking-wider ${
+            className={`flex min-w-20 flex-1 flex-col items-center gap-0.5 py-2 text-[9px] uppercase tracking-wider ${
               isActive(item.view) ? "neon" : "text-zinc-500"
             }`}
           >

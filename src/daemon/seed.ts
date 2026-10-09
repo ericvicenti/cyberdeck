@@ -7,10 +7,11 @@ import { homedir } from "os";
 import { join } from "path";
 import * as blobs from "@seed-hypermedia/client/blobs";
 import * as cbor from "@seed-hypermedia/client/cbor";
+import type { SessionInfo } from "./sessions";
 import { CYBERDECK_HOME, type SeedConfig } from "./config";
 
 /** Persisted in `${CYBERDECK_HOME}/seed.json`. */
-export type SeedState = { agentId?: string; sessionId?: string; mcpRegisteredAt?: number; lastCallAt?: number; dogfoodTriggerId?: string };
+export type SeedState = { queryAgentId?: string; agentId?: string; sessionId?: string; mcpRegisteredAt?: number; lastCallAt?: number; dogfoodTriggerId?: string };
 
 export type SeedHealth = { ok: boolean; voice?: boolean; protocol?: number; version?: string; error?: string; checkedAt: number };
 
@@ -146,6 +147,7 @@ export class SeedBridge {
   #healthInFlight: Promise<SeedHealth> | null = null;
   #dogfood: { value: DogfoodStatus | undefined; checkedAt: number; agentId: string } | null = null;
   #agentName: string | undefined;
+  #querySetup: Promise<string> | null = null;
 
   constructor(opts: SeedBridgeOptions) {
     this.config = opts.config;
@@ -427,6 +429,64 @@ export class SeedBridge {
 
   #readCompanion(): { agentId?: string; sessionId?: string; profile?: { voice?: unknown; speed?: unknown } } | null {
     try { return existsSync(this.companionFile) ? JSON.parse(readFileSync(this.companionFile, "utf8")) : null; } catch { return null; }
+  }
+
+  /** Text queries need a signer and reachable configured agent server; voice support is optional. */
+  async queryReady(): Promise<boolean> {
+    const [signer, health] = await Promise.all([this.signer(), this.health()]);
+    return !!signer && health.ok && !!this.#state.agentId && !!this.#state.mcpRegisteredAt;
+  }
+
+  /** A separate agent keeps text queries out of the voice companion's session and spoken-reply prompt. */
+  async queryAgent(): Promise<string> {
+    if (this.#state.queryAgentId) return this.#state.queryAgentId;
+    if (this.#querySetup) return this.#querySetup;
+    this.#querySetup = (async () => {
+      if (!await this.queryReady()) throw new SeedError("Seed queries are not configured on this node; run cyberdeck seed setup");
+      const created = await this.action<{ agentId: string }>({ _: "CreateAgent", definition: {
+        name: "Cyberdeck Queries", modelProvider: this.config.modelProvider, model: this.config.model,
+        mcpServers: [MCP_SERVER_NAME],
+        systemPrompt: "You are Eric's Seed agent in Cyberdeck. Handle the user's query using the Cyberdeck fleet tools. Check hosts, projects, services, sessions and handoffs before guessing. The supplied working directory is context on the selected fleet machine, not a local path in your sandbox. Organizational work belongs in Seed Hypermedia. Use clear written replies with useful detail and links. Only queue or start coding work when the user requests it. Preserve existing work and services.",
+      } });
+      this.#state.queryAgentId = created.agentId;
+      this.#save();
+      return created.agentId;
+    })();
+    try { return await this.#querySetup; } finally { this.#querySetup = null; }
+  }
+
+  /** Convert server sessions to the shared session-strip shape without inventing a terminal. */
+  queryInfo(s: { id: string; title?: string; status?: string; createdAt?: number; updatedAt?: number }): SessionInfo {
+    return { id: `seed-${s.id}`, title: s.title || "Seed query", cwd: this.config.agentsUrl, cmd: null, tool: "seed", prompt: null, runner: "agent",
+      state: "running", createdAt: s.createdAt ?? 0, exitedAt: null, exitCode: null, clients: 0, lastOutputAt: s.updatedAt ?? null,
+      bells: 0, busy: s.status === "streaming" };
+  }
+
+  /** List text conversations from the agents server, including after a Cyberdeck restart. */
+  async querySessions(): Promise<SessionInfo[]> {
+    if (!this.#state.queryAgentId) return [];
+    const r = await this.action<{ sessions: Parameters<SeedBridge["queryInfo"]>[0][] }>({ _: "ListSessions", agentId: this.#state.queryAgentId, includeChildren: false, limit: 100 }, { timeoutMs: 5000 });
+    return r.sessions.map((s) => this.queryInfo(s));
+  }
+
+  /** Start a durable text session. The caller sends the first message after creation. */
+  async createQuery(title: string): Promise<SessionInfo> {
+    const agentId = await this.queryAgent();
+    const r = await this.action<{ sessionId: string }>({ _: "CreateSession", agentId, title });
+    return this.queryInfo({ id: r.sessionId, title, createdAt: Date.now() });
+  }
+
+  /** Read one query and its transcript; reject access through this API to unrelated agent sessions. */
+  async getQuery(id: string, beforeSeq?: number): Promise<any> {
+    const r = await this.action<any>({ _: "GetSession", sessionId: id, limit: 100, beforeSeq });
+    if (!this.#state.queryAgentId || r.session?.agentId !== this.#state.queryAgentId) throw new SeedError("No such Seed query", 404);
+    return r;
+  }
+
+  /** Send a text turn, with optional fleet/directory context, to an existing query. */
+  async messageQuery(id: string, text: string, context?: string[], clientMessageId?: string): Promise<void> {
+    await this.getQuery(id);
+    await this.action({ _: "MessageSession", sessionId: id, content: [{ type: "text", text }, ...(context?.length ? [{ type: "context", lines: context }] : [])], clientMessageId });
   }
 
   // ---- voice profile --------------------------------------------------------------------------

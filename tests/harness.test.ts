@@ -1,13 +1,13 @@
 import { test, expect } from "bun:test";
 import { planHarness, type PlanInput, type Caps } from "../src/shared/harness";
 
-const full: Caps = { cc: true, cx: true, tmux: true, cmux: false };
+const full: Caps = { seed: true, cc: true, cx: true, tmux: true, cmux: false };
 const base = (): PlanInput => ({
   prompt: "",
   context: { node: "", cwd: null, project: null },
   nodes: [
     { id: "", name: "starlight", online: true, caps: full },
-    { id: "n-yacht", name: "yacht", online: true, caps: { cc: true, cx: true, tmux: false, cmux: true } },
+    { id: "n-yacht", name: "yacht", online: true, caps: { seed: true, cc: true, cx: true, tmux: false, cmux: true } },
     { id: "n-iris", name: "iris", online: false, caps: null },
   ],
   projects: [
@@ -17,22 +17,22 @@ const base = (): PlanInput => ({
   ],
 });
 
-test("default: cc on the current node in ~/Code, tmux when available", () => {
+test("default: Seed on a ready server without a shell command", () => {
   const p = planHarness({ ...base(), prompt: "tidy up the readme" });
-  expect(p.tool).toBe("cc");
+  expect(p.tool).toBe("seed");
   expect(p.node).toBe("");
   expect(p.cwd).toBe("~/Code");
-  expect(p.runner).toBe("tmux");
-  expect(p.cmd).toBe("claude --dangerously-skip-permissions 'tidy up the readme'");
+  expect(p.runner).toBe("agent");
+  expect(p.cmd).toBe("");
   expect(p.prompt).toBe("tidy up the readme");
-  expect(p.title.startsWith("cc tidy up")).toBe(true);
+  expect(p.title.startsWith("seed tidy up")).toBe(true);
 });
 
 test("project mention picks the repo directory and its host", () => {
   const p = planHarness({ ...base(), prompt: "fix the HLS playback bug in Afterglow for botical" });
   expect(p.node).toBe("n-yacht");
   expect(p.cwd).toBe("~/Code/BoticalMedia");
-  expect(p.runner).toBe("pty"); // yacht has no tmux
+  expect(p.runner).toBe("agent"); // Seed survives the client closing
   expect(p.reasons.join(" ")).toContain("lives on yacht");
 });
 
@@ -75,7 +75,7 @@ test("natural mentions of codex/claude choose the tool; prefix wins over mention
 });
 
 test("offline node falls back to local with a reason", () => {
-  const p = planHarness({ ...base(), prompt: "restart things on iris" });
+  const p = planHarness({ ...base(), prompt: "cc: restart things on iris" });
   expect(p.node).toBe("");
   expect(p.reasons.join(" ")).toContain("iris is offline");
 });
@@ -100,13 +100,34 @@ test("overrides pin fields and are reported", () => {
   expect(p.pinned.sort()).toEqual(["cwd", "node", "runner", "tool"]);
 });
 
-test("missing tool on the target swaps to the other agent and warns if neither exists", () => {
-  const nodes = base().nodes.map((n) => (n.id === "" ? { ...n, caps: { cc: false, cx: true, tmux: false, cmux: false } } : n));
+test("Seed routes to a healthy server and preserves the work's machine context", () => {
+  const nodes = base().nodes.map((n) => n.id === "" ? { ...n, caps: { ...full, seed: false } } : n);
+  const p = planHarness({ ...base(), nodes, prompt: "hello", context: { node: "", cwd: "/Users/eric/Code/Deck" } });
+  expect(p.tool).toBe("seed");
+  expect(p.node).toBe("n-yacht");
+  expect(p.contextNodeName).toBe("starlight");
+  expect(p.cwd).toBe("/Users/eric/Code/Deck");
+  expect(p.error).toBeUndefined();
+  const pinned = planHarness({ ...base(), nodes, prompt: "hello", overrides: { node: "" } });
+  expect(pinned.node).toBe("");
+  expect(pinned.error).toContain("No ready Seed");
+});
+
+test("no ready server blocks Seed instead of silently starting a different agent", () => {
+  const nodes = base().nodes.map((n) => ({ ...n, caps: { ...full, seed: false } }));
   const p = planHarness({ ...base(), nodes, prompt: "hello" });
-  expect(p.tool).toBe("cx");
-  expect(p.reasons.join(" ")).toContain("cc is not installed");
-  const none = base().nodes.map((n) => (n.id === "" ? { ...n, caps: { cc: false, cx: false, tmux: false, cmux: false } } : n));
-  expect(planHarness({ ...base(), nodes: none, prompt: "hello" }).reasons.join(" ")).toContain("warning: cc not found");
+  expect(p.tool).toBe("seed");
+  expect(p.cmd).toBe("");
+  expect(p.error).toContain("No ready Seed");
+  expect(planHarness({ ...base(), prompt: "seed: hello @iris" }).error).toContain("iris");
+  expect(planHarness({ ...base(), nodes, prompt: "cx: hello" }).error).toBeUndefined();
+});
+
+test("saved CLI preference and explicit Seed prefix remain available", () => {
+  const cli = planHarness({ ...base(), prompt: "hello", defaultTool: "cx" });
+  expect(cli.tool).toBe("cx");
+  expect(cli.cmd).toBe("codex --yolo 'hello'");
+  expect(planHarness({ ...base(), prompt: "seed: hello", defaultTool: "cx" }).tool).toBe("seed");
 });
 
 test("scanned repos: any indexed checkout is a destination, on whichever node has it", () => {

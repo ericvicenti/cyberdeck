@@ -35,6 +35,11 @@ export const fetchNodes = () => apiOn<FleetNodes>("", "/api/fleet/nodes");
 export const listSessions = async (node: string, nodeName: string): Promise<LiveSession[]> =>
   (await apiOn<{ sessions: Omit<LiveSession, "node" | "nodeName">[] }>(node, "/api/sessions")).sessions.map((s) => ({ ...s, node, nodeName }));
 
+/** Idempotency key available on private HTTP fleet origins as well as HTTPS. */
+export function messageRequestId(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export type CreateSession = { cwd?: string; cmd?: string; title?: string; tool?: Tool; prompt?: string; runner?: Runner; cols?: number; rows?: number };
 export const createSession = (node: string, nodeName: string, body: CreateSession) =>
   postOn<Omit<LiveSession, "node" | "nodeName">>(node, "/api/sessions", body).then((s) => ({ ...s, node, nodeName }) as LiveSession);

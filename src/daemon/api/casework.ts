@@ -57,6 +57,8 @@ const safeEq = (a: string, b: string) => { const x = Buffer.from(a), y = Buffer.
 export function caseworkAllows(method: string, path: string): boolean {
   const get = method === "GET", post = method === "POST";
   if (path === "/api/auth/whoami" || path === "/api/state" || path === "/api/experience-status" || path === "/api/status" || path === "/api/casework/me") return get;
+  if (path === "/api/kiosk/stream") return get;
+  if (path === "/api/audio") return get || post; // the remote's volume buttons
   if (path.startsWith("/api/modules/")) return get;
   if (path.startsWith("/api/media/")) return get || method === "PUT";
   if (path === "/api/command" || path === "/api/experiences/validate" || path === "/api/experiences/error" || path === "/api/casework/run") return post;
@@ -106,6 +108,7 @@ export async function compileExperience(name: string, dir = EXPERIENCES_DIR): Pr
 export type CaseworkDeps = {
   token: string;
   nodeName: string;
+  kiosk?: boolean;
   upgradeWebSocket: any;
   /** Full (token or tailscale) authentication for the current request. */
   isFullAuth: (c: any) => boolean;
@@ -122,7 +125,7 @@ export function registerCaseworkRoutes(app: Hono, deps: CaseworkDeps) {
   const dir = deps.experiencesDir ?? EXPERIENCES_DIR;
   let key = deps.key ?? loadCaseworkKey();
   const matches = (supplied: string) => safeEq(supplied, key) || safeEq(supplied, deps.token);
-  const scene = (): Scene => ({ title: "Cyberdeck", subtitle: `${deps.nodeName} · fleet control`, accent: "#22d3ee", tree: { type: "RemoteModule", props: { name: "cyberdeck" } } });
+  const scene = (): Scene => ({ title: "Cyberdeck", subtitle: `${deps.nodeName} · fleet control`, accent: "#22d3ee", tree: { type: "RemoteModule", props: { name: deps.kiosk ? "screen-remote" : "cyberdeck" } } });
   let revision = Date.now();
   const peers = new Map<string, Peer>();
   const events: unknown[] = [];

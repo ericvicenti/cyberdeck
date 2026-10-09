@@ -10,7 +10,7 @@ const cfg = loadConfig();
 const token = loadToken();
 const nodeId = loadNodeId();
 const db = openDb();
-const { fetch, websocket } = createServer(db, cfg, token, nodeId);
+const { fetch, websocket, network } = createServer(db, cfg, token, nodeId);
 
 // "tailscale" and "lan" both listen everywhere; the server's source-address gate
 // (server.ts) is what keeps "tailscale" closed to LAN clients.
@@ -24,6 +24,8 @@ const server = Bun.serve({
   fetch,
   websocket,
 });
+
+network.start();
 
 console.log(`cyberdeck ${VERSION} — node "${cfg.nodeName}"`);
 console.log(`listening on http://127.0.0.1:${server.port} (bind ${cfg.bind}; data in ${CYBERDECK_HOME})`);

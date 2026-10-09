@@ -1,6 +1,7 @@
 // Home: the dashboard. Usage limits for Claude Code and Codex, backup and
 // redundancy status, storage across the fleet, agent activity, the Deck control
 // summary, services, handoff, and the machine cards with pairing at the bottom.
+import { NetworkMap } from "../components/NetworkMap";
 import { useEffect, useState } from "react";
 import { api, post, navigate, setActiveNode, fmtBytes, fmtAgo, ApiError } from "../lib/api";
 import { ServerIcon, FolderIcon, TerminalIcon, GitIcon } from "../lib/icons";
@@ -9,6 +10,7 @@ import type { Dashboard, UsageSummary } from "../../src/daemon/api/dashboard";
 import type { CodexResets } from "../../src/daemon/codexrpc";
 import { apiOn, startSession } from "../lib/sessions";
 import { Widget, Meter, StackBar, DayBars, HUD, severity, fmtIn, fmtDuration, fmtInt } from "../components/Widgets";
+import { VolumeControl, useAudio } from "../components/VolumeControl";
 
 type NodeStatus = {
   nodeName: string;
@@ -230,6 +232,16 @@ function NodeCard(props: { name: string; subtitle: string; online: boolean; stat
 type CaseworkPairing = { url: string; key: string; link: string; qr: string; devices: { id: string; info?: { name?: string; model?: string } }[]; desk?: { url: string; secure: boolean; qr: string } };
 const qrBox = (svg: string, testId: string) => <div data-testid={testId} className="shrink-0 rounded-lg border border-cyan-900/60 bg-[#e8fbff] p-1" dangerouslySetInnerHTML={{ __html: svg.replace(/width="\d+" height="\d+"/, 'width="168" height="168"') }} />;
 /** Pairing card: the Casework Desk iPad/iPhone app (scan the QR, or type URL + key, in its Server settings) and, beside it, the web Desk for any phone browser. */
+/** This machine's speakers: the same control the buoy remote has, from any browser. */
+function SoundWidget({ nodeName }: { nodeName: string }) {
+  const { state } = useAudio(10_000);
+  const meta = state ? (state.available ? `${nodeName}${state.device ? ` · ${state.device}` : ""}` : state.reason ?? "unavailable") : "…";
+  return (
+    <Widget title="Sound" testId="widget-sound" meta={meta}>
+      <VolumeControl />
+    </Widget>
+  );
+}
 function CaseworkCard() {
   const [pairing, setPairing] = useState<CaseworkPairing | null>(null);
   const [err, setErr] = useState("");
@@ -425,6 +437,8 @@ export function Home({ onLocked }: { onLocked: () => void }) {
           {dash && <span className="text-[10px] text-zinc-600">updated {fmtAgo(dash.at)}</span>}
         </div>
 
+        <NetworkMap />
+
         <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="dashboard">
           {/* row 1: usage, backup */}
           <UsageWidget title="Claude Code + Fable" usage={cc.usage} testId="widget-claude" node={cc.m.id} nodeName={cc.m.name} isSelf={cc.m.self} onRefresh={refreshUsage(cc.m)} />
@@ -563,6 +577,8 @@ export function Home({ onLocked }: { onLocked: () => void }) {
               ))}
             </ul>
           </Widget>
+
+          <SoundWidget nodeName={selfName} />
 
           {/* row 4: every machine */}
           <Widget title="Systems" testId="widget-system" className="md:col-span-2 xl:col-span-3" meta={`${machines.filter((m) => m.online).length}/${machines.length} machines up`}>

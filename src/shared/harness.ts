@@ -10,9 +10,9 @@
 //   #seed               run in that project's or repo's directory
 // Plain words also count: "codex", "claude", a host name, a project or repo name.
 
-export type Tool = "cc" | "cx" | "shell";
-export type Runner = "tmux" | "pty";
-export type Caps = { cc: boolean; cx: boolean; tmux: boolean; cmux: boolean };
+export type Tool = "seed" | "cc" | "cx" | "shell";
+export type Runner = "agent" | "tmux" | "pty";
+export type Caps = { seed?: boolean; seedUrl?: string; cc: boolean; cx: boolean; tmux: boolean; cmux: boolean };
 
 export type PlanNode = { id: string; name: string; online: boolean; caps?: Caps | null };
 export type PlanProject = { slug: string; name: string; repos: string[]; hosts: string[] };
@@ -30,12 +30,13 @@ export type PlanInput = {
   repos?: PlanRepo[];
   overrides?: PlanOverrides;
   /** Default agent when nothing else decides (user preference). */
-  defaultTool?: "cc" | "cx";
+  defaultTool?: "seed" | "cc" | "cx";
 };
 
 export type Plan = {
   node: string;
   nodeName: string;
+  contextNodeName: string;
   tool: Tool;
   cwd: string;
   runner: Runner;
@@ -47,6 +48,7 @@ export type Plan = {
   reasons: string[];
   /** Which fields were fixed by the user rather than inferred. */
   pinned: (keyof PlanOverrides)[];
+  error?: string;
 };
 
 export const AGENT_CMDS: Record<"cc" | "cx", string> = {
@@ -91,8 +93,8 @@ export function planHarness(input: PlanInput): Plan {
   // ---- explicit syntax ----
   const shell = text.match(/^[$!]\s+(.+)$/s);
   if (shell) { shellCmd = shell[1].trim(); tool = "shell"; text = ""; reasons.push("`$` prefix: plain shell command, no agent"); }
-  const prefix = text.match(/^(cc|cx|claude|codex)\s*:\s*/i);
-  if (prefix && !tool) { tool = /^c(c|laude)/i.test(prefix[1]) ? "cc" : "cx"; text = text.slice(prefix[0].length); reasons.push(`${prefix[1]}: prefix`); }
+  const prefix = text.match(/^(seed|cc|cx|claude|codex)\s*:\s*/i);
+  if (prefix && !tool) { tool = prefix[1].toLowerCase() === "seed" ? "seed" : /^c(c|laude)/i.test(prefix[1]) ? "cc" : "cx"; text = text.slice(prefix[0].length); reasons.push(`${prefix[1]}: prefix`); }
   text = text.replace(/(^|\s)@([\w.-]+)/g, (m, sp, name) => {
     const n = findNode(name);
     if (!n) return m;
@@ -165,7 +167,7 @@ export function planHarness(input: PlanInput): Plan {
     }
     if (!node) node = current;
   }
-  if (node && node.id !== "" && !node.online) { reasons.push(`${node.name} is offline; using ${self.name}`); node = self; }
+  if (node && node.id !== "" && !node.online && (ov.tool ?? tool ?? input.defaultTool ?? "seed") !== "seed") { reasons.push(`${node.name} is offline; using ${self.name}`); node = self; }
   node = node ?? self;
 
   // ---- cwd ----
@@ -176,30 +178,41 @@ export function planHarness(input: PlanInput): Plan {
   else if (input.context.cwd && (node.id === input.context.node)) { cwd = input.context.cwd; reasons.push(`current directory ${shortCwd(cwd)}`); }
   else cwd = "~/Code";
 
-  // ---- tool ----
-  const caps = node.caps ?? null;
+  const contextNodeName = node.name;
+
+  // Seed queries run on a ready agents server, independently of local CLI availability.
   if (ov.tool !== undefined) { tool = ov.tool; pinned.push("tool"); }
   else if (!tool) {
-    const pref = input.defaultTool ?? "cc";
-    tool = pref;
-    if (caps && !caps[pref] && caps[pref === "cc" ? "cx" : "cc"]) { tool = pref === "cc" ? "cx" : "cc"; reasons.push(`${pref} is not installed on ${node.name}`); }
-    else reasons.push(`default ${pref}`);
+    tool = input.defaultTool ?? "seed";
+    const available = node.caps;
+    if ((tool === "cc" || tool === "cx") && available && !available[tool] && available[tool === "cc" ? "cx" : "cc"]) {
+      reasons.push(`${tool} is not installed on ${node.name}`);
+      tool = tool === "cc" ? "cx" : "cc";
+    } else reasons.push(`default ${tool}`);
   }
-  if (tool !== "shell" && caps && !caps[tool]) reasons.push(`warning: ${tool} not found on ${node.name}`);
+  let error: string | undefined;
+  if (tool === "seed" && (!node.online || !node.caps?.seed)) {
+    const explicitNode = ov.node !== undefined || reasons.some((r) => r.startsWith("@"));
+    const server = !explicitNode && nodes.find((n) => n.online && n.caps?.seed);
+    if (server) { node = server; reasons.push(`Seed agents server on ${server.name}`); }
+    else error = `No ready Seed agents server${explicitNode ? ` on ${node.name}` : ""}. Configure Seed on a fleet node or choose another agent.`;
+  }
+  const caps = node.caps ?? null;
+  if (tool !== "seed" && tool !== "shell" && caps && !caps[tool]) reasons.push(`warning: ${tool} not found on ${node.name}`);
 
-  // ---- runner ----
   let runner: Runner;
-  if (ov.runner !== undefined) { runner = ov.runner; pinned.push("runner"); }
-  else if (caps && caps.tmux) { runner = "tmux"; reasons.push("tmux: survives daemon restarts"); }
+  if (tool === "seed") runner = "agent";
+  else if (ov.runner !== undefined && ov.runner !== "agent") { runner = ov.runner; pinned.push("runner"); }
+  else if (caps?.tmux) { runner = "tmux"; reasons.push("tmux: survives daemon restarts"); }
   else { runner = "pty"; if (caps) reasons.push("no tmux: session ends if the daemon restarts"); }
 
   // Tool pinned to shell (or chosen by caps) with no `$` prefix: the text itself is the command.
   if (tool === "shell" && shellCmd === null && text) { shellCmd = text; text = ""; reasons.push("shell: the text runs as a command"); }
   const prompt = text;
-  const cmd = tool === "shell" ? (shellCmd ?? "") : launchCmd(tool, prompt || undefined);
+  const cmd = tool === "seed" ? "" : tool === "shell" ? (shellCmd ?? "") : launchCmd(tool, prompt || undefined);
   const base = (cwd ?? "~").split("/").filter(Boolean).pop() ?? "~";
   const gist = (tool === "shell" ? shellCmd ?? "" : prompt).replace(/\s+/g, " ").trim();
   const title = `${tool === "shell" ? "sh" : tool} ${gist ? gist.slice(0, 32) : base}`;
 
-  return { node: node.id, nodeName: node.name, tool, cwd: cwd ?? "~", runner, prompt, cmd, title, reasons, pinned };
+  return { node: node.id, nodeName: node.name, contextNodeName, tool, cwd: cwd ?? "~", runner, prompt, cmd, title, reasons, pinned, error };
 }

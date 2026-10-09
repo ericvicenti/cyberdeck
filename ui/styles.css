@@ -211,3 +211,10 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 1px var(--hud-cyan
 @media (prefers-reduced-motion: reduce) {
   .talk-btn::before { animation: none; }
 }
+
+/* Network constellation: movement follows only a selected, measured link. */
+.network-flow { animation: network-flow 2s linear infinite; }
+@keyframes network-flow { to { stroke-dashoffset: -48; } }
+.network-host:focus { outline: none; }
+.network-host:focus-visible rect { stroke: #e879f9; stroke-width: 3; }
+@media (prefers-reduced-motion: reduce) { .network-flow { animation: none; } }

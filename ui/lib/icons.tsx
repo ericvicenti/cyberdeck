@@ -148,3 +148,7 @@ export const MicIcon = (p: P) => (
     <path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" />
   </svg>
 );
+
+export const MusicIcon = (p: P) => (
+  <svg {...base(p)}><path d="M9 18V5l12-2v13M9 9l12-2" /><ellipse cx="6" cy="18" rx="3" ry="3" /><ellipse cx="18" cy="16" rx="3" ry="3" /></svg>
+);

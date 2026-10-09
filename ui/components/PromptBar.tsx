@@ -7,13 +7,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { activeNode, api, type Route } from "../lib/api";
 import { planHarness, shortCwd, type Caps, type PlanOverrides, type PlanRepo, type Runner, type Tool } from "../../src/shared/harness";
 import { apiOn } from "../lib/sessions";
-import { createSession, getCaps, openSession, useLiveSessions, type LiveSession } from "../lib/sessions";
+import { messageRequestId, createSession, getCaps, openSession, useLiveSessions, type LiveSession } from "../lib/sessions";
 import { recentCwds, rememberCwd } from "../lib/terms";
 import type { Overview } from "../lib/control";
 
-const PREF_KEY = "cyberdeck-default-tool";
+const PREF_KEY = "cyberdeck-default-tool-v2";
 const DRAFT_KEY = "cyberdeck-prompt-draft";
-const readPref = (): "cc" | "cx" => { try { return localStorage.getItem(PREF_KEY) === "cx" ? "cx" : "cc"; } catch { return "cc"; } };
+const readPref = (): "seed" | "cc" | "cx" => { try { const p = localStorage.getItem(PREF_KEY); return p === "cc" || p === "cx" ? p : "seed"; } catch { return "seed"; } };
 
 /** What the current view says about where the user is. */
 function contextFor(route: Route, sessions: LiveSession[]): { cwd?: string | null; project?: string | null } {
@@ -21,7 +21,7 @@ function contextFor(route: Route, sessions: LiveSession[]): { cwd?: string | nul
   if (route.view === "files" && p.get("path")) return { cwd: p.get("path") };
   if (route.view === "edit" && p.get("path")) return { cwd: p.get("path")!.replace(/\/[^/]*$/, "") || "/" };
   if (route.view === "projects" && p.get("p")) return { project: p.get("p") };
-  if (route.view === "term" && p.get("session")) { const s = sessions.find((x) => x.id === p.get("session") && x.node === activeNode()); if (s) return { cwd: s.cwd }; }
+  if (route.view === "term" && p.get("session")) { const s = sessions.find((x) => x.id === p.get("session") && x.node === activeNode()); if (s && s.tool !== "seed") return { cwd: s.cwd }; }
   return {};
 }
 
@@ -36,7 +36,7 @@ export function PromptBar({ route, nodeName }: { route: Route; nodeName: string 
   const [caps, setCaps] = useState<Record<string, Caps | null>>({});
   const [repos, setRepos] = useState<Record<string, PlanRepo[]>>({});
   const [editCwd, setEditCwd] = useState(false);
-  const [pref, setPref] = useState<"cc" | "cx">(readPref);
+  const [pref, setPref] = useState<"seed" | "cc" | "cx">(readPref);
   const ta = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => { api<Overview>("/api/control/overview").then(setOverview).catch(() => setOverview(null)); }, []);
@@ -64,11 +64,15 @@ export function PromptBar({ route, nodeName }: { route: Route; nodeName: string 
 
   const send = async (background: boolean) => {
     const t = text.trim();
-    if (!t || sending) return;
+    if (!t || sending || plan.error) return;
     if (plan.tool !== "shell" && !plan.prompt) { setNote({ text: "that only routes; add what the agent should do", kind: "err" }); return; }
     setSending(true);
     try {
       const s = await createSession(plan.node, plan.nodeName, { cwd: plan.cwd, cmd: plan.cmd || undefined, title: plan.title, tool: plan.tool, prompt: plan.prompt || undefined, runner: plan.runner });
+      if (plan.tool === "seed") {
+        try { await apiOn(plan.node, `/api/sessions/${s.id}/message`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: plan.prompt, cwd: plan.cwd, nodeName: plan.contextNodeName, clientMessageId: messageRequestId() }) }); }
+        catch (e) { openSession(s); throw new Error(`Session created; first message could not be confirmed. Check the conversation before retrying: ${e instanceof Error ? e.message : e}`); }
+      }
       rememberCwd(plan.cwd);
       setText(""); setOverrides({}); setEditCwd(false);
       setNote({ text: `started ${s.title} on ${plan.nodeName}`, kind: "ok" });
@@ -81,7 +85,7 @@ export function PromptBar({ route, nodeName }: { route: Route; nodeName: string 
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(e.metaKey || e.ctrlKey); }
     if (e.key === "Escape") { (e.target as HTMLTextAreaElement).blur(); }
   };
-  const cycleTool = () => { const order: Tool[] = ["cc", "cx", "shell"]; const next = order[(order.indexOf(plan.tool) + 1) % order.length]; setOverrides({ ...overrides, tool: next }); };
+  const cycleTool = () => { const order: Tool[] = ["seed", "cc", "cx", "shell"]; const next = order[(order.indexOf(plan.tool) + 1) % order.length]; setOverrides({ ...overrides, tool: next }); };
   const cycleRunner = () => setOverrides({ ...overrides, runner: (plan.runner === "tmux" ? "pty" : "tmux") as Runner });
   const unpin = (k: keyof PlanOverrides) => { const o = { ...overrides }; delete o[k]; setOverrides(o); };
   const live = useMemo(() => [...sessions].sort((a, b) => (a.state === "running" ? 0 : 1) - (b.state === "running" ? 0 : 1) || b.createdAt - a.createdAt), [sessions]);
@@ -113,15 +117,15 @@ export function PromptBar({ route, nodeName }: { route: Route; nodeName: string 
       {showPlan && (
         <div className="flex flex-wrap items-center gap-1 px-2 pt-1.5 text-[10px]" data-testid="plan-chips">
           <span className="hud-label mr-1 hidden sm:inline">{plan.pinned.length ? "plan (pinned ●)" : "auto"}</span>
-          <select value={plan.node} onChange={(e) => setOverrides({ ...overrides, node: e.target.value })} data-testid="plan-node" title="machine" className={`hud-chip cursor-pointer appearance-none bg-transparent normal-case tracking-normal ${plan.pinned.includes("node") ? "border-sky-400/60 text-sky-200" : "text-zinc-300"}`}>
+          <select value={plan.node} onChange={(e) => setOverrides({ ...overrides, node: e.target.value })} data-testid="plan-node" title={plan.tool === "seed" ? "Agent server node" : "machine"} className={`hud-chip cursor-pointer appearance-none bg-transparent normal-case tracking-normal ${plan.pinned.includes("node") ? "border-sky-400/60 text-sky-200" : "text-zinc-300"}`}>
             {planNodes.map((n) => <option key={n.id} value={n.id} disabled={!n.online}>{n.name}{n.online ? "" : " (offline)"}</option>)}
           </select>
-          {chip(plan.tool === "cc" ? "cc · Claude" : plan.tool === "cx" ? "cx · Codex" : "$ shell", { pinned: plan.pinned.includes("tool"), onClick: cycleTool, title: "agent (click to cycle)", testid: "plan-tool", tone: plan.tool === "cc" ? "text-orange-300" : plan.tool === "cx" ? "text-sky-300" : "text-zinc-300" })}
+          {chip(plan.tool === "seed" ? "Seed agents" : plan.tool === "cc" ? "cc · Claude" : plan.tool === "cx" ? "cx · Codex" : "$ shell", { pinned: plan.pinned.includes("tool"), onClick: cycleTool, title: "agent (click to cycle)", testid: "plan-tool", tone: plan.tool === "cc" ? "text-orange-300" : plan.tool === "cx" ? "text-sky-300" : "text-zinc-300" })}
           {editCwd ? (
             <input autoFocus list="prompt-cwd-options" defaultValue={plan.cwd} onBlur={(e) => { const v = e.target.value.trim(); setEditCwd(false); if (v) setOverrides({ ...overrides, cwd: v }); }} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setEditCwd(false); }} className="w-56 rounded-sm border border-sky-500/40 bg-zinc-950 px-2 py-0.5 font-mono text-[10px] text-zinc-100 outline-none" />
           ) : chip(shortCwd(plan.cwd), { pinned: plan.pinned.includes("cwd"), onClick: () => setEditCwd(true), title: "working directory (click to edit)", testid: "plan-cwd" })}
           <datalist id="prompt-cwd-options">{cwdOptions.map((c) => <option key={c} value={c} />)}</datalist>
-          {chip(plan.runner, { pinned: plan.pinned.includes("runner"), onClick: cycleRunner, title: plan.runner === "tmux" ? "tmux: survives daemon restarts; `tmux attach -t cd-<id>` from any terminal" : "plain pty: ends if the daemon restarts", testid: "plan-runner", tone: "text-zinc-400" })}
+          {plan.tool !== "seed" && chip(plan.runner, { pinned: plan.pinned.includes("runner"), onClick: cycleRunner, title: plan.runner === "tmux" ? "tmux: survives daemon restarts; `tmux attach -t cd-<id>` from any terminal" : "plain pty: ends if the daemon restarts", testid: "plan-runner", tone: "text-zinc-400" })}
           {plan.pinned.length > 0 && <button type="button" onClick={() => { setOverrides({}); setEditCwd(false); }} className="text-zinc-500 hover:text-zinc-200" title="back to automatic">reset</button>}
           <span className="ml-auto hidden truncate text-zinc-600 md:inline" title={plan.reasons.join("\n")} data-testid="plan-reasons">{plan.reasons.filter((r) => !r.startsWith("default")).slice(0, 3).join(" · ")}</span>
         </div>
@@ -139,14 +143,15 @@ export function PromptBar({ route, nodeName }: { route: Route; nodeName: string 
           rows={1}
           disabled={sending}
           data-testid="prompt-input"
-          placeholder={`Start a session: describe the task… (@node, #project, cc:/cx:, or $ for a shell command; Enter starts, ${/Mac/.test(navigator.platform) ? "⌘" : "Ctrl+"}Enter starts in the background)`}
+          placeholder={`Start a session: describe the task… (@node, #project, seed:/cc:/cx:, or $ for a shell command; Enter starts, ${/Mac/.test(navigator.platform) ? "⌘" : "Ctrl+"}Enter starts in the background)`}
           className="max-h-32 min-h-[34px] flex-1 resize-none rounded-sm border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-[12px] leading-5 text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-sky-500/60 disabled:opacity-60"
           style={{ height: "auto" }}
           onInput={(e) => { const el = e.currentTarget; el.style.height = "auto"; el.style.height = `${Math.min(128, el.scrollHeight)}px`; }}
         />
-        <button type="button" onClick={() => { const n = pref === "cc" ? "cx" : "cc"; setPref(n); try { localStorage.setItem(PREF_KEY, n); } catch {} }} title={`default agent when nothing decides: ${pref} (click to switch)`} className="mb-0.5 hidden text-[9px] uppercase tracking-widest text-zinc-600 hover:text-zinc-300 sm:inline" data-testid="prompt-pref">{pref}</button>
-        <button disabled={!text.trim() || sending} data-testid="prompt-go" className="hud-badge neon-green mb-0.5 px-3 py-1.5 hover:bg-lime-500/10 disabled:opacity-40">{sending ? "…" : "Start"}</button>
+        <button type="button" onClick={() => { const n = pref === "seed" ? "cc" : pref === "cc" ? "cx" : "seed"; setPref(n); try { localStorage.setItem(PREF_KEY, n); } catch {} }} title={`default agent when nothing decides: ${pref} (click to switch)`} className="mb-0.5 hidden text-[9px] uppercase tracking-widest text-zinc-600 hover:text-zinc-300 sm:inline" data-testid="prompt-pref">{pref}</button>
+        <button disabled={!text.trim() || sending || !!plan.error} data-testid="prompt-go" className="hud-badge neon-green mb-0.5 px-3 py-1.5 hover:bg-lime-500/10 disabled:opacity-40">{sending ? "…" : "Start"}</button>
       </form>
+      {plan.error && showPlan && <div role="status" className="px-3 pb-1 text-xs text-amber-300">{plan.error}</div>}
       {note && <div className={`px-3 pb-1 text-[10px] ${note.kind === "err" ? "text-red-300" : "text-zinc-400"}`} data-testid="prompt-note">{note.text}</div>}
     </div>
   );

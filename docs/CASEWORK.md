@@ -41,6 +41,10 @@ Edit the TSX and `POST /api/experiences/validate` (or restart the daemon): conne
 the error instead of crashing the app. Only modules in the app's native registry may be imported
 (`NATIVE_MODULES` in api/casework.ts); anything else fails validation with the module name.
 
+When `kiosk.enabled` is set (enuc), the scene is the `screen-remote` module instead: the app's
+WebView shows the node's `/#/remote` page, a live stream of the kiosk browser with touch, keys and a
+**Sound** row (mute, −, slider, +) that sets the node's system volume through `/api/audio`.
+
 ## Voice
 
 The app's AI call button talks to a Seed agent through this node (full design in `docs/VOICE.md`).

@@ -3,7 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { activeNode, activeNodeName, navigate, api, wsUrl } from "../lib/api";
 import { recentCwds, rememberCwd, shortCwd } from "../lib/terms";
-import { apiOn, attachUrl, createSession, getCaps, removeSession, renameSession, type LiveSession } from "../lib/sessions";
+import { messageRequestId, apiOn, attachUrl, createSession, getCaps, removeSession, renameSession, type LiveSession } from "../lib/sessions";
 import type { Overview } from "../lib/control";
 import "@xterm/xterm/css/xterm.css";
 
@@ -89,6 +89,87 @@ function TermPane({ session, onStatus, onRemove }: { session: LiveSession; onSta
   );
 }
 
+type QueryEvent = { seq: number; event: { type?: string; role?: string; content?: string; message?: string } };
+type QueryTranscript = { session: { status: string; continuedTo?: { sessionId: string } }; events: QueryEvent[]; hasMoreBefore?: boolean };
+
+/** Persistent Seed conversation, with transcript history and follow-up messages. */
+function SeedPane({ session }: { session: LiveSession }) {
+  const [data, setData] = useState<QueryTranscript | null>(null);
+  const [events, setEvents] = useState<QueryEvent[]>([]);
+  const [more, setMore] = useState(false);
+  const [text, setText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const requestId = useRef<string | null>(null);
+  const scroll = useRef<HTMLDivElement>(null);
+  const follow = useRef(true);
+  const path = `/api/sessions/${session.id}`;
+  const mergeEvents = (incoming: QueryEvent[]) => setEvents((prev) => [...new Map([...prev, ...incoming].map((e) => [e.seq, e])).values()].sort((a, b) => a.seq - b.seq));
+  useEffect(() => {
+    let alive = true;
+    let pending = false;
+    let initialized = false;
+    const load = async () => {
+      if (pending || document.visibilityState !== "visible") return;
+      pending = true;
+      try {
+        const r = await apiOn<QueryTranscript>(session.node, `${path}/transcript`);
+        if (alive) { setData(r); mergeEvents(r.events); if (!initialized) { setMore(!!r.hasMoreBefore); initialized = true; } }
+      } catch (e) { if (alive) setError(`Could not refresh: ${e instanceof Error ? e.message : e}`); }
+      finally { pending = false; }
+    };
+    load();
+    const timer = setInterval(load, 2000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [session.node, path]);
+  useEffect(() => { if (follow.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight; }, [events]);
+  const post = (suffix: string, body: unknown) => apiOn(session.node, `${path}/${suffix}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const send = async () => {
+    if (!text.trim() || sending) return;
+    setSending(true); setError(null);
+    requestId.current ??= messageRequestId();
+    try {
+      await post("message", { text, clientMessageId: requestId.current });
+      setText(""); requestId.current = null; follow.current = true;
+      const r = await apiOn<QueryTranscript>(session.node, `${path}/transcript`); setData(r); mergeEvents(r.events);
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setSending(false); }
+  };
+  const earlier = async () => {
+    setLoadingEarlier(true);
+    try { const r = await apiOn<QueryTranscript>(session.node, `${path}/transcript?beforeSeq=${events[0]?.seq ?? 1}`); follow.current = false; mergeEvents(r.events); setMore(!!r.hasMoreBefore); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setLoadingEarlier(false); }
+  };
+  const busy = data?.session.status === "streaming";
+  return <div className="flex min-h-0 flex-1 flex-col" data-testid="seed-conversation">
+    <div className="flex items-center gap-2 border-b border-zinc-800 px-4 py-2 text-xs text-zinc-400">
+      <span className="text-emerald-300">Seed agents</span><span>on {session.nodeName}</span>
+      <span className="ml-auto" role="status">{data?.session.status ?? "Connecting…"}</span>
+      {busy && <button className="hud-badge px-2 py-1 text-red-300" onClick={() => post("stop", {}).catch((e) => setError(e.message))}>Stop</button>}
+    </div>
+    <div ref={scroll} onScroll={() => { const el = scroll.current!; follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div className="mx-auto flex max-w-3xl flex-col gap-5">
+        {more && <button disabled={loadingEarlier} onClick={earlier} className="text-xs text-sky-300">{loadingEarlier ? "Loading…" : "Load earlier messages"}</button>}
+        {events.filter((e) => e.event.type === "message" && ["user", "assistant"].includes(e.event.role ?? "") && typeof e.event.content === "string").map((e) => <article key={e.seq} className={`rounded-sm border p-4 ${e.event.role === "user" ? "border-zinc-800 bg-zinc-900/50" : "border-emerald-900/50"}`}>
+          <div className="mb-2 text-xs uppercase tracking-widest text-zinc-500">{e.event.role === "user" ? "You" : "Seed"}</div>
+          <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-zinc-200">{e.event.content}</div>
+        </article>)}
+        {!events.length && <div className="py-8 text-center text-sm text-zinc-500">{data ? "Send a message to begin this conversation." : "Loading conversation…"}</div>}
+        {busy && <div className="text-xs text-emerald-300" role="status">Seed is working…</div>}
+        {events.filter((e) => e.event.type === "error").map((e) => <div key={e.seq} role="alert" className="text-sm text-red-300">{e.event.message}</div>)}
+        {data?.session.continuedTo && <button className="text-left text-sm text-sky-300" onClick={() => navigate("term", { session: `seed-${data.session.continuedTo!.sessionId}` })}>Open continued conversation →</button>}
+      </div>
+    </div>
+    {error && <div role="alert" className="px-4 py-2 text-xs text-red-300">{error}</div>}
+    <form className="flex items-end gap-2 border-t border-zinc-800 p-3" onSubmit={(e) => { e.preventDefault(); send(); }}>
+      <textarea aria-label="Reply to Seed" value={text} maxLength={8000} disabled={sending || !!data?.session.continuedTo} onChange={(e) => { setText(e.target.value); requestId.current = null; }} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} rows={2} placeholder="Continue this conversation…" className="min-w-0 flex-1 resize-none rounded-sm border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
+      <button disabled={!text.trim() || sending || !!data?.session.continuedTo} className="hud-badge px-3 py-2 text-emerald-300 disabled:opacity-40">{sending ? "Sending…" : "Send"}</button>
+    </form>
+  </div>;
+}
+
 export function Term({ params }: { params: URLSearchParams }) {
   const node = activeNode();
   const nodeName = node ? activeNodeName() : "local";
@@ -104,9 +185,9 @@ export function Term({ params }: { params: URLSearchParams }) {
 
   const load = async () => {
     try {
-      const r = await apiOn<{ sessions: Omit<LiveSession, "node" | "nodeName">[] }>(node, "/api/sessions");
+      const r = await apiOn<{ sessions: Omit<LiveSession, "node" | "nodeName">[]; seedError?: string }>(node, "/api/sessions");
       setSessions(r.sessions.map((s) => ({ ...s, node, nodeName })).reverse());
-      setErr(null);
+      setErr(r.seedError ? `Seed server: ${r.seedError}` : null);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setSessions([]); }
   };
   useEffect(() => {
@@ -152,8 +233,8 @@ export function Term({ params }: { params: URLSearchParams }) {
   }, []);
 
   const close = async (s: LiveSession) => {
-    if (s.state === "running" && !confirm(`Kill session “${s.title}”? Anything running in it stops.`)) return;
-    try { await removeSession(node, s.id); } catch {}
+    if (s.state === "running" && !confirm(s.tool === "seed" ? `Delete conversation “${s.title}” and its messages?` : `Kill session “${s.title}”? Anything running in it stops.`)) return;
+    try { await removeSession(node, s.id); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); return; }
     const rest = (sessions ?? []).filter((x) => x.id !== s.id);
     setSessions(rest);
     if (active === s.id) { if (rest[0]) navigate("term", { session: rest[0].id }); else { navigate("term"); setAdding(true); } }
@@ -179,7 +260,7 @@ export function Term({ params }: { params: URLSearchParams }) {
           </div>
         ))}
         <button onClick={() => setAdding(true)} data-testid="term-new" className={`shrink-0 rounded-sm border px-2 py-1 font-mono text-[12px] ${adding ? "border-sky-500/40 text-sky-300" : "border-zinc-800 text-zinc-400 hover:text-zinc-100"}`} title="new session">+</button>
-        {current && <span className="ml-auto hidden shrink-0 pl-3 font-mono text-[10px] text-zinc-600 md:inline" title="this session's working directory" data-testid="term-status">{shortCwd(current.cwd)} · {current.runner}{current.clients > 1 ? ` · ${current.clients} viewers` : ""} · <span className={statuses[current.id] === "live" ? "text-emerald-400" : ""}>{current.state !== "running" ? current.state : statuses[current.id] ?? "connecting"}</span></span>}
+        {current && <span className="ml-auto hidden shrink-0 pl-3 font-mono text-[10px] text-zinc-600 md:inline" title="this session's working directory" data-testid="term-status">{shortCwd(current.cwd)} · {current.runner}{current.clients > 1 ? ` · ${current.clients} viewers` : ""} · <span className={statuses[current.id] === "live" ? "text-emerald-400" : ""}>{current.state !== "running" ? current.state : (current.tool === "seed" ? current.busy ? "working" : "ready" : statuses[current.id] ?? "connecting")}</span></span>}
       </div>
       {err && <div className="border-b border-red-500/20 bg-red-500/5 px-3 py-1 text-[11px] text-red-300">{err}</div>}
       {adding && (
@@ -202,7 +283,7 @@ export function Term({ params }: { params: URLSearchParams }) {
         </div>
       )}
       {!adding && current && (
-        <TermPane key={`${current.node}:${current.id}`} session={current} onStatus={(s) => setStatuses((m) => (m[current.id] === s ? m : { ...m, [current.id]: s }))} onRemove={() => close(current)} />
+        current.tool === "seed" ? <SeedPane key={`${current.node}:${current.id}`} session={current} /> : <TermPane key={`${current.node}:${current.id}`} session={current} onStatus={(s) => setStatuses((m) => (m[current.id] === s ? m : { ...m, [current.id]: s }))} onRemove={() => close(current)} />
       )}
       {!adding && !current && sessions && sessions.length > 0 && active && <div className="p-6 text-xs text-zinc-500">No session {active} on {nodeName}. Pick one above.</div>}
     </div>

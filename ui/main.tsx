@@ -10,6 +10,11 @@ if (hashToken) {
   history.replaceState(null, "", location.pathname);
 }
 
+// OAuth returns to the allowlisted root URL (Spotify does not allow hash redirects).
+if (new URLSearchParams(location.search).has("code") || new URLSearchParams(location.search).has("error")) {
+  history.replaceState(null, "", location.pathname + location.search + "#/spotify");
+}
+
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />

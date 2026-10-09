@@ -6,6 +6,11 @@ import { randomBytes } from "crypto";
 export const CYBERDECK_HOME = process.env.CYBERDECK_HOME ?? join(homedir(), ".cyberdeck");
 
 export interface CyberdeckConfig {
+  /** Optional applications and physical fullscreen browser on this machine. */
+  applications?: { id: string; name: string; description: string; url: string }[];
+  kiosk?: { enabled: boolean };
+  /** Small, staggered peer throughput probes, at most once per peer every six hours. */
+  network?: { automatic?: boolean };
   nodeName: string;
   port: number;
   /** Who may reach the daemon: "tailscale" (default) listens on all interfaces but only

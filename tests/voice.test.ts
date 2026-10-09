@@ -1,6 +1,7 @@
 // Voice bridge: Cyberdeck signs Seed agents actions as a vault identity and mints LiveKit rooms for
 // the Casework app. A fake agents server verifies the signed CBOR envelopes and answers the actions
 // setup and calls need.
+import { chromium } from "playwright";
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { Database } from "bun:sqlite";
 import { existsSync, readFileSync, writeFileSync } from "fs";
@@ -13,7 +14,7 @@ import { seedConfig } from "../src/daemon/config";
 import { caseworkAllows } from "../src/daemon/api/casework";
 import { secureCallUrl } from "../src/daemon/api/voice";
 import { Tailscale } from "../src/daemon/tailscale";
-import { DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME } from "../src/daemon/seed";
+import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME } from "../src/daemon/seed";
 import { testConfig, TEST_TOKEN, tmpHomeDir } from "./helpers";
 
 // Deterministic signer; the bridge builds the keypair from this instead of opening the Seed vault.
@@ -30,7 +31,8 @@ type Action = Record<string, any>;
 function fakeAgents(opts: { voice: boolean }) {
   const actions: Action[] = [];
   const agents = new Map<string, Record<string, any>>([[COMPANION_ID, { name: "Casework Companion", systemPrompt: "x", modelProvider: "OpenAI", model: "gpt-6-sol", mcpServers: ["casework_host"] }]]);
-  const sessions = new Map<string, { agentId: string; continuedTo?: string }>();
+  const sessions = new Map<string, { agentId: string; title?: string; continuedTo?: string }>();
+  const queryEvents = new Map<string, any[]>();
   const secrets = new Map<string, Uint8Array>();
   const mcp = new Map<string, Record<string, any>>();
   const triggers = new Map<string, Record<string, any>[]>();
@@ -70,7 +72,19 @@ function fakeAgents(opts: { voice: boolean }) {
         case "GetAgent": { const d = agents.get(a.agentId); return d ? ok({ _: "GetAgentResponse", agent: { id: a.agentId, definition: d }, sessionCount: 0 }) : err(404, "Agent not found"); }
         case "UpdateAgent": if (!agents.has(a.agentId)) return err(404, "Agent not found"); agents.set(a.agentId, a.definition); return ok({ _: "UpdateAgentResponse", agent: { id: a.agentId, definition: a.definition } });
         case "CreateAgent": { const id = `agent-${++n}`; agents.set(id, a.definition); return ok({ _: "CreateAgentResponse", agentId: id }); }
-        case "CreateSession": { if (!agents.has(a.agentId)) return err(404, "Agent not found"); const id = `session-${++n}`; sessions.set(id, { agentId: a.agentId }); return ok({ _: "CreateSessionResponse", sessionId: id }); }
+        case "CreateSession": { if (!agents.has(a.agentId)) return err(404, "Agent not found"); const id = `session-${++n}`; sessions.set(id, { agentId: a.agentId, title: a.title }); return ok({ _: "CreateSessionResponse", sessionId: id }); }
+        case "ListSessions": return ok({ _: "ListSessionsResponse", sessions: [...sessions].filter(([, s]) => s.agentId === a.agentId).map(([id, s]) => ({ id, ...s, status: "idle", createdAt: 1, updatedAt: 2 })) });
+        case "MessageSession": {
+          if (!sessions.has(a.sessionId)) return err(404, "No session");
+          const rows = queryEvents.get(a.sessionId) ?? [];
+          const text = a.content.find((p: any) => p.type === "text")?.text;
+          rows.push({ seq: rows.length + 1, event: { type: "message", role: "user", content: text } }, { seq: rows.length + 2, event: { type: "message", role: "assistant", content: `Seed reply: ${text}` } });
+          queryEvents.set(a.sessionId, rows);
+          return ok({ _: "MessageSessionResponse" });
+        }
+        case "StopSession": return ok({ _: "StopSessionResponse" });
+        case "UpdateSession": { const s = sessions.get(a.sessionId); if (s) s.title = a.title; return ok({ _: "UpdateSessionResponse" }); }
+        case "DeleteSession": sessions.delete(a.sessionId); return ok({ _: "DeleteSessionResponse" });
         case "GetSession": {
           const s = sessions.get(a.sessionId);
           if (!s) return err(404, "Session not found");
@@ -79,7 +93,7 @@ function fakeAgents(opts: { voice: boolean }) {
             { id: "e2", sessionId: a.sessionId, seq: 2, createdAt: 2, event: { type: "message", role: "tool", content: "{}", toolCallId: "t" } },
             { id: "e3", sessionId: a.sessionId, seq: 3, createdAt: 3, event: { type: "message", role: "assistant", content: "Hello from the fleet." } },
           ];
-          return ok({ _: "GetSessionResponse", session: { id: a.sessionId, agentId: s.agentId, status: "idle", ...(s.continuedTo ? { continuedTo: { continuationId: "c", sessionId: s.continuedTo, reason: "context", createdAt: 1 } } : {}) }, events: events.slice(-(a.limit ?? events.length)), systemPromptMarkdown: "" });
+          return ok({ _: "GetSessionResponse", session: { id: a.sessionId, agentId: s.agentId, status: "idle", ...(s.continuedTo ? { continuedTo: { continuationId: "c", sessionId: s.continuedTo, reason: "context", createdAt: 1 } } : {}) }, events: (queryEvents.get(a.sessionId) ?? events).slice(-(a.limit ?? events.length)), systemPromptMarkdown: "" });
         }
         case "ListAgentTriggers": return ok({ _: "ListAgentTriggersResponse", triggers: triggers.get(a.agentId) ?? [] });
         case "CreateAgentTrigger": {
@@ -228,7 +242,7 @@ describe("configured node", () => {
     expect(voiced.agents.get(COMPANION_ID)!.mcpServers).toEqual(["casework_host", "cyberdeck"]);
     // A fresh session, not the companion's own.
     expect(j.sessionId).not.toBe("old-companion-session");
-    expect(voiced.sessions.get(j.sessionId)).toEqual({ agentId: COMPANION_ID });
+    expect(voiced.sessions.get(j.sessionId)).toEqual({ agentId: COMPANION_ID, title: "Cyberdeck voice" });
 
     const persisted = JSON.parse(readFileSync(join(a.home, "seed.json"), "utf8"));
     expect(persisted).toMatchObject({ agentId: COMPANION_ID, sessionId: j.sessionId });
@@ -365,3 +379,82 @@ describe("configured node", () => {
     expect((await r.json()).error).toContain("Agent not found");
   });
 });
+
+
+describe("Seed text queries", () => {
+  test("create, list, message, read, rename and delete are signed server actions; voice stays separate", async () => {
+    const voiceSession = JSON.parse(readFileSync(join(a.home, "seed.json"), "utf8")).sessionId;
+    const create = await req(a, TEST_TOKEN, "/api/sessions", { method: "POST", body: JSON.stringify({ tool: "seed", runner: "agent", title: "A query" }) });
+    expect(create.status).toBe(201);
+    const s = await create.json() as any;
+    expect(s.tool).toBe("seed"); expect(s.runner).toBe("agent");
+    expect(s.id).toStartWith("seed-");
+    expect(JSON.parse(readFileSync(join(a.home, "seed.json"), "utf8")).sessionId).toBe(voiceSession);
+    const id = s.id.slice(5);
+    expect((await req(a, TEST_TOKEN, `/api/sessions/${s.id}/message`, { method: "POST", body: JSON.stringify({ text: "hello", cwd: "~/Code/Deck", nodeName: "yacht", clientMessageId: "retry-safe-id" }) })).status).toBe(200);
+    expect(voiced.actions.findLast((x) => x._ === "MessageSession")).toMatchObject({ sessionId: id, clientMessageId: "retry-safe-id", content: [{ type: "text", text: "hello" }, { type: "context", lines: ["Fleet machine: yacht", "Working directory: ~/Code/Deck"] }] });
+    const transcript = await (await req(a, TEST_TOKEN, `/api/sessions/${s.id}/transcript?beforeSeq=5`)).json() as any;
+    expect(transcript.events.some((e: any) => e.event.content === "Seed reply: hello")).toBe(true);
+    expect(voiced.actions.findLast((x) => x._ === "GetSession").beforeSeq).toBe(5);
+    expect((await (await req(a, TEST_TOKEN, "/api/sessions")).json() as any).sessions.some((x: any) => x.id === s.id)).toBe(true);
+    const recovered = new SeedBridge({ config: seedConfig({ seed: { agentsUrl: voiced.url } }), port: 4777, token: TEST_TOKEN, home: a.home });
+    expect((await recovered.querySessions()).some((x) => x.id === s.id)).toBe(true);
+    expect((await req(a, TEST_TOKEN, `/api/sessions/${s.id}/stop`, { method: "POST" })).status).toBe(200);
+    expect((await req(a, TEST_TOKEN, `/api/sessions/${s.id}/rename`, { method: "POST", body: JSON.stringify({ title: "Renamed query" }) })).status).toBe(200);
+    expect(voiced.sessions.get(id)?.title).toBe("Renamed query");
+    expect((await req(a, TEST_TOKEN, `/api/sessions/${s.id}`, { method: "DELETE" })).status).toBe(200);
+    expect(voiced.sessions.has(id)).toBe(false);
+  });
+  test("query API rejects unauthenticated, pairing-key and unrelated voice-session access", async () => {
+    const state = JSON.parse(readFileSync(join(a.home, "seed.json"), "utf8"));
+    expect((await req(a, "bad", "/api/sessions")).status).toBe(401);
+    expect((await req(a, KEY, "/api/sessions", { method: "POST", body: JSON.stringify({ tool: "seed" }) })).status).toBe(403);
+    expect((await req(a, TEST_TOKEN, `/api/sessions/seed-${state.sessionId}/transcript`)).status).toBe(404);
+    expect((await req(a, TEST_TOKEN, `/api/sessions/seed-${state.sessionId}/message`, { method: "POST", body: JSON.stringify({ text: "wrong agent" }) })).status).toBe(404);
+  });
+  test("text queries do not require voice support", async () => {
+    await req(b, TEST_TOKEN, "/api/voice/setup", { method: "POST", body: "{}" });
+    const created = await req(b, TEST_TOKEN, "/api/sessions", { method: "POST", body: JSON.stringify({ tool: "seed", title: "Text only" }) });
+    expect(created.status).toBe(201);
+    const s = await created.json() as any;
+    expect(s.tool).toBe("seed");
+  });
+});
+
+
+test("Seed query UI defaults, starts, resumes after reload, and sends a follow-up on desktop and mobile", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    await page.addInitScript(({ token }) => {
+      // Tailnet HTTP origins lack randomUUID; the send path must work there too.
+      Object.defineProperty(crypto, "randomUUID", { value: undefined });
+      localStorage.setItem("cyberdeck-token", token);
+      // The old preference must not keep pre-Seed installations stuck on Codex.
+      localStorage.setItem("cyberdeck-default-tool", "cx");
+    }, { token: TEST_TOKEN });
+    await page.goto(a.base + "/#/term");
+    const input = page.locator('[data-testid="prompt-input"]');
+    await input.fill("Check the fleet");
+    await page.waitForFunction(() => !document.querySelector<HTMLButtonElement>('[data-testid="prompt-go"]')?.disabled);
+    expect(await page.locator('[data-testid="plan-tool"]').textContent()).toContain("Seed agents");
+    expect(await page.locator('[data-testid="plan-runner"]').count()).toBe(0);
+    await input.press("Enter");
+    await page.getByText("Seed reply: Check the fleet", { exact: true }).waitFor();
+    const url = page.url();
+    expect(url).toContain("session=seed-");
+    await page.reload();
+    await page.getByText("Seed reply: Check the fleet", { exact: true }).waitFor();
+    await page.getByLabel("Reply to Seed").fill("And the services?");
+    await page.getByLabel("Reply to Seed").press("Enter");
+    await page.getByText("Seed reply: And the services?", { exact: true }).waitFor();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByLabel("Reply to Seed").fill("Mobile reply");
+    await page.getByLabel("Reply to Seed").press("Enter");
+    await page.getByText("Seed reply: Mobile reply", { exact: true }).waitFor();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await input.fill("cx: explicitly use Codex");
+    expect(await page.locator('[data-testid="plan-tool"]').textContent()).toContain("cx");
+    expect(await page.locator('[data-testid="plan-runner"]').count()).toBe(1);
+  } finally { await browser.close(); }
+}, 45000);

@@ -1,19 +1,51 @@
 // Live session routes: create/list/kill daemon-owned sessions and attach to one
 // over a WebSocket (same wire format as /api/term: {t:"data"|"input"|"resize"|"exit"},
 // plus {t:"hello", session} first and `replay:true` on the buffered backlog).
+import { SeedBridge } from "../seed";
 import type { Hono } from "hono";
 import { SessionManager, detectCaps, type CreateOpts } from "../sessions";
 import type { Runner, Tool } from "../../shared/harness";
 
-const TOOLS = new Set<Tool>(["cc", "cx", "shell"]);
-const RUNNERS = new Set<Runner>(["tmux", "pty"]);
+const TOOLS = new Set<Tool>(["seed", "cc", "cx", "shell"]);
+const RUNNERS = new Set<Runner>(["agent", "tmux", "pty"]);
 const ID = /^[0-9a-f]{8}$/;
 
-export function registerSessionRoutes(app: Hono, mgr: SessionManager, upgradeWebSocket: any, isAuthed: (c: any) => boolean) {
-  app.get("/api/harness/caps", async (c) => c.json(await detectCaps(Boolean(c.req.query("refresh")))));
+export function registerSessionRoutes(app: Hono, mgr: SessionManager, upgradeWebSocket: any, isAuthed: (c: any) => boolean, seed: SeedBridge) {
+  app.get("/api/harness/caps", async (c) => {
+    const [caps, ready] = await Promise.all([detectCaps(Boolean(c.req.query("refresh"))), seed.queryReady()]);
+    return c.json({ ...caps, seed: ready, seedUrl: seed.config.agentsUrl });
+  });
 
-  app.get("/api/sessions", (c) => c.json({ sessions: mgr.list() }));
-  app.get("/api/sessions/:id", (c) => {
+
+  app.get("/api/sessions", async (c) => {
+    let seedError: string | undefined;
+    const queries = await seed.querySessions().catch((e) => { seedError = e.message; return []; });
+    return c.json({ sessions: [...mgr.list(), ...queries], seedError });
+  });
+  app.get("/api/sessions/:id/transcript", async (c) => {
+    const id = c.req.param("id");
+    if (!id.startsWith("seed-")) return c.json({ error: "not a Seed query" }, 400);
+    const before = c.req.query("beforeSeq");
+    if (before && (!Number.isSafeInteger(Number(before)) || Number(before) < 1)) return c.json({ error: "bad beforeSeq" }, 400);
+    return c.json(await seed.getQuery(id.slice(5), before ? Number(before) : undefined));
+  });
+  app.post("/api/sessions/:id/message", async (c) => {
+    const id = c.req.param("id");
+    const b = await c.req.json().catch(() => ({}));
+    if (!id.startsWith("seed-") || typeof b.text !== "string" || !b.text.trim() || b.text.length > 8000) return c.json({ error: "Seed query and text (1–8000 characters) required" }, 400);
+    const context = typeof b.cwd === "string" ? [`Fleet machine: ${b.nodeName || "local"}`, `Working directory: ${b.cwd.slice(0, 1024)}`] : undefined;
+    await seed.messageQuery(id.slice(5), b.text.trim(), context, typeof b.clientMessageId === "string" ? b.clientMessageId : undefined);
+    return c.json({ ok: true });
+  });
+  app.post("/api/sessions/:id/stop", async (c) => {
+    const id = c.req.param("id");
+    if (!id.startsWith("seed-")) return c.json({ error: "not a Seed query" }, 400);
+    await seed.getQuery(id.slice(5));
+    await seed.action({ _: "StopSession", sessionId: id.slice(5) });
+    return c.json({ ok: true });
+  });
+  app.get("/api/sessions/:id", async (c) => {
+    if (c.req.param("id").startsWith("seed-")) return c.json(seed.queryInfo((await seed.getQuery(c.req.param("id").slice(5))).session));
     const s = mgr.get(c.req.param("id"));
     return s ? c.json(s) : c.json({ error: "no such session" }, 404);
   });
@@ -27,6 +59,11 @@ export function registerSessionRoutes(app: Hono, mgr: SessionManager, upgradeWeb
     if (b.tool != null) { if (!TOOLS.has(b.tool as Tool)) return c.json({ error: "bad tool" }, 400); opts.tool = b.tool as Tool; }
     if (b.runner != null) { if (!RUNNERS.has(b.runner as Runner)) return c.json({ error: "bad runner" }, 400); opts.runner = b.runner as Runner; }
     if (typeof b.cols === "number" && typeof b.rows === "number") { opts.cols = b.cols; opts.rows = b.rows; }
+    if (opts.tool === "seed") {
+      try { return c.json(await seed.createQuery(opts.title || "Seed query"), 201); }
+      catch (e) { return c.json({ error: e instanceof Error ? e.message : String(e) }, 503); }
+    }
+    if (opts.runner === "agent") return c.json({ error: "agent runner requires Seed" }, 400);
     return c.json(await mgr.create(opts), 201);
   });
   app.post("/api/sessions/:id/input", async (c) => {
@@ -40,9 +77,23 @@ export function registerSessionRoutes(app: Hono, mgr: SessionManager, upgradeWeb
   });
   app.post("/api/sessions/:id/rename", async (c) => {
     const b = (await c.req.json().catch(() => ({}))) as { title?: unknown };
+    if (c.req.param("id").startsWith("seed-")) {
+      const sessionId = c.req.param("id").slice(5);
+      await seed.getQuery(sessionId);
+      await seed.action({ _: "UpdateSession", sessionId, title: String(b.title ?? "").trim().slice(0, 120) });
+      return c.json({ ok: true });
+    }
     return mgr.rename(c.req.param("id"), String(b.title ?? "")) ? c.json({ ok: true }) : c.json({ error: "no such session" }, 404);
   });
-  app.delete("/api/sessions/:id", async (c) => (await mgr.remove(c.req.param("id")) ? c.json({ ok: true }) : c.json({ error: "no such session" }, 404)));
+  app.delete("/api/sessions/:id", async (c) => {
+    const id = c.req.param("id");
+    if (id.startsWith("seed-")) {
+      await seed.getQuery(id.slice(5));
+      await seed.action({ _: "DeleteSession", sessionId: id.slice(5) });
+      return c.json({ ok: true });
+    }
+    return await mgr.remove(id) ? c.json({ ok: true }) : c.json({ error: "no such session" }, 404);
+  });
 
   app.get(
     "/api/sessions/:id/attach",

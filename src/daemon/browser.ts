@@ -182,7 +182,7 @@ export class BrowserManager {
 export const browsers = new BrowserManager();
 
 /** One screencast viewer: frames out as {t:"frame"} JSON, input in as InputMsg JSON. */
-export function createBrowserStreamHandlers(mgr: BrowserManager, profileName: string) {
+export function createBrowserStreamHandlers(mgr: Pick<BrowserManager, "get">, profileName: string, options: { fixedViewport?: boolean } = {}) {
   let cdp: CDPSession | null = null;
   let page: Page | null = null;
   let closed = false;
@@ -205,8 +205,8 @@ export function createBrowserStreamHandlers(mgr: BrowserManager, profileName: st
           cdp?.send("Page.screencastFrameAck", { sessionId: ev.sessionId }).catch(() => {});
         });
         await cdp.send("Page.enable");
-        const vp = page.viewportSize() ?? { width: 1280, height: 800 };
-        await cdp.send("Page.startScreencast", { format: "jpeg", quality: 60, maxWidth: vp.width, maxHeight: vp.height, everyNthFrame: 1 });
+        const vp = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+        await cdp.send("Page.startScreencast", { format: "jpeg", quality: 60, maxWidth: options.fixedViewport ? Math.min(1280, vp.width) : vp.width, maxHeight: options.fixedViewport ? Math.min(800, vp.height) : vp.height, everyNthFrame: options.fixedViewport ? 6 : 1 });
         page.on("framenavigated", onNav);
         page.on("load", onNav);
         await pushState();
@@ -223,7 +223,7 @@ export function createBrowserStreamHandlers(mgr: BrowserManager, profileName: st
       if (!m) { push({ t: "error", message: "rejected input" }); return; }
       try {
         switch (m.t) {
-          case "mouse": await cdp.send("Input.dispatchMouseEvent", { type: m.type, x: m.x, y: m.y, button: m.button ?? (m.type === "mouseMoved" ? "none" : "left"), clickCount: m.clickCount ?? (m.type === "mouseMoved" ? 0 : 1), modifiers: m.modifiers ?? 0 }); break;
+          case "mouse": await cdp.send("Input.dispatchMouseEvent", { type: m.type, x: m.x, y: m.y, button: m.button ?? (m.type === "mouseMoved" ? "none" : "left"), buttons: m.type === "mouseReleased" || (m.type === "mouseMoved" && (!m.button || m.button === "none")) ? 0 : m.button === "right" ? 2 : m.button === "middle" ? 4 : 1, clickCount: m.clickCount ?? (m.type === "mouseMoved" ? 0 : 1), modifiers: m.modifiers ?? 0 }); break;
           case "key": await cdp.send("Input.dispatchKeyEvent", { type: m.type, key: m.key, code: m.code, text: m.text, unmodifiedText: m.text, modifiers: m.modifiers ?? 0, windowsVirtualKeyCode: m.windowsVirtualKeyCode, nativeVirtualKeyCode: m.windowsVirtualKeyCode }); break;
           case "wheel": await cdp.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: m.x, y: m.y, deltaX: m.deltaX, deltaY: m.deltaY }); break;
           case "nav": page.goto(m.url, { waitUntil: "domcontentloaded", timeout: 45_000 }).catch(() => {}); break;
@@ -231,6 +231,7 @@ export function createBrowserStreamHandlers(mgr: BrowserManager, profileName: st
           case "forward": page.goForward({ timeout: 20_000 }).catch(() => {}); break;
           case "reload": page.reload({ timeout: 45_000 }).catch(() => {}); break;
           case "resize":
+            if (options.fixedViewport) break;
             await page.setViewportSize({ width: m.w, height: m.h });
             await cdp.send("Page.stopScreencast").catch(() => {});
             await cdp.send("Page.startScreencast", { format: "jpeg", quality: 60, maxWidth: m.w, maxHeight: m.h, everyNthFrame: 1 });
