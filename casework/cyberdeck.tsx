@@ -43,9 +43,13 @@ export default function Cyberdeck() {
   const refresh = useCallback(async () => {
     setBusy(true); setError('');
     try {
-      const [n, o] = await Promise.all([json<{ nodes: Node[]; self: { name: string } }>('/api/fleet/nodes'), json<Overview>('/api/control/overview')]);
-      setNodes([{ id: '', name: n.self.name, online: true }, ...n.nodes]); setOverview(o);
-    } catch (e) { setError(String(e)); } finally { setBusy(false); }
+      // A node without a fleet dir (a server, the TV) has nodes but no overview: show what there is.
+      const [n, o] = await Promise.allSettled([json<{ nodes: Node[]; self: { name: string } }>('/api/fleet/nodes'), json<Overview>('/api/control/overview')]);
+      if (n.status === 'fulfilled') setNodes([{ id: '', name: n.value.self.name, online: true }, ...n.value.nodes]);
+      if (o.status === 'fulfilled') setOverview(o.value);
+      const failed = n.status === 'rejected' ? n.reason : o.status === 'rejected' ? o.reason : null;
+      if (failed) setError(String(failed));
+    } finally { setBusy(false); }
   }, [json]);
   useEffect(() => { void refresh(); const t = setInterval(() => { void refresh(); }, 30000); return () => clearInterval(t); }, [refresh]);
 
@@ -60,7 +64,7 @@ export default function Cyberdeck() {
       <Button label={busy ? 'syncing' : 'refresh'} onPress={() => void refresh()} disabled={busy} />
     </View>
     <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>{tabs.map(([key, label]) => <Pressable key={key} onPress={() => setTab(key)} style={{ paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: tab === key ? '#102a33' : 'transparent', borderWidth: 1, borderColor: tab === key ? C.cyan : C.line }}><Text style={{ color: tab === key ? C.cyan : C.dim, fontSize: 12, letterSpacing: 1, fontWeight: '700' }}>{label.toUpperCase()}</Text></Pressable>)}</View>
-    {error ? <Text style={{ color: C.red }}>{error}</Text> : null}
+    {error && (tab === 'fleet' || tab === 'agents') ? <Text style={{ color: C.red }}>{error}</Text> : null}
     {tab === 'deck' ? <DeckTab route={route} setRoute={setRoute} /> : null}
     {tab === 'apps' ? <AppsTab json={json} openWeb={(next) => { setRoute(next); setTab('deck'); }} /> : null}
     {tab === 'talk' ? <TalkTab json={json} /> : null}
