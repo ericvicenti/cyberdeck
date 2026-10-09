@@ -3,12 +3,36 @@
 // POST /api/voice/livekit -> join the LiveKit room with {url, token, room}. The Casework pairing
 // key reaches everything here except setup (caseworkAllows in api/casework.ts).
 import type { Hono } from "hono";
+import { networkInterfaces } from "os";
 import { SeedBridge, SeedError } from "../seed";
 
 export type VoiceDeps = {
   /** Full (token or tailscale) authentication for the current request; setup requires it. */
   isFullAuth: (c: any) => boolean;
+  /** The https origin `tailscale serve` publishes for a local port (Tailscale.serveOrigin). */
+  serveOrigin?: (port: number) => Promise<string | null>;
 };
+
+/** Addresses that mean "this machine" in a call server URL. */
+export function localHosts(): Set<string> {
+  const hosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
+  for (const list of Object.values(networkInterfaces())) for (const a of list ?? []) if (a.family === "IPv4") hosts.add(a.address);
+  return hosts;
+}
+
+/**
+ * The wss:// twin of a plain ws:// call server on this machine, when `tailscale serve` publishes its
+ * port over TLS (e.g. `tailscale serve --bg --https=7443 http://127.0.0.1:7880`). An https page (the
+ * Desk on the tailnet origin) cannot open ws://, so the browser uses this instead; media still flows
+ * over WebRTC to the addresses the call server advertises.
+ */
+export async function secureCallUrl(url: string, serveOrigin: (port: number) => Promise<string | null>, hosts = localHosts()): Promise<string | null> {
+  let u: URL;
+  try { u = new URL(url); } catch { return null; }
+  if (u.protocol !== "ws:" || !hosts.has(u.hostname)) return null;
+  const origin = await serveOrigin(Number(u.port || 80)).catch(() => null);
+  return origin ? `${origin.replace(/^https:/, "wss:")}${u.pathname === "/" ? "" : u.pathname}` : null;
+}
 
 const errorStatus = (e: unknown): 502 | 503 => (e instanceof SeedError && e.status === 0 && /no agent set up|identity unavailable|unreachable/.test(e.message) ? 503 : 502);
 const errorBody = (e: unknown) => ({ error: e instanceof Error ? e.message : String(e) });
@@ -31,7 +55,8 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
     if (!s.configured) return c.json({ error: "voice not configured", reason: s.reason }, 503);
     try {
       const v = await bridge.createVoiceSession();
-      return c.json(v);
+      const secureUrl = deps.serveOrigin ? await secureCallUrl(v.url, deps.serveOrigin) : null;
+      return c.json(secureUrl ? { ...v, secureUrl } : v);
     } catch (e) {
       console.error("voice: CreateVoiceSession failed:", e instanceof Error ? e.message : e);
       return c.json(errorBody(e), errorStatus(e));

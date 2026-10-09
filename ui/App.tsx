@@ -15,6 +15,7 @@ import { Term } from "./views/Term";
 import { Cmux } from "./views/Cmux";
 import { TokenGate } from "./views/TokenGate";
 import { PromptBar } from "./components/PromptBar";
+import { applyInstallTarget } from "./lib/pwa";
 
 const NAV = [
   { view: "fleet", label: "Home", icon: ServerIcon },
@@ -49,6 +50,8 @@ export function App() {
       window.removeEventListener("cyberdeck-node-changed", onNode);
     };
   }, []);
+
+  useEffect(() => applyInstallTarget(route.view), [route.view]);
 
   useEffect(() => {
     let alive = true;

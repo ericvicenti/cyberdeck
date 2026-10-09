@@ -14,7 +14,8 @@ export type AgentState = "initializing" | "listening" | "thinking" | "speaking" 
 export type TranscriptLine = { id: string; who: "me" | "agent"; text: string; final: boolean; at: number };
 
 export type VoiceConfig = { configured: boolean; provider: "livekit" | "none"; reason?: string; agentId?: string; sessionId?: string };
-type LivekitGrant = { url: string; token: string; room: string; identity: string; expiresAt?: number };
+/** `secureUrl`: the wss:// twin of `url` an https page must use (see secureCallUrl in api/voice.ts). */
+type LivekitGrant = { url: string; secureUrl?: string; token: string; room: string; identity: string; expiresAt?: number };
 
 export type Voice = {
   phase: VoicePhase;
@@ -250,7 +251,9 @@ export function useVoice({ onLocked }: { onLocked?: () => void } = {}): Voice {
       const [grant, { Room, RoomEvent, Track, createAudioAnalyser }] = await Promise.all([voicePost<LivekitGrant>(routeRef.current, "/api/voice/livekit", {}), loadLiveKit()]);
       if (superseded()) return;
       // An https page may not open a plain ws:// socket (other than to localhost), and the SDK only reports a generic failure.
-      if (location.protocol === "https:" && /^ws:\/\/(?!localhost[:/]|127\.0\.0\.1[:/])/.test(grant.url)) throw new Error(`The call server is plain ${grant.url}, which an https page cannot reach: open Cyberdeck at http://localhost on this machine`);
+      // The daemon offers a wss:// twin (secureUrl) when tailscale serve publishes the call server over TLS.
+      const callUrl = location.protocol === "https:" && grant.secureUrl ? grant.secureUrl : grant.url;
+      if (location.protocol === "https:" && /^ws:\/\/(?!localhost[:/]|127\.0\.0\.1[:/])/.test(callUrl)) throw new Error(`The call server is plain ${callUrl}, which an https page cannot reach: publish it over TLS on the voice node (tailscale serve --bg --https=7443 http://127.0.0.1:7880) or open Cyberdeck at http://localhost there`);
 
       room = new Room({ adaptiveStream: true, dynacast: true });
       const current = room;
@@ -305,7 +308,7 @@ export function useVoice({ onLocked }: { onLocked?: () => void } = {}): Voice {
         phaseRef.current = "idle";
       });
 
-      await current.connect(grant.url, grant.token);
+      await current.connect(callUrl, grant.token);
       if (superseded()) { current.removeAllListeners(); await current.disconnect(); return; }
       current.remoteParticipants.forEach((p) => readAgentState(p));
       await current.localParticipant.setMicrophoneEnabled(true);

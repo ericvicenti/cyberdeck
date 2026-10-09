@@ -596,7 +596,7 @@ hashes but scans must be fast (300 project dirs ≈ minutes, not hours).
 | POST | `/api/experiences/validate` · GET `/api/experience-status` · POST `/api/experiences/error` | — | recompile all experiences (broadcasts `modules.changed`) / compile status / a device's crash report |
 | POST | `/api/command` | `{deviceId?, action:{name,args}}` | deliver a native action to connected devices → 202 `{id, sent}` or 409 when none |
 | PUT/GET | `/api/media/:name` | bytes | uploads from the app into `~/.cyberdeck/casework-media` (80 MiB max) |
-| GET | `/api/casework/pairing` | `?url=` | full auth only: `{url, key, link, qr(svg), devices}` for the Home page card; POST `/api/casework/rotate` replaces the key and drops devices |
+| GET | `/api/casework/pairing` | `?url=` | full auth only: `{url, key, link, qr(svg), devices, desk:{url, secure, qr}}` for the Home page card (`desk` = the web Desk on the `tailscale serve` https origin when there is one); POST `/api/casework/rotate` replaces the key and drops devices |
 | POST | `/api/casework/run` | `{cwd, cmd}` | bounded non-interactive command (60 s, `bash -lc`) for the app's Run screen → `{code, output}` |
 | WS | `/control` | first frame `{type:"hello", role:"device"\|"console", token, info}` | Casework Desk device socket: `welcome{id,scene,revision,voice,devices}`, then `ping/pong`, `scene`, `command/result`, `event`, `modules.changed`, `peer.left`; wrong key closes 4001 |
 | POST | `/api/fleet/pair-direct` | `{url}` | pair with a tailnet peer without a code (the peer trusts us as its owner via `tailscale whois`) |

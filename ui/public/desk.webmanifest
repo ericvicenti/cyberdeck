@@ -1,0 +1,17 @@
+{
+  "id": "/#/desk",
+  "name": "Cyberdeck Desk",
+  "short_name": "Desk",
+  "description": "One button to talk to the fleet's Seed agent.",
+  "start_url": "/#/desk",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#07080c",
+  "theme_color": "#07080c",
+  "icons": [
+    { "src": "/icons/desk-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/desk-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icons/desk-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

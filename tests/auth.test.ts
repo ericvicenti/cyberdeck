@@ -67,6 +67,17 @@ describe("Tailscale client", () => {
     const ts = new Tailscale(fakeRunner);
     expect(await ts.self()).toEqual({ dnsName: "yacht.tail.ts.net", login: OWNER, ip4: "100.100.0.9" });
   });
+  test("serveOrigin finds the https origin `tailscale serve` proxies to the daemon port", async () => {
+    const status = { Web: {
+      "yacht.tail.ts.net:8444": { Handlers: { "/": { Proxy: "http://127.0.0.1:13034" } } },
+      "yacht.tail.ts.net:443": { Handlers: { "/": { Proxy: "http://127.0.0.1:4777" } } },
+    } };
+    const ts = new Tailscale(async (args) => (args.join(" ") === "serve status --json" ? JSON.stringify(status) : null));
+    expect(await ts.serveOrigin(4777)).toBe("https://yacht.tail.ts.net");
+    expect(await ts.serveOrigin(13034)).toBe("https://yacht.tail.ts.net:8444");
+    expect(await ts.serveOrigin(5000)).toBeNull();
+    expect(await new Tailscale(async () => null).serveOrigin(4777)).toBeNull();
+  });
   test("missing CLI yields nulls", async () => {
     const ts = new Tailscale(async () => null);
     expect(await ts.whois("100.100.0.1")).toBeNull();

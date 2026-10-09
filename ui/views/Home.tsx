@@ -227,8 +227,9 @@ function NodeCard(props: { name: string; subtitle: string; online: boolean; stat
 
 // --------------------------------------------------------------------- home ----
 
-type CaseworkPairing = { url: string; key: string; link: string; qr: string; devices: { id: string; info?: { name?: string; model?: string } }[] };
-/** Pairing card for the Casework Desk iPad/iPhone app: scan the QR (or type URL + key) in its Server settings. */
+type CaseworkPairing = { url: string; key: string; link: string; qr: string; devices: { id: string; info?: { name?: string; model?: string } }[]; desk?: { url: string; secure: boolean; qr: string } };
+const qrBox = (svg: string, testId: string) => <div data-testid={testId} className="shrink-0 rounded-lg border border-cyan-900/60 bg-[#e8fbff] p-1" dangerouslySetInnerHTML={{ __html: svg.replace(/width="\d+" height="\d+"/, 'width="168" height="168"') }} />;
+/** Pairing card: the Casework Desk iPad/iPhone app (scan the QR, or type URL + key, in its Server settings) and, beside it, the web Desk for any phone browser. */
 function CaseworkCard() {
   const [pairing, setPairing] = useState<CaseworkPairing | null>(null);
   const [err, setErr] = useState("");
@@ -242,7 +243,7 @@ function CaseworkCard() {
   return (
     <div className="mt-3 hud-card p-4" data-testid="casework-card">
       <div className="flex flex-wrap items-start gap-5">
-        {pairing ? <div className="shrink-0 rounded-lg border border-cyan-900/60 bg-[#e8fbff] p-1" dangerouslySetInnerHTML={{ __html: pairing.qr.replace(/width="\d+" height="\d+"/, 'width="168" height="168"') }} /> : null}
+        {pairing ? qrBox(pairing.qr, "casework-qr") : null}
         <div className="min-w-0 flex-1">
           <div className="hud-label neon">iPad / iPhone client</div>
           <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
@@ -259,6 +260,26 @@ function CaseworkCard() {
             </div>
           ) : null}
         </div>
+        {pairing?.desk ? (
+          <div className="flex min-w-0 flex-1 flex-wrap items-start gap-5 border-zinc-800 lg:border-l lg:pl-5" data-testid="desk-pairing">
+            {qrBox(pairing.desk.qr, "desk-qr")}
+            <div className="min-w-0 flex-1">
+              <div className="hud-label neon">Phone · Desk</div>
+              <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+                Scan with the phone camera, sign in, then <span className="text-zinc-300">Share → Add to Home Screen</span>: one tap opens TALK with the fleet's Seed agent.
+              </p>
+              <div className="mt-3 flex items-center gap-2 font-mono text-[11px]">
+                <a href={pairing.desk.url} className="truncate text-sky-300 hover:underline">{pairing.desk.url}</a>
+                <button onClick={() => copy("desk", pairing.desk!.url)} className="hud-chip">{copied === "desk" ? "copied" : "copy"}</button>
+              </div>
+              {pairing.desk.secure ? null : (
+                <div className="mt-2 text-[11px] text-amber-400" data-testid="desk-insecure">
+                  Not https: phone browsers keep the microphone off here. Run <span className="font-mono">cyberdeck serve</span> to publish this node on the tailnet.
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -111,7 +111,7 @@ the node token (`~/.cyberdeck/token`) requires a re-run so the secret on the age
 | Route | Key | Returns |
 |---|---|---|
 | `GET /api/voice/config` | pairing | `{configured, provider: 'livekit' \| 'none', engine: 'seed', reason?, agentId?, sessionId?}` |
-| `POST /api/voice/livekit` | pairing | `{sessionId, url, token, room, identity, expiresAt, profile?}` from `CreateVoiceSession`; `profile: {voice, speed, applied, error?}` says whether the voice profile below reached the room; `503 {error: 'voice not configured', reason}` when unconfigured; `502 {error}` on a server failure |
+| `POST /api/voice/livekit` | pairing | `{sessionId, url, token, room, identity, expiresAt, profile?}` from `CreateVoiceSession`; `secureUrl?` is the `wss://` twin of a local plain `ws://` url when tailscale serve publishes it; `profile: {voice, speed, applied, error?}` says whether the voice profile below reached the room; `503 {error: 'voice not configured', reason}` when unconfigured; `502 {error}` on a server failure |
 | `GET /api/voice/status` | pairing | `{configured, reason?, agentsUrl, identity: {name, available, principal?, error?}, agent?: {id, name?}, sessionId?, health: {ok, voice, protocol, version, error?, checkedAt}, mcpRegisteredAt?, lastCallAt?, profile?: {voice, speed, runtimeToken, source}}` |
 | `POST /api/voice/session/reset` | pairing | `{sessionId, previous?, room?}`: a new session for the next call; body `{room?}` names a live call's LiveKit room, which the voice runtime is then switched to the new session (`room: {name, switched, error?}`), so the caller keeps talking |
 | `GET /api/voice/transcript?limit=` | pairing | `{supported: true, sessionId?, messages: [{seq, role, text, at}], hasMoreBefore}`: user/assistant text of the current session (`GetSession`'s tail, cheap) |
@@ -189,8 +189,25 @@ Browsers only expose `getUserMedia` on secure origins, so the web Desk can place
 `http://localhost:4777` on the node itself but not from a plain-HTTP tailnet address. Run
 `cyberdeck serve` and use `https://<node>.<tailnet>.ts.net`. The LiveKit `url` the experiments server
 hands out is its own (today a LAN `ws://` address), so the caller must be able to reach that too.
-An https page cannot open that plain `ws://` address at all (mixed content), so today the Desk only
-places calls from `http://localhost:4777`; over https it fails with a message that says so.
+An https page cannot open that plain `ws://` address at all (mixed content). When `tailscale serve`
+publishes the call server's port over TLS on the voice node, `POST /api/voice/livekit` adds
+`secureUrl` (the `wss://` twin, `secureCallUrl` in `api/voice.ts`) and an https Desk connects there;
+without it the Desk fails with a message naming the fix. On yacht (2026-10-09):
+
+    tailscale serve --bg --https=7443 http://127.0.0.1:7880   # LiveKit signaling -> wss://yacht.<tailnet>:7443
+
+Media still flows over WebRTC to the addresses LiveKit advertises (`rtc.node_ip`, today the LAN IP),
+so a phone on the home network works; off-LAN calls need the droplet's LiveKit (ROADMAP P4).
+
+## Phone home-screen button
+
+The Desk is installable. On `#/desk` the page swaps in `/desk.webmanifest` (name "Desk", mic icon,
+`start_url` `/#/desk`, standalone) and the matching `apple-touch-icon`/title (`ui/lib/pwa.ts`); every
+other page advertises `/manifest.webmanifest` (Cyberdeck). The Home page's pairing card shows a
+**Phone · Desk** QR beside the Casework one: it points at the `tailscale serve` origin when there is one
+(`Tailscale.serveOrigin`, else the page's own https origin) and warns when the link would be plain http.
+Scan it, sign in (on the tailnet the Tailscale identity is enough), then Share → Add to Home Screen.
+There is no service worker on purpose: the UI must never be served stale after a fleet deploy.
 
 ## Not done
 

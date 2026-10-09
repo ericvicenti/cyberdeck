@@ -128,6 +128,13 @@ test("desk view: talk button and the not-configured card render", async () => {
   expect(await page.textContent('[data-testid="voice-state"]')).toContain("tap to talk");
   expect(await page.textContent('[data-testid="voice-status"]')).toContain("e2e-node");
   expect(await page.textContent('[data-testid="voice-transcript"]')).toContain("transcript");
+  // "Add to Home Screen" from here installs the Desk (its own manifest + icon), and the manifest is served
+  expect(await page.getAttribute('link[rel="manifest"]', "href")).toBe("/desk.webmanifest");
+  expect(await page.getAttribute('meta[name="apple-mobile-web-app-title"]', "content")).toBe("Desk");
+  const m = await (await fetch(`${BASE}/desk.webmanifest`)).json();
+  expect(m.start_url).toBe("/#/desk");
+  await page.goto(`${BASE}/#/services`);
+  await page.waitForFunction(() => document.querySelector('link[rel="manifest"]')?.getAttribute("href") === "/manifest.webmanifest");
 });
 
 test("desk view: a paired node with voice takes the call when this one has none", async () => {

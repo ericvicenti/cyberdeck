@@ -58,6 +58,7 @@ const SELF_TTL = 60 * 1000;
 export class Tailscale {
   private whoisCache = new Map<string, { at: number; id: Identity | null }>();
   private selfCache: { at: number; info: SelfInfo | null } | null = null;
+  private serveCache = new Map<number, { at: number; origin: string | null }>();
   constructor(private run: Runner = defaultRunner) {}
 
   /** Identity of the tailnet peer at `ip`, or null if unknown / not a tailnet address. */
@@ -93,5 +94,24 @@ export class Tailscale {
     } catch {}
     this.selfCache = { at: Date.now(), info };
     return info;
+  }
+
+  /** The https origin `tailscale serve` (`cyberdeck serve`) publishes for 127.0.0.1:`port` at its root, or null. */
+  async serveOrigin(port: number): Promise<string | null> {
+    const hit = this.serveCache.get(port);
+    if (hit && Date.now() - hit.at < SELF_TTL) return hit.origin;
+    let origin: string | null = null;
+    try {
+      const out = await this.run(["serve", "status", "--json"]);
+      const web = (out ? JSON.parse(out) : null)?.Web ?? {};
+      for (const [hostPort, cfg] of Object.entries<any>(web)) {
+        const proxy = String(cfg?.Handlers?.["/"]?.Proxy ?? "");
+        if (!new RegExp(`^(https?://)?(127\\.0\\.0\\.1|localhost):${port}/?$`).test(proxy)) continue;
+        origin = `https://${hostPort.replace(/:443$/, "")}`;
+        break;
+      }
+    } catch {}
+    this.serveCache.set(port, { at: Date.now(), origin });
+    return origin;
   }
 }

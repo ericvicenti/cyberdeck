@@ -10,7 +10,9 @@ server, so the app is a native client of the fleet: the protocol is implemented 
 
 1. Open the Cyberdeck Home page on the node you want the app to talk to (for the phone this is the
    HTTPS tailnet URL, e.g. `https://yacht.tail0bb35a.ts.net`, served by `cyberdeck serve`).
-2. Scroll to **Casework Desk**: a QR code plus the address and pairing key.
+2. Scroll to **Casework Desk**: a QR code plus the address and pairing key. Beside it, **Phone · Desk**
+   is a second QR for any phone browser: it opens the web Desk on the https tailnet origin, ready for
+   Add to Home Screen (docs/VOICE.md, Phone home-screen button).
 3. In the app open **Server settings** → **Scan pairing QR** (or type the address and key) →
    **Test connection** → **Use this server**.
 

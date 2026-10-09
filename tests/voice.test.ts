@@ -11,6 +11,8 @@ import { initSchema } from "../src/daemon/db";
 import { createServer } from "../src/daemon/server";
 import { seedConfig } from "../src/daemon/config";
 import { caseworkAllows } from "../src/daemon/api/casework";
+import { secureCallUrl } from "../src/daemon/api/voice";
+import { Tailscale } from "../src/daemon/tailscale";
 import { DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME } from "../src/daemon/seed";
 import { testConfig, TEST_TOKEN, tmpHomeDir } from "./helpers";
 
@@ -111,7 +113,7 @@ function startNode(agentsUrl: string, prefix: string, companion?: object, runtim
   if (runtimeToken) writeFileSync(runtimeFile, JSON.stringify({ SEED_AGENTS_VOICE_INTERNAL_TOKEN: runtimeToken, SEED_AGENTS_HTTP_PORT: "3053" }));
   const db = new Database(":memory:");
   initSchema(db);
-  const s = createServer(db, testConfig({ port: 4777, seed: { agentsUrl } }), TEST_TOKEN, "stw-test", { caseworkKey: KEY, caseworkExperiencesDir: FIXTURES, persistOwner: false, cloudSync: false, seed: { home: dir, companionFile, runtimeFile } });
+  const s = createServer(db, testConfig({ port: 4777, seed: { agentsUrl } }), TEST_TOKEN, "stw-test", { caseworkKey: KEY, caseworkExperiencesDir: FIXTURES, persistOwner: false, cloudSync: false, tailscale: new Tailscale(async () => null), seed: { home: dir, companionFile, runtimeFile } });
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: s.fetch, websocket: s.websocket });
   return { base: `http://127.0.0.1:${server.port}`, wsBase: `ws://127.0.0.1:${server.port}`, home: dir, stop: () => { s.sessions.close(); void server.stop(true); }, cleanup };
 }
@@ -138,6 +140,21 @@ beforeAll(() => {
   c = startNode(voiced.url, "voice-c", { agentId: COMPANION_ID, profile: { voice: "v-other", speed: 1.2 } }, "stale-token");
 });
 afterAll(() => { for (const n of [a, b, c]) { n.stop(); n.cleanup(); } voiced.stop(); muted.stop(); });
+
+describe("secure call url", () => {
+  const hosts = new Set(["localhost", "127.0.0.1", "192.168.1.131"]);
+  const serve = async (port: number) => (port === 7880 ? "https://yacht.tail.ts.net:7443" : null);
+  test("a plain ws:// call server on this machine gets the wss:// twin tailscale serve publishes", async () => {
+    expect(await secureCallUrl("ws://192.168.1.131:7880", serve, hosts)).toBe("wss://yacht.tail.ts.net:7443");
+    expect(await secureCallUrl("ws://localhost:7880/rtc", serve, hosts)).toBe("wss://yacht.tail.ts.net:7443/rtc");
+  });
+  test("no twin for TLS urls, other machines, or unpublished ports", async () => {
+    expect(await secureCallUrl("wss://voice.botical.com/rtc", serve, hosts)).toBeNull();
+    expect(await secureCallUrl("ws://192.168.1.99:7880", serve, hosts)).toBeNull();
+    expect(await secureCallUrl("ws://127.0.0.1:7999", serve, hosts)).toBeNull();
+    expect(await secureCallUrl("not a url", serve, hosts)).toBeNull();
+  });
+});
 
 describe("seed config", () => {
   test("defaults, file values, then env overrides", () => {
@@ -236,6 +253,7 @@ describe("configured node", () => {
     expect(r.status).toBe(200);
     const j = await r.json();
     expect(j.url).toBe("wss://livekit.example/");
+    expect(j.secureUrl).toBeUndefined(); // already TLS: nothing to rewrite
     expect(j.token).toMatch(/^jwt-session-/);
     expect(j.room).toMatch(/^room-session-/);
     expect(j.identity).toBe("caller");

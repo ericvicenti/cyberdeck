@@ -8,6 +8,7 @@ import { createServer } from "../src/daemon/server";
 import { testConfig, TEST_TOKEN, tmpHomeDir } from "./helpers";
 import { qrMatrix, qrSvg } from "../src/daemon/casework/qr";
 import { caseworkAllows } from "../src/daemon/api/casework";
+import { Tailscale } from "../src/daemon/tailscale";
 
 const KEY = "casework-pairing-key-for-tests";
 const FIXTURES = join(import.meta.dir, "fixtures", "casework");
@@ -21,7 +22,7 @@ let sessions: { close: () => void };
 beforeAll(() => {
   const db = new Database(":memory:");
   initSchema(db);
-  const s = createServer(db, testConfig({ seed: { agentsUrl: "http://127.0.0.1:1" } }), TEST_TOKEN, "stw-test", { caseworkKey: KEY, caseworkExperiencesDir: FIXTURES, persistOwner: false, cloudSync: false, seed: { home: seedHome.dir, companionFile: join(seedHome.dir, "none.json") } });
+  const s = createServer(db, testConfig({ seed: { agentsUrl: "http://127.0.0.1:1" } }), TEST_TOKEN, "stw-test", { caseworkKey: KEY, caseworkExperiencesDir: FIXTURES, persistOwner: false, cloudSync: false, tailscale: new Tailscale(async () => null), seed: { home: seedHome.dir, companionFile: join(seedHome.dir, "none.json") } });
   sessions = s.sessions;
   server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: s.fetch, websocket: s.websocket });
   base = `http://127.0.0.1:${server.port}`;
@@ -119,6 +120,13 @@ describe("casework server", () => {
     expect(j.key).toBe(KEY);
     expect(j.link).toBe(`remotecontrol://?url=${encodeURIComponent("https://yacht.example.ts.net")}&token=${encodeURIComponent(KEY)}`);
     expect(j.qr.startsWith("<svg")).toBe(true);
+    // Beside it, the web Desk link for a phone browser: https here, so the microphone works.
+    expect(j.desk).toMatchObject({ url: "https://yacht.example.ts.net/#/desk", secure: true });
+    expect(j.desk.qr.startsWith("<svg")).toBe(true);
+  });
+  test("a plain-http Desk link (no tailnet serve) is flagged insecure", async () => {
+    const j = await (await withToken(`/api/casework/pairing?url=${encodeURIComponent("http://192.168.1.20:4777")}`)).json();
+    expect(j.desk).toMatchObject({ url: "http://192.168.1.20:4777/#/desk", secure: false });
   });
   test("experiences compile to CommonJS with only native requires and an error boundary", async () => {
     const r = await withKey("/api/modules/hello?v=1");

@@ -114,6 +114,8 @@ export type CaseworkDeps = {
   key?: string;
   /** Voice availability for `/api/state` and the `welcome` frame (the Seed bridge's summary; absent = no voice). */
   voice?: () => Promise<{ configured: boolean; provider: "livekit" | "none"; reason?: string }>;
+  /** The https origin that serves this daemon on the tailnet (`cyberdeck serve`), for the phone's Desk link. */
+  secureOrigin?: () => Promise<string | null>;
 };
 
 export function registerCaseworkRoutes(app: Hono, deps: CaseworkDeps) {
@@ -199,7 +201,11 @@ export function registerCaseworkRoutes(app: Hono, deps: CaseworkDeps) {
     let url: URL;
     try { url = new URL(origin); if (!/^https?:$/.test(url.protocol)) throw new Error(); } catch { return c.json({ error: "url must be http(s)" }, 400); }
     const link = `remotecontrol://?url=${encodeURIComponent(url.origin)}&token=${encodeURIComponent(key)}`;
-    return c.json({ url: url.origin, key, link, qr: qrSvg(link, { scale: 5, dark: "#07080c", light: "#e8fbff" }), devices: devices() });
+    // A phone browser only gets the microphone on https (or localhost), so the Desk link prefers the tailnet origin.
+    const secure = (await deps.secureOrigin?.().catch(() => null)) ?? (url.protocol === "https:" ? url.origin : null);
+    const deskUrl = `${secure ?? url.origin}/#/desk`;
+    const desk = { url: deskUrl, secure: Boolean(secure), qr: qrSvg(deskUrl, { scale: 5, dark: "#07080c", light: "#e8fbff" }) };
+    return c.json({ url: url.origin, key, link, qr: qrSvg(link, { scale: 5, dark: "#07080c", light: "#e8fbff" }), devices: devices(), desk });
   });
   app.post("/api/casework/rotate", (c) => {
     if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);
