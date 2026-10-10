@@ -6,6 +6,7 @@
       "name": "cyberdeck",
       "dependencies": {
         "@modelcontextprotocol/sdk": "1.30.0",
+        "@seed-hypermedia/agents-ui": "file:./vendor/seed-agents-ui",
         "@seed-hypermedia/client": "0.0.100",
         "bun-pty": "^0.4.10",
         "hono": "^4.6.0",
@@ -331,6 +332,8 @@
     "@rollup/rollup-win32-x64-gnu": ["@rollup/rollup-win32-x64-gnu@4.62.4", "", { "os": "win32", "cpu": "x64" }, "sha512-qPzHqdj9rfUD+w79dtE07zi/kFwKyCJqplp5K5ygeLTp7jLpAoc16OAH39HSmRC9UpozaecsleI8uAdEj6v2yw=="],
 
     "@rollup/rollup-win32-x64-msvc": ["@rollup/rollup-win32-x64-msvc@4.62.4", "", { "os": "win32", "cpu": "x64" }, "sha512-zD6NdeWEByGE9QF9vCrlJ5YQB4oq9q91kPZS37Jwj5hOkvR1lTBSpsKhKDw4IJtbQ35LsTS1HD9DZYGKIshU1Q=="],
+
+    "@seed-hypermedia/agents-ui": ["@seed-hypermedia/agents-ui@file:vendor/seed-agents-ui", { "peerDependencies": { "react": ">=18.2.0 <20", "react-dom": ">=18.2.0 <20" } }],
 
     "@seed-hypermedia/client": ["@seed-hypermedia/client@0.0.100", "", { "dependencies": { "@ipld/dag-cbor": "^9.2.5", "@noble/ciphers": "^2.1.1", "@noble/curves": "^2.0.1", "@noble/hashes": "^2.0.1", "blockstore-core": "^5.0.2", "cborg": "^4.5.8", "cheerio": "^1.2.0", "core-js": "^3.48.0", "hash-wasm": "^4.12.0", "ipfs-unixfs-importer": "^15.3.2", "multiformats": "^13.4.1", "superjson": "2.2.1", "yaml": "^2.6.0" }, "peerDependencies": { "pdfjs-dist": "^4.2.67", "zod": "^3.20.0" }, "optionalPeers": ["pdfjs-dist"] }, "sha512-Dg1IZr3yXnVPmwpLBqp0/6wu+J/KrAvmECgSQSXPqbHr3srSaVYxPDdfZyDfAkYLd+loE74/DLHRDKg+/m4dSQ=="],
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { activeNode, activeNodeName, navigate, api, wsUrl } from "../lib/api";
@@ -6,6 +6,9 @@ import { recentCwds, rememberCwd, shortCwd } from "../lib/terms";
 import { messageRequestId, apiOn, attachUrl, createSession, getCaps, removeSession, renameSession, type LiveSession } from "../lib/sessions";
 import type { Overview } from "../lib/control";
 import "@xterm/xterm/css/xterm.css";
+
+// Seed sessions on this node render with Seed's own agents UI (see SeedAgents.tsx); loaded on first use.
+const SeedAgentsEmbed = lazy(() => import("./SeedAgents").then((m) => ({ default: m.SeedAgentsEmbed })));
 
 type Status = "connecting" | "live" | "exited" | "closed";
 
@@ -92,7 +95,24 @@ function TermPane({ session, onStatus, onRemove }: { session: LiveSession; onSta
 type QueryEvent = { seq: number; event: { type?: string; role?: string; content?: string; message?: string } };
 type QueryTranscript = { session: { status: string; continuedTo?: { sessionId: string } }; events: QueryEvent[]; hasMoreBefore?: boolean };
 
-/** Persistent Seed conversation, with transcript history and follow-up messages. */
+/** A Seed session on this node, in Seed's agents UI: tool calls, runs, plan, sub-sessions, model and stop/retry. */
+function NativeSeedSession({ id }: { id: string }) {
+  const sessionId = id.replace(/^seed-/, "");
+  return (
+    <Suspense fallback={<div className="p-6 text-xs text-zinc-500">Loading Seed agents…</div>}>
+      <SeedAgentsEmbed
+        route={{ key: "agent-session", sessionId }}
+        onRouteChange={(next, _mode, path) => {
+          // Stay in Sessions for this session; anything else (the agent, a run, another session) opens the Seed view.
+          if (next.key === "agent-session" && next.sessionId === sessionId) return;
+          navigate("seed", { r: path });
+        }}
+      />
+    </Suspense>
+  );
+}
+
+/** Persistent Seed conversation on a remote node, with transcript history and follow-up messages. */
 function SeedPane({ session }: { session: LiveSession }) {
   const [data, setData] = useState<QueryTranscript | null>(null);
   const [events, setEvents] = useState<QueryEvent[]>([]);
@@ -282,10 +302,12 @@ export function Term({ params }: { params: URLSearchParams }) {
           </div>
         </div>
       )}
-      {!adding && current && (
+      {/* A local Seed session opens before the session list has caught up with it: Seed's view only needs the id. */}
+      {!adding && !node && active.startsWith("seed-") && <NativeSeedSession key={active} id={active} />}
+      {!adding && current && !(current.tool === "seed" && !current.node) && (
         current.tool === "seed" ? <SeedPane key={`${current.node}:${current.id}`} session={current} /> : <TermPane key={`${current.node}:${current.id}`} session={current} onStatus={(s) => setStatuses((m) => (m[current.id] === s ? m : { ...m, [current.id]: s }))} onRemove={() => close(current)} />
       )}
-      {!adding && !current && sessions && sessions.length > 0 && active && <div className="p-6 text-xs text-zinc-500">No session {active} on {nodeName}. Pick one above.</div>}
+      {!adding && !current && sessions && sessions.length > 0 && active && !(!node && active.startsWith("seed-")) && <div className="p-6 text-xs text-zinc-500">No session {active} on {nodeName}. Pick one above.</div>}
     </div>
   );
 }

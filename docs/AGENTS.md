@@ -107,6 +107,30 @@ UpdateSession and DeleteSession actions. Query ids carry a `seed-` prefix in Cyb
 transcripts and lifecycle stay on the Seed server. All reads and writes require normal Cyberdeck
 authentication; the Casework voice pairing key cannot use the query routes. Voice state is separate.
 
+## Seed's agents UI
+
+The **Seed** view (`#/seed?r=<path>`, `ui/views/SeedAgents.tsx`) is Seed's own agents UI, the code the
+Seed desktop and web apps render, from the `@seed-hypermedia/agents-ui` package: every agent on this
+node's agents server with its sessions, triggers, memory, tools and MCP servers, system prompt,
+collaborators and settings, and sessions with tool calls, plans, sub-sessions and runs. `r` is the
+path after `/hm/agents/` in Seed's web URLs (`session/<id>?agent=<id>`), so links match the Seed apps.
+Seed query sessions in **Sessions** render with the same UI.
+
+Cyberdeck only hosts it (`ui/lib/seed-agents.ts`, `src/daemon/api/seed-agents.ts`): the daemon signs
+`AgentsAction` envelopes for the bridge's identity and nothing else, and proxies the agents server and
+the Seed API on the same origin behind an HttpOnly cookie, so the browser never holds the key or talks
+to the private agents server directly. Remote nodes' Seed sessions still use the plain transcript pane.
+
+The package is vendored in `vendor/seed-agents-ui` until it is on npm. Refresh it from a Seed checkout
+with its dependencies installed, then commit the result:
+
+```
+bun scripts/seed-agents-ui.ts --seed ~/Code/Seed && bun install && bun run build
+```
+
+`vendor/seed-agents-ui/SOURCE.json` records the Seed commit. Restyling goes through Seed's CSS variables
+(`ui/views/seed-agents.css`), not its markup.
+
 ## Cross-agent session index (planned)
 
 The Deck session index covers cc and cx transcripts. Seed agent sessions live in the agents

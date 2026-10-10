@@ -1,0 +1,32 @@
+{
+  "name": "@seed-hypermedia/agents-ui",
+  "version": "0.1.0",
+  "description": "The Seed Hypermedia agents UI as a React package for any app",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/seed-hypermedia/seed.git",
+    "directory": "frontend/packages/agents-ui"
+  },
+  "type": "module",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    },
+    "./styles.css": "./styles.css",
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "react": ">=18.2.0 <20",
+    "react-dom": ">=18.2.0 <20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
