@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { parseHash, navigate, api, activeNode, activeNodeName, setActiveNode, type Route } from "./lib/api";
-import { ShieldIcon, ServerIcon, FolderIcon, TerminalIcon, GitIcon, LayersIcon, BotIcon, PulseIcon, GridIcon, CloudIcon, MicIcon, MusicIcon } from "./lib/icons";
+import { ShieldIcon, ServerIcon, FolderIcon, TerminalIcon, GitIcon, LayersIcon, BotIcon, PulseIcon, GridIcon, CloudIcon, MicIcon, MusicIcon, SeedIcon } from "./lib/icons";
 import { Spotify } from "./views/Spotify";
 import { Cloud } from "./views/Cloud";
 import { Applications } from "./views/Applications";
@@ -20,12 +20,16 @@ import { TokenGate } from "./views/TokenGate";
 import { PromptBar } from "./components/PromptBar";
 import { applyInstallTarget } from "./lib/pwa";
 
+// Seed's agents UI is a large bundle of its own; load it when the view opens.
+const SeedAgents = lazy(() => import("./views/SeedAgents"));
+
 const NAV = [
   { view: "fleet", label: "Home", icon: ServerIcon },
   { view: "applications", label: "Applications", icon: GridIcon },
   { view: "spotify", label: "Spotify", icon: MusicIcon },
   { view: "desk", label: "Desk", icon: MicIcon },
   { view: "projects", label: "Projects", icon: LayersIcon },
+  { view: "seed", label: "Seed", icon: SeedIcon },
   { view: "agents", label: "Agents", icon: BotIcon },
   { view: "services", label: "Services", icon: PulseIcon },
   { view: "data", label: "Data", icon: GitIcon },
@@ -105,6 +109,7 @@ export function App() {
       {route.view === "applications" && <Applications params={route.params} onLocked={lock} />}
       {route.view === "desk" && <Desk onLocked={lock} key={`desk-${nodeGen}-${nodeId}`} />}
       {route.view === "projects" && <Projects params={route.params} onLocked={lock} key={`projects-${nodeGen}-${nodeId}`} />}
+      {route.view === "seed" && <Suspense fallback={<div className="p-6 text-xs text-zinc-500">Loading Seed agents…</div>}><SeedAgents params={route.params} /></Suspense>}
       {route.view === "agents" && <Agents params={route.params} onLocked={lock} key={`agents-${nodeGen}-${nodeId}`} />}
       {route.view === "services" && <Services params={route.params} onLocked={lock} key={`services-${nodeGen}-${nodeId}`} />}
       {route.view === "data" && <Data onLocked={lock} key={`data-${nodeGen}-${nodeId}`} />}

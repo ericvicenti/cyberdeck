@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
+    "@seed-hypermedia/agents-ui": "file:./vendor/seed-agents-ui",
     "@seed-hypermedia/client": "0.0.100",
     "bun-pty": "^0.4.10",
     "hono": "^4.6.0",

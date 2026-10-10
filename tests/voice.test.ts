@@ -445,12 +445,21 @@ test("Seed query UI defaults, starts, resumes after reload, and sends a follow-u
     expect(url).toContain("session=seed-");
     await page.reload();
     await page.getByText("Seed reply: Check the fleet", { exact: true }).waitFor();
-    await page.getByLabel("Reply to Seed").fill("And the services?");
-    await page.getByLabel("Reply to Seed").press("Enter");
+    // Local Seed sessions render in Seed's own agents UI (vendor/seed-agents-ui): its block editor composes replies.
+    const reply = async (text: string) => {
+      const seed = page.locator('[data-testid="seed-agents"]');
+      const editor = seed.locator('[contenteditable="true"]:visible').last();
+      const collapsed = seed.getByRole("button", { name: /Start a Discussion|Write a Reply/ }).last();
+      await editor.or(collapsed).first().waitFor(); // the editor loads lazily
+      if (await collapsed.isVisible()) await collapsed.click();
+      await editor.click();
+      await page.keyboard.type(text);
+      await page.keyboard.press("Enter");
+    };
+    await reply("And the services?");
     await page.getByText("Seed reply: And the services?", { exact: true }).waitFor();
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.getByLabel("Reply to Seed").fill("Mobile reply");
-    await page.getByLabel("Reply to Seed").press("Enter");
+    await reply("Mobile reply");
     await page.getByText("Seed reply: Mobile reply", { exact: true }).waitFor();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await input.fill("cx: explicitly use Codex");

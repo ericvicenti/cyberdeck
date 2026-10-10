@@ -70,13 +70,16 @@ export function PromptBar({ route, nodeName }: { route: Route; nodeName: string 
     try {
       const s = await createSession(plan.node, plan.nodeName, { cwd: plan.cwd, cmd: plan.cmd || undefined, title: plan.title, tool: plan.tool, prompt: plan.prompt || undefined, runner: plan.runner });
       if (plan.tool === "seed") {
+        // Open the conversation as soon as it exists (Seed's own session view shows the message
+        // arrive live), then hand the agent its first message.
+        if (!background) openSession(s);
         try { await apiOn(plan.node, `/api/sessions/${s.id}/message`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: plan.prompt, cwd: plan.cwd, nodeName: plan.contextNodeName, clientMessageId: messageRequestId() }) }); }
         catch (e) { openSession(s); throw new Error(`Session created; first message could not be confirmed. Check the conversation before retrying: ${e instanceof Error ? e.message : e}`); }
       }
       rememberCwd(plan.cwd);
       setText(""); setOverrides({}); setEditCwd(false);
       setNote({ text: `started ${s.title} on ${plan.nodeName}`, kind: "ok" });
-      if (!background) openSession(s);
+      if (!background && plan.tool !== "seed") openSession(s);
     } catch (e) {
       setNote({ text: `could not start: ${e instanceof Error ? e.message : e}`, kind: "err" });
     } finally { setSending(false); }

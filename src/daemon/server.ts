@@ -13,6 +13,7 @@ import { runScan, isScanRunning } from "./indexer/scan";
 import { runDataScan, isDataScanRunning } from "./indexer/data";
 import type { RepoRow } from "./db";
 import { registerFsRoutes } from "./api/fs";
+import { registerSeedAgentsRoutes, seedAgentsCookieAuth } from "./api/seed-agents";
 import { createTermHandlers } from "./api/term";
 import { registerFleetRoutes } from "./api/fleet";
 import { registerMediaRoutes, cleanupHlsCache } from "./api/media";
@@ -38,7 +39,8 @@ const UI_DIST = join(import.meta.dir, "../../dist/ui");
 export const VERSION = "0.4.0";
 
 // "casework" = the Casework Desk app's pairing key: scoped to the routes the app needs (api/casework.ts).
-export type AuthInfo = { method: "token" | "tailscale" | "casework"; login?: string; node?: string };
+/** `seed`: the Seed agents UI proxy cookie, honored only on the proxy paths (see api/seed-agents.ts). */
+export type AuthInfo = { method: "token" | "tailscale" | "casework" | "seed"; login?: string; node?: string };
 export type ServerOptions = {
   /** Override peer-address lookup (tests inject tailnet/LAN addresses). Default: Bun's server.requestIP. */
   requestIp?: (c: { req: { raw: Request } }) => string | null;
@@ -101,6 +103,7 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
     if (owned) return owned;
     const bearer = (c.req.header("authorization") ?? "").replace(/^Bearer /, "");
     if (bearer && casework && casework.matches(bearer)) return { method: "casework" };
+    if (seedAgentsCookieAuth(c.req.path, c.req.header("cookie"), token)) return { method: "seed" };
     return null;
   };
   const tailnetIdentity = async (c: any): Promise<AuthInfo | null> => {
@@ -218,6 +221,8 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   const seed = new SeedBridge({ config: seedConfig(cfg), port: cfg.port, token, home: opts.seed?.home, companionFile: opts.seed?.companionFile, runtimeFile: opts.seed?.runtimeFile });
   casework = registerCaseworkRoutes(app, { token, nodeName: cfg.nodeName, kiosk: cfg.kiosk?.enabled, upgradeWebSocket, isFullAuth, experiencesDir: opts.caseworkExperiencesDir, key: opts.caseworkKey, voice: () => seed.voiceSummary(), secureOrigin: () => ts.serveOrigin(cfg.port), seedBridge: cfg.casework });
   registerVoiceRoutes(app, seed, { isFullAuth, serveOrigin: (port) => ts.serveOrigin(port) });
+  // Seed's own agents UI in the browser: signing stays here, requests reach the agents server through us.
+  registerSeedAgentsRoutes(app, seed, { token, upgradeWebSocket, isFullAuth });
   registerDashboardRoutes(app, db, cfg);
   const network = registerNetworkRoutes(app, db, cfg);
   registerMcpRoutes(app, db, cfg, control, { status, version: VERSION });
