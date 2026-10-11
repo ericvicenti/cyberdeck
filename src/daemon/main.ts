@@ -10,7 +10,7 @@ const cfg = loadConfig();
 const token = loadToken();
 const nodeId = loadNodeId();
 const db = openDb();
-const { fetch, websocket, network, seed } = createServer(db, cfg, token, nodeId);
+const { fetch, websocket, network } = createServer(db, cfg, token, nodeId);
 
 // "tailscale" and "lan" both listen everywhere; the server's source-address gate
 // (server.ts) is what keeps "tailscale" closed to LAN clients.
@@ -26,13 +26,6 @@ const server = Bun.serve({
 });
 
 network.start();
-
-// A deploy may have added MCP tools; the agents server only sees them after a re-registration.
-setTimeout(() => {
-  seed.refreshMcp()
-    .then((r) => { if (r === "refreshed") console.log("seed: MCP tool list changed; re-registered with the agents server"); })
-    .catch((err) => console.error("seed: MCP refresh failed:", err instanceof Error ? err.message : err));
-}, 5000);
 
 console.log(`cyberdeck ${VERSION} — node "${cfg.nodeName}"`);
 console.log(`listening on http://127.0.0.1:${server.port} (bind ${cfg.bind}; data in ${CYBERDECK_HOME})`);

@@ -272,5 +272,5 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   app.use("/*", serveStatic({ root: UI_DIST }));
   app.get("*", serveStatic({ path: join(UI_DIST, "index.html") }));
 
-  return { fetch: app.fetch, websocket, sessions, network, seed };
+  return { fetch: app.fetch, websocket, sessions, network };
 }

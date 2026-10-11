@@ -38,6 +38,14 @@ const errorStatus = (e: unknown): 502 | 503 => (e instanceof SeedError && e.stat
 const errorBody = (e: unknown) => ({ error: e instanceof Error ? e.message : String(e) });
 
 export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDeps) {
+  // A deploy may have added MCP tools; the agents server only sees them after a re-registration.
+  if (process.env.NODE_ENV !== "test") {
+    setTimeout(() => {
+      bridge.refreshMcp()
+        .then((r) => { if (r === "refreshed") console.log("seed: MCP tool list changed; re-registered with the agents server"); })
+        .catch((err) => console.error("seed: MCP refresh failed:", err instanceof Error ? err.message : err));
+    }, 5000).unref?.();
+  }
   app.get("/api/voice/config", async (c) => {
     const s = await bridge.status();
     return c.json({
