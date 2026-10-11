@@ -11,7 +11,7 @@ import type { SessionInfo } from "./sessions";
 import { CYBERDECK_HOME, type SeedConfig } from "./config";
 
 /** Persisted in `${CYBERDECK_HOME}/seed.json`. */
-export type SeedState = { queryAgentId?: string; agentId?: string; sessionId?: string; mcpRegisteredAt?: number; lastCallAt?: number; dogfoodTriggerId?: string };
+export type SeedState = { queryAgentId?: string; agentId?: string; sessionId?: string; mcpRegisteredAt?: number; mcpTools?: string; lastCallAt?: number; dogfoodTriggerId?: string };
 
 export type SeedHealth = { ok: boolean; voice?: boolean; protocol?: number; version?: string; error?: string; checkedAt: number };
 
@@ -383,6 +383,7 @@ export class SeedBridge {
     });
     const mcp: SetupResult["mcp"] = { name: MCP_SERVER_NAME, url: this.mcpUrl, state: mcpRes?.server?.status?.state, error: mcpRes?.server?.status?.error, tools: Array.isArray(mcpRes?.server?.tools) ? mcpRes!.server!.tools!.length : undefined };
     this.#state.mcpRegisteredAt = Date.now();
+    this.#state.mcpTools = (await this.#ownTools().catch(() => [])).join(",") || undefined;
     if (mcp.state === "error") warnings.push(`MCP discovery failed: ${mcp.error ?? "unknown"} (the server record is saved; it retries on the next connect)`);
 
     // 2. The agent: keep, adopt the Casework Companion, or create.
@@ -421,6 +422,31 @@ export class SeedBridge {
     // 3. A session for the calls.
     const sessionId = await this.ensureSession();
     return { agent, sessionId, mcp, warnings };
+  }
+
+  /** This daemon's MCP tool names, from its own `tools/list`. */
+  async #ownTools(): Promise<string[]> {
+    const res = await fetch(this.mcpUrl, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.#token}`, "content-type": "application/json", accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const j = (await res.json()) as { result?: { tools?: { name: string }[] } };
+    return (j.result?.tools ?? []).map((t) => t.name).sort();
+  }
+
+  /** The agents server keeps the tool list it discovered at registration, so a deploy that adds or
+   *  changes tools re-registers the MCP server (same config, fresh discovery) once the list differs. */
+  async refreshMcp(names?: string[]): Promise<"skipped" | "unchanged" | "refreshed"> {
+    if (!this.#state.mcpRegisteredAt) return "skipped";
+    const fp = (names ?? (await this.#ownTools())).slice().sort().join(",");
+    if (!fp || fp === this.#state.mcpTools) return "unchanged";
+    await this.action({ _: "SetMcpServer", name: MCP_SERVER_NAME, config: { url: this.mcpUrl, transport: "http", secretRefs: { Authorization: MCP_SECRET_NAME } } });
+    this.#state.mcpTools = fp;
+    this.#state.mcpRegisteredAt = Date.now();
+    this.#save();
+    return "refreshed";
   }
 
   /** Make sure `agentId` exists and lists the cyberdeck MCP server; returns the agent's name. */

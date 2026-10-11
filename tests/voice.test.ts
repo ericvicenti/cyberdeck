@@ -4,7 +4,8 @@
 import { chromium } from "playwright";
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { Database } from "bun:sqlite";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 import * as blobs from "@seed-hypermedia/client/blobs";
 import * as cbor from "@seed-hypermedia/client/cbor";
@@ -267,6 +268,19 @@ describe("configured node", () => {
     expect((await restarted.status()).agent).toEqual({ id: COMPANION_ID, name: "Casework Companion" });
     expect((await restarted.status()).agent?.name).toBe("Casework Companion");
     expect(voiced.actions.filter((x) => x._ === "GetAgent").length).toBe(before + 1);
+  });
+  test("a changed MCP tool list re-registers the server once; an unchanged one does nothing", async () => {
+    const bridge = new SeedBridge({ config: seedConfig({ seed: { agentsUrl: voiced.url } }), port: 4777, token: TEST_TOKEN, home: a.home });
+    const sets = () => voiced.actions.filter((x) => x._ === "SetMcpServer").length;
+    const before = sets();
+    expect(await bridge.refreshMcp(["status", "todo_add"])).toBe("refreshed");
+    expect(await bridge.refreshMcp(["todo_add", "status"])).toBe("unchanged");
+    expect(sets()).toBe(before + 1);
+    expect(JSON.parse(readFileSync(join(a.home, "seed.json"), "utf8")).mcpTools).toBe("status,todo_add");
+    expect(await bridge.refreshMcp(["status", "todo_add", "todo_done"])).toBe("refreshed");
+    expect(sets()).toBe(before + 2);
+    const fresh = new SeedBridge({ config: seedConfig({ seed: { agentsUrl: voiced.url } }), port: 4777, token: TEST_TOKEN, home: mkdtempSync(join(tmpdir(), "cd-seed-")) });
+    expect(await fresh.refreshMcp(["status"])).toBe("skipped");
   });
   test("livekit with the pairing key returns url/token/room and records the call", async () => {
     const before = voiced.actions.length;

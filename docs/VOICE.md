@@ -103,6 +103,10 @@ Setup (`POST /api/voice/setup`, node token only) does, in order:
 3. `CreateSession` for the agent (title "Cyberdeck voice"). The companion's own session is not
    reused: Cyberdeck's calls get their own transcript.
 
+The agents server keeps the tool list it discovered when the MCP server was registered, so 5 s after boot the
+daemon compares its own `tools/list` with the fingerprint in `seed.json` (`mcpTools`) and re-sends `SetMcpServer`
+when they differ (`SeedBridge.refreshMcp`): a deploy that adds a tool reaches the companion without a manual setup.
+
 Re-running setup is idempotent for the MCP registration and keeps the agent and session. Rotating
 the node token (`~/.cyberdeck/token`) requires a re-run so the secret on the agents server follows.
 
