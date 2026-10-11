@@ -39,6 +39,11 @@ MCP server, and grants it to the voice agent; see `docs/VOICE.md`).
 | `sessions` | search the cross-host cc/cx session index (`query`, `host`, `tool`) | no |
 | `repos` | indexed repos with risk; `risk` (default `at-risk`), `node` (a paired node by name, fetched over the fleet token), `query`, `limit` | no |
 | `services` | last service probe; `probe: true` runs one now (up to 60 s) | no |
+| `service_logs` | recent log lines of one manifest service on its host (`host`, `name`, `lines` ≤ 500): journal, launchd stdout/stderr files, docker logs | no |
+| `services_restart` | restart one manifest service on its host (`host`, `name`, `reason`), re-check its state, retry once; ≤ 3 per service per 30 min; refuses this node's own daemon; audited | yes (restarts a service) |
+| `todo_add` | add a dated entry to `handoff/TODO.md` (`text`, optional `section` prefix; default the first section), signed `(seed@<node>)` | yes (Deck repo) |
+| `todo_done` | remove the one `handoff/TODO.md` entry containing `match`; refuses none/several and lists the candidates | yes (Deck repo) |
+| `handoff_note` | prepend a dated line to `handoff/<host>-seed.md` (`host`, `text`); `handoff` returns it next to the cc/cx notes | yes (Deck repo) |
 | `collab_tasks` | the collab queue and its runs | no |
 | `collab_add` | queue a task for cc/cx on a host (`title`, `project`, `host`, `worker`, `body`); returns the id | yes (Deck repo) |
 | `collab_run` | start a queued task on this node, detached; refuses while a run is active | yes (spawns agents) |
@@ -61,6 +66,14 @@ A Seed agent that enables an MCP server gets a grant as strong as `execute` on t
 terminal access: an agent can learn what every machine is doing, queue work for a laptop agent,
 and read the result, but it cannot read arbitrary files, run commands, or touch the terminal
 sessions. Those stay with the humans and the laptop agents. Add tools at that altitude.
+
+`service_logs` and `services_restart` are the one place the agent touches a machine, and they stay
+inside that rule: the target must be a service the fleet manifest lists for that host (`deck hosts
+--json`), the command is a fixed one per service type (`src/shared/services.ts`, the same builders the
+Services view's Logs/Restart buttons use; names quoted, `sudo -n` so nothing prompts), and it runs
+through `bash -s` locally or `ssh -o BatchMode=yes <alias>` (`src/daemon/servicectl.ts`). Restarts
+re-check the state after each attempt (two at most), are limited to three per service per 30
+minutes, and each writes a JSON line to `~/.cyberdeck/audit.log`.
 
 ## Connecting a Seed agent
 

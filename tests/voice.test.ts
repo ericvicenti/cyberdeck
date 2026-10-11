@@ -261,6 +261,13 @@ describe("configured node", () => {
     const s = await (await req(a, KEY, "/api/voice/status")).json();
     expect(s.profile).toEqual({ voice: "v", speed: 1, runtimeToken: true, source: join(a.home, "companion.json") });
   });
+  test("after a restart the bridge looks the agent's name up once instead of showing only its id", async () => {
+    const restarted = new SeedBridge({ config: seedConfig({ seed: { agentsUrl: voiced.url } }), port: 4777, token: TEST_TOKEN, home: a.home });
+    const before = voiced.actions.filter((x) => x._ === "GetAgent").length;
+    expect((await restarted.status()).agent).toEqual({ id: COMPANION_ID, name: "Casework Companion" });
+    expect((await restarted.status()).agent?.name).toBe("Casework Companion");
+    expect(voiced.actions.filter((x) => x._ === "GetAgent").length).toBe(before + 1);
+  });
   test("livekit with the pairing key returns url/token/room and records the call", async () => {
     const before = voiced.actions.length;
     const r = await req(a, KEY, "/api/voice/livekit", { method: "POST" });

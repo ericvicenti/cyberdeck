@@ -21,6 +21,7 @@ import type { NodeStatus } from "../status";
 import type { Control } from "./control";
 import { peerFetch, type NodeRow } from "./fleet";
 import { runScan, isScanRunning } from "../indexer/scan";
+import { resolveService, serviceLogs, restartService, restartBudget, type ManifestHost, type ServiceTarget } from "../servicectl";
 
 export const MCP_PATH = "/api/mcp";
 export const MCP_SERVER_NAME = "cyberdeck";
@@ -40,7 +41,8 @@ or cx on a given host and reviewed by the other.
 Start with \`status\` (this node and its peers) or \`fleet_status\` (every host, online or not). Use
 \`todo\` and \`handoff\` to learn what is in flight before proposing work. Use \`repos\` to find
 uncommitted or unpushed work. Queue work for a laptop agent with \`collab_add\`, start it with
-\`collab_run\`, and read its result with \`run_log\`. \`note\` drops a line into the owner's inbox that
+\`collab_run\`, and read its result with \`run_log\`. When \`services\` shows something down, read
+\`service_logs\` first and say what you found; call \`services_restart\` only after the owner agrees. \`todo_add\` / \`todo_done\` keep the handoff list current (confirm before removing), \`handoff_note\` records what you did on a host, and \`note\` drops a line into the owner's inbox that
 every agent reads at session start. All times are ISO 8601 or Unix milliseconds.`;
 
 type RepoOut = Omit<RepoRow, "remotes" | "risk_reasons"> & { remotes: unknown; risk_reasons: unknown };
@@ -204,6 +206,51 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
     }
   );
 
+  /** A manifest service on a host, or the refusal to hand back. */
+  const target = async (host: string, name: string): Promise<ServiceTarget | ReturnType<typeof fail>> => {
+    const blocked = needDeck(); if (blocked) return blocked;
+    const [hosts, status] = await Promise.all([
+      control.cached<ManifestHost[]>("hosts", ["hosts", "--json"], []),
+      control.cached<{ host?: string } | null>("status", ["status", "--json"], null),
+    ]);
+    const r = resolveService(hosts, status?.host ?? cfg.nodeName, host, name);
+    return "error" in r ? fail(r.error) : r;
+  };
+
+  server.tool(
+    "service_logs",
+    "Recent log lines of one service from the fleet manifest (systemd journal, launchd stdout/stderr files, docker logs), read on the host that runs it. Use it to explain why a service is down before proposing a restart.",
+    {
+      host: z.string().min(1).describe("Host name from `hosts` / `services`"),
+      name: z.string().min(1).describe("Service name exactly as the manifest lists it (e.g. com.casework.console, caddy)"),
+      lines: z.number().int().min(1).max(500).default(60),
+    },
+    async ({ host, name, lines }) => {
+      const t = await target(host, name);
+      if ("isError" in t) return t;
+      return text(await serviceLogs(t, lines));
+    }
+  );
+
+  server.tool(
+    "services_restart",
+    "Restart one service from the fleet manifest on its host (systemctl / launchctl kickstart / docker restart), then re-check its state; retries once if it does not come up. At most 3 restarts per service per 30 minutes; every restart is audited. Ask the owner before calling this.",
+    {
+      host: z.string().min(1).describe("Host name from `hosts` / `services`"),
+      name: z.string().min(1).describe("Service name exactly as the manifest lists it"),
+      reason: z.string().max(500).optional().describe("Why (goes into the audit line)"),
+    },
+    async ({ host, name, reason }) => {
+      const t = await target(host, name);
+      if ("isError" in t) return t;
+      if (t.local && /(^|\.)cyberdeck(\.daemon)?$/i.test(t.service)) return fail("That is the Cyberdeck daemon answering this call; restarting it from here would cut the call off. Use `cyberdeck restart` on the machine.");
+      if (restartBudget(t) <= 0) return fail(`${t.service} on ${t.host} was already restarted 3 times in the last 30 minutes; read service_logs and tell the owner instead.`);
+      const r = await restartService(t, `mcp${reason ? `: ${reason}` : ""}`);
+      control.probe().catch(() => {});
+      return text(r);
+    }
+  );
+
   server.tool(
     "collab_tasks",
     "The collab queue: tasks handed to cc or cx on a host (open, running, review, done) and the runs that executed them, newest first.",
@@ -278,6 +325,47 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
       if (!r || r.code !== 0) return fail(`deck note failed: ${(r?.err ?? "").trim() || "no output"}`);
       return text({ ok: true });
     }
+  );
+
+  /** A Deck write through the CLI (`deck … --json`); the JSON it prints, or the refusal. */
+  const deckWrite = async (args: string[], invalidates: string[]) => {
+    const blocked = needDeck(); if (blocked) return blocked;
+    const r = await control.cli([...args, "--json"]);
+    control.invalidate(...invalidates);
+    const out = parseLast(r?.out ?? "") as { ok?: boolean; error?: string; candidates?: string[] } | null;
+    if (!r || r.code !== 0 || !out?.ok) {
+      const why = out?.error ?? ((r?.err ?? "").trim() || "no output");
+      return fail(`deck ${args.slice(0, 2).join(" ")} failed: ${why}${out?.candidates?.length ? `\nMatching entries:\n${out.candidates.join("\n")}` : ""}`);
+    }
+    return text(out);
+  };
+  const by = () => `seed@${cfg.nodeName.toLowerCase()}`;
+
+  server.tool(
+    "todo_add",
+    "Add a dated entry to the fleet handoff list (handoff/TODO.md in the Deck repo), at the top of the first section (\"Needs a decision or action from Eric\") unless `section` names another. Write it like the others: a **bold title**, then one or two sentences with the host and a pointer. Your name is appended.",
+    {
+      text: z.string().min(3).max(2000),
+      section: z.string().max(120).optional().describe("Start of a section title from `todo`, e.g. \"Open PRs\""),
+    },
+    async ({ text: entry, section }) => deckWrite(["todo", "add", ...(section ? ["--section", section] : []), `${entry.trim()} (${by()})`], ["todo"])
+  );
+
+  server.tool(
+    "todo_done",
+    "Remove the one entry of the fleet handoff list whose text contains `match` (case-insensitive), because it is finished. Refuses when nothing or several entries match and lists them; read `todo` first and confirm with the owner. Returns the removed entry.",
+    { match: z.string().min(3).max(300).describe("A distinctive piece of the entry, e.g. its bold title") },
+    async ({ match }) => deckWrite(["todo", "done", match], ["todo"])
+  );
+
+  server.tool(
+    "handoff_note",
+    "Prepend a dated line to the per-host handoff note for the Seed agent (handoff/<host>-seed.md), which the laptop agents read at session start. Use it to record what you checked or changed on a machine.",
+    {
+      host: z.string().min(1).describe("Host name from `hosts`"),
+      text: z.string().min(3).max(2000),
+    },
+    async ({ host, text: line }) => deckWrite(["handoff", "note", host.toLowerCase(), "seed", line], ["handoff"])
   );
 
   server.tool(

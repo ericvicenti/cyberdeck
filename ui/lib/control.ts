@@ -1,4 +1,5 @@
 // Shared types + helpers for the control views (fed by /api/control/*).
+import { serviceLogCmd as sharedLogCmd, serviceRestartCmd as sharedRestartCmd, type ServiceRef } from "../../src/shared/services";
 export type HostStatus = { name: string; kind: string; os: string; ssh?: string | null; roles: string[]; online: boolean | null; cyberdeck: { version: string; repos: number; atRisk: number; attention: number; lastScanAt: number | null } | null; note?: string };
 export type FleetStatus = { host: string; time: string; hosts: HostStatus[]; repo: { branch: string; dirty: number; ahead: number; behind: number }; handoffOpen: number; sessionsIndexed: number };
 export type Project = { slug: string; name: string; status: string; depth: number; parent: string | null; repos: string[]; hosts: string[]; services?: string[]; links: string[]; body: string; file: string };
@@ -66,30 +67,9 @@ export function servicesForProject(p: Project, projects: Project[], rows: Servic
 /** Projects whose `hosts:` list this host. */
 export const projectsOnHost = (host: string, projects: Project[]) => projects.filter((p) => p.hosts.some((h) => h.toLowerCase() === host.toLowerCase()));
 
-const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
-/** Shell command that shows a service's recent logs and follows them, run on the service's host. null when the type has no logs (http probes). */
-export function serviceLogCmd(row: { service: string; type: string }): string | null {
-  const n = q(row.service);
-  switch (row.type) {
-    case "systemd": return `journalctl -u ${n} -n 200 -f || sudo journalctl -u ${n} -n 200 -f`;
-    case "systemd-timer": return `systemctl list-timers ${n}; journalctl -u ${q(row.service.replace(/\.timer$/, ""))} -n 200 || sudo journalctl -u ${q(row.service.replace(/\.timer$/, ""))} -n 200`;
-    case "systemd-user": return `journalctl --user -u ${n} -n 200 -f`;
-    case "launchd": return `launchctl print gui/$(id -u)/${n} | head -40; p=$(launchctl print gui/$(id -u)/${n} | awk '/(stdout|stderr) path = /{print $NF}' | sort -u); [ -n "$p" ] && tail -n 100 -f $p`;
-    case "docker": return `docker logs -n 200 -f ${n} 2>&1 || sudo -n docker logs -n 200 -f ${n}`;
-    default: return null;
-  }
-}
-/** Shell command that restarts a service, run on its host. null for types that cannot be restarted this way. */
-export function serviceRestartCmd(row: { service: string; type: string }): string | null {
-  const n = q(row.service);
-  switch (row.type) {
-    case "systemd": case "systemd-timer": return `sudo systemctl restart ${n} && systemctl status ${n} --no-pager | head -20`;
-    case "systemd-user": return `systemctl --user restart ${n} && systemctl --user status ${n} --no-pager | head -20`;
-    case "launchd": return `launchctl kickstart -k gui/$(id -u)/${n} && launchctl print gui/$(id -u)/${n} | head -20`;
-    case "docker": return `docker restart ${n} || sudo -n docker restart ${n}`;
-    default: return null;
-  }
-}
+/** Terminal commands for a service on its host (they follow the log and may prompt for sudo). null for http probes. */
+export const serviceLogCmd = (row: ServiceRef): string | null => sharedLogCmd(row, { follow: true, interactive: true });
+export const serviceRestartCmd = (row: ServiceRef): string | null => sharedRestartCmd(row, { interactive: true });
 /** A project link that is a shell command rather than a URL ("ssh root@host", "ssh agent.hm (containers ...)"). */
 export function linkCommand(link: string): string | null {
   const m = link.match(/^((?:ssh|mosh)\s+\S+)/);

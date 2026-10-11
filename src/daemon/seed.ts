@@ -147,6 +147,7 @@ export class SeedBridge {
   #healthInFlight: Promise<SeedHealth> | null = null;
   #dogfood: { value: DogfoodStatus | undefined; checkedAt: number; agentId: string } | null = null;
   #agentName: string | undefined;
+  #agentNameTriedAt = 0;
   #querySetup: Promise<string> | null = null;
 
   constructor(opts: SeedBridgeOptions) {
@@ -272,6 +273,13 @@ export class SeedBridge {
 
   async status(): Promise<SeedStatus> {
     const [signer, health] = await Promise.all([this.signer(), this.health()]);
+    // The name is learned at setup; after a daemon restart, ask the agents server once (best effort).
+    if (signer && health.ok && this.#state.agentId && !this.#agentName && Date.now() - this.#agentNameTriedAt > 5 * 60_000) {
+      this.#agentNameTriedAt = Date.now();
+      await this.action<{ agent: { definition: { name?: unknown } } }>({ _: "GetAgent", agentId: this.#state.agentId })
+        .then((r) => { if (typeof r.agent?.definition?.name === "string") this.#agentName = r.agent.definition.name; })
+        .catch(() => {});
+    }
     const s: SeedStatus = {
       configured: false,
       agentsUrl: this.config.agentsUrl,

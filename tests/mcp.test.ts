@@ -1,11 +1,21 @@
 // The MCP server at /api/mcp, driven by the same client library Seed Agents uses.
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { join } from "path";
+import { mkdtempSync, readFileSync, existsSync } from "fs";
+import { tmpdir } from "os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { startTestServer, testConfig, TEST_TOKEN, type TestServer } from "./helpers";
 
 const FLEET_STUB = join(import.meta.dir, "fixtures", "fleet");
+const SCRATCH = mkdtempSync(join(tmpdir(), "cd-servicectl-"));
+const SSH_LOG = join(SCRATCH, "ssh.log");
+process.env.CYBERDECK_AUDIT_LOG = join(SCRATCH, "audit.log");
+process.env.CYBERDECK_SSH = join(import.meta.dir, "fixtures", "ssh-stub.sh");
+process.env.SSH_STUB_LOG = SSH_LOG;
+process.env.CYBERDECK_SERVICECTL_SETTLE_MS = "0";
+const DECK_LOG = join(SCRATCH, "deck.log");
+process.env.DECK_STUB_LOG = DECK_LOG;
 
 let srv: TestServer;
 let bare: TestServer;
@@ -71,7 +81,7 @@ describe("mcp tools", () => {
     const client = await connect(srv.base);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["collab_add", "collab_run", "collab_tasks", "fleet_status", "handoff", "hosts", "note", "projects", "repos", "run_log", "scan", "services", "sessions", "status", "todo"]);
+    expect(names).toEqual(["collab_add", "collab_run", "collab_tasks", "fleet_status", "handoff", "handoff_note", "hosts", "note", "projects", "repos", "run_log", "scan", "service_logs", "services", "services_restart", "sessions", "status", "todo", "todo_add", "todo_done"]);
     for (const t of tools) {
       expect(t.name).toMatch(/^[a-z0-9_]{1,40}$/);
       expect(t.description?.length ?? 0).toBeGreaterThan(20);
@@ -129,6 +139,70 @@ describe("mcp tools", () => {
     expect(fresh.rows[0].service).toBe("x");
     const cached = parsed(await call(client, "services"));
     expect(cached.probedAt).toBe(fresh.probedAt);
+    await client.close();
+  });
+
+  test("service_logs and services_restart only reach manifest services", async () => {
+    const client = await connect(srv.base);
+    const refusals: [string, Record<string, unknown>, string][] = [
+      ["service_logs", { host: "nowhere", name: "x" }, "No host"],
+      ["service_logs", { host: "other", name: "rm -rf /" }, "Its services: web-api, db"],
+      ["service_logs", { host: "test-node", name: "cyberdeck" }, "http probe"],
+      ["service_logs", { host: "phone", name: "app" }, "no ssh alias"],
+      ["services_restart", { host: "test-node", name: "sh.cyberdeck.daemon" }, "cut the call off"],
+    ];
+    for (const [tool, args, msg] of refusals) {
+      const r = await call(client, tool, args);
+      expect(r.isError).toBe(true);
+      expect(r.content[0].text).toContain(msg);
+    }
+    expect(existsSync(SSH_LOG)).toBe(false);
+    await client.close();
+  });
+
+  test("service_logs reads a remote service over ssh with a quoted, bounded command", async () => {
+    const client = await connect(srv.base);
+    const r = parsed(await call(client, "service_logs", { host: "OTHER", name: "web-api", lines: 25 }));
+    expect(r).toMatchObject({ host: "other", service: "web-api", type: "systemd", lines: 25, ok: true });
+    expect(r.output).toContain("stub log line from other-alias");
+    const log = readFileSync(SSH_LOG, "utf8");
+    expect(log).toContain("BatchMode=yes other-alias bash -s");
+    expect(log).toContain("journalctl --no-pager -u 'web-api' -n 25");
+    expect(log).toContain("sudo -n journalctl");
+    await client.close();
+  });
+
+  test("services_restart restarts, re-checks, audits, and stops after three in the window", async () => {
+    const client = await connect(srv.base);
+    const r = parsed(await call(client, "services_restart", { host: "other", name: "db", reason: "test" }));
+    expect(r).toMatchObject({ host: "other", service: "db", type: "docker", ok: true, state: "active", attempts: 1 });
+    expect(readFileSync(SSH_LOG, "utf8")).toContain("docker restart 'db'");
+    const audit = readFileSync(process.env.CYBERDECK_AUDIT_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(audit.at(-1)).toMatchObject({ action: "service-restart", by: "mcp: test", host: "other", service: "db", ok: true });
+    await call(client, "services_restart", { host: "other", name: "db" });
+    await call(client, "services_restart", { host: "other", name: "db" });
+    const fourth = await call(client, "services_restart", { host: "other", name: "db" });
+    expect(fourth.isError).toBe(true);
+    expect(fourth.content[0].text).toContain("3 times");
+    await client.close();
+  });
+
+  test("todo_add, todo_done and handoff_note write through the deck CLI", async () => {
+    const client = await connect(srv.base);
+    const added = parsed(await call(client, "todo_add", { text: "**Voice** check the backups", section: "Open" }));
+    expect(added).toMatchObject({ ok: true, section: "Open" });
+    const done = parsed(await call(client, "todo_done", { match: "Demo" }));
+    expect(done).toMatchObject({ ok: true, removed: "- 2026-10-07 **Demo** thing" });
+    const miss = await call(client, "todo_done", { match: "nothing like it" });
+    expect(miss.isError).toBe(true);
+    expect(miss.content[0].text).toContain("no entry contains");
+    expect(parsed(await call(client, "handoff_note", { host: "OTHER", text: "restarted db" }))).toMatchObject({ ok: true, file: "handoff/other-seed.md" });
+    const bad = await call(client, "handoff_note", { host: "nowhere", text: "x y z" });
+    expect(bad.isError).toBe(true);
+    const calls = readFileSync(DECK_LOG, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(calls[0]).toEqual(["todo", "add", "--section", "Open", expect.stringMatching(/^\*\*Voice\*\* check the backups \(seed@[a-z0-9-]+\)$/)]);
+    expect(calls[1]).toEqual(["todo", "done", "Demo"]);
+    expect(calls[3]).toEqual(["handoff", "note", "other", "seed", "restarted db"]);
     await client.close();
   });
 
