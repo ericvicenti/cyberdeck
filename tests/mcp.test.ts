@@ -165,7 +165,7 @@ describe("mcp tools", () => {
     const ok = await srv.api(`/api/repos/detail?repo=${encodeURIComponent(LIVE_REPO)}`);
     expect(ok.status).toBe(200);
     expect((await ok.json()).branch).toBe("main");
-    const no = await srv.api("/api/repos/detail?repo=/tmp");
+    const no = await srv.api("/api/repos/detail?repo=/no/such-repo-zz");
     expect(no.status).toBe(404);
     expect((await no.json()).error).toContain("No indexed repo");
   }, 30_000);
