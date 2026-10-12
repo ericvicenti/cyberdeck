@@ -37,7 +37,9 @@ MCP server, and grants it to the voice agent; see `docs/VOICE.md`).
 | `todo` | `handoff/TODO.md` by section; `query` filters entries | no |
 | `handoff` | the per-agent `handoff/<host>-<agent>.md` notes | no |
 | `sessions` | search the cross-host cc/cx session index (`query`, `host`, `tool`) | no |
+| `sessions_search` | words matched across title, folder, project, branch and id (`query`, `host`, `tool`, `limit` ≤ 50, default 8), newest first, each with `spoken` and a `resume` hint (`command` on its host; for other hosts `ssh -t <alias> …` and `deck sessions pull <id>`), plus a `brief` | no |
 | `repos` | indexed repos with risk; `risk` (default `at-risk`), `node` (a paired node by name, fetched over the fleet token), `query`, `limit` | no |
+| `repos_detail` | one indexed repo read live with git (`repo` = folder name, path or part of one; `node` = a paired node, via its `GET /api/repos/detail`): branch, upstream, ahead/behind, dirty files (first 30), stashes, last commit, local branches no remote has, and a spoken `brief` | no |
 | `services` | last service probe; `probe: true` runs one now (up to 60 s) | no |
 | `service_logs` | recent log lines of one manifest service on its host (`host`, `name`, `lines` ≤ 500): journal, launchd stdout/stderr files, docker logs | no |
 | `services_restart` | restart one manifest service on its host (`host`, `name`, `reason`), re-check its state, retry once; ≤ 3 per service per 30 min; refuses this node's own daemon; audited | yes (restarts a service) |
