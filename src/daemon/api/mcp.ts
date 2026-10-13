@@ -331,8 +331,9 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
         result = control.lastProbe() ?? { probedAt: null, rows: [], note: "no probe yet; call with probe: true" };
       }
       const rows = result.rows as ServiceProbe["rows"];
-      const down = rows.filter((r) => r.ok === false).map((r) => `${r.service} on ${r.host}`);
-      const unknown = rows.filter((r) => r.ok === null).map((r) => `${r.service} on ${r.host}`);
+      // A service probed more than once on a host (two types in the manifest) is said once.
+      const down = [...new Set(rows.filter((r) => r.ok === false).map((r) => `${r.service} on ${r.host}`))];
+      const unknown = [...new Set(rows.filter((r) => r.ok === null).map((r) => `${r.service} on ${r.host}`))];
       const sentence = !result.probedAt
         ? "No service probe has run yet; ask again with probe true."
         : `Probe ${ago(Date.now() - Date.parse(result.probedAt))}: ${plural(rows.length, "service")} checked, ${down.length ? `${down.length} down: ${listOf(down)}` : "all up"}${unknown.length ? `; ${listOf(unknown)} unknown` : ""}.`;
