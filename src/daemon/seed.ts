@@ -126,10 +126,21 @@ function omitUndefined<T>(value: T): T {
   return value;
 }
 
-const systemPrompt = (name: string) =>
-  `You are ${name}, Eric's fleet companion. People reach you by voice through Cyberdeck (the fleet-and-data daemon on Eric's machines) from the Casework iPad app or the web Desk, so your replies are spoken aloud: answer in one or two short sentences, lead with the answer, and skip markdown, lists and code.
+/**
+ * The companion's system prompt: a fleet persona for a voice channel. Applied to the agent
+ * Cyberdeck creates, and to an adopted companion with `cyberdeck seed prompt --apply`
+ * (never silently: the owner may have tuned the agent by hand on the server).
+ */
+export const fleetPrompt = (name: string) =>
+  `You are ${name}, Eric's fleet companion: the voice of Cyberdeck, the daemon on each of Eric's machines (the laptops yacht and starlight, the servers enuc, sentinel, iris and botical, the phone). Eric reaches you by voice from the Casework app on the iPad or the web Desk, so everything you say is read aloud: lead with the answer, one or two short sentences, plain words, no markdown, lists, code or URLs unless he asks for them.
 
-You have the cyberdeck tools: status of this node and its paired nodes, the fleet manifest (hosts, services), the project tree, the handoff TODO, the cross-host coding-agent session index, repo risk, service probes, the collab queue (queue a task for a laptop agent, start a queued task, read a run's log), notes to the inbox, and a rescan. Reach for them before guessing; say when something is not known. Confirm before queueing or starting work.`;
+Work from facts, not memory: call your cyberdeck tools before answering and never guess at the state of a machine, a service or a repo. Pass brief true on every call and read the sentence it returns; ask for the full data only when Eric wants details. Say in a few words what you checked ("I probed the services and read the log on enuc") and name the host and the service when something is down. Keep numbers few and sayable.
+
+Before anything that changes a machine or the shared handoff (restarting a service, queueing or starting a collab task, removing a handoff entry) say what you are about to do and wait for a yes. Reading status, logs, notes, repos and sessions needs no confirmation. Leave a trace: handoff_note for what you did on a host, note for something Eric should see later, todo_add for work someone has to pick up.
+
+When a tool fails, say which one and what it said, retry at most once, and offer the next step. When you do not know, say so plainly.`;
+
+export type PromptResult = { agentId: string; name?: string; current: string; desired: string; changed: boolean; applied: boolean };
 
 export class SeedBridge {
   readonly config: SeedConfig;
@@ -410,7 +421,7 @@ export class SeedBridge {
     if (!agent) {
       const created = await this.action<{ agentId: string }>({
         _: "CreateAgent",
-        definition: { name, systemPrompt: systemPrompt(name), modelProvider: this.config.modelProvider, model: this.config.model, mcpServers: [MCP_SERVER_NAME] },
+        definition: { name, systemPrompt: fleetPrompt(name), modelProvider: this.config.modelProvider, model: this.config.model, mcpServers: [MCP_SERVER_NAME] },
       });
       this.#state.agentId = created.agentId;
       this.#state.sessionId = undefined;
@@ -438,6 +449,25 @@ export class SeedBridge {
 
   /** The agents server keeps the tool list it discovered at registration, so a deploy that adds or
    *  changes tools re-registers the MCP server (same config, fresh discovery) once the list differs. */
+  /** The companion's system prompt next to the fleet persona; with `apply`, the persona is written to the agent. */
+  async prompt(apply = false): Promise<PromptResult> {
+    if (!this.#state.agentId) throw new SeedError("no agent set up yet: run `cyberdeck seed setup`", 409);
+    const agentId = this.#state.agentId;
+    const res = await this.action<{ agent: { definition: Record<string, unknown> & { name?: string; systemPrompt?: string } } }>({ _: "GetAgent", agentId });
+    const definition = res.agent.definition;
+    const name = typeof definition.name === "string" ? definition.name : undefined;
+    if (name) this.#agentName = name;
+    const current = typeof definition.systemPrompt === "string" ? definition.systemPrompt : "";
+    const desired = fleetPrompt(name ?? "Cyberdeck");
+    const changed = current !== desired;
+    let applied = false;
+    if (apply && changed) {
+      await this.action({ _: "UpdateAgent", agentId, definition: { ...definition, systemPrompt: desired } });
+      applied = true;
+    }
+    return { agentId, name, current, desired, changed, applied };
+  }
+
   async refreshMcp(names?: string[]): Promise<"skipped" | "unchanged" | "refreshed"> {
     if (!this.#state.mcpRegisteredAt) return "skipped";
     const fp = (names ?? (await this.#ownTools())).slice().sort().join(",");

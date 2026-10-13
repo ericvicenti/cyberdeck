@@ -15,7 +15,7 @@ import { seedConfig } from "../src/daemon/config";
 import { caseworkAllows } from "../src/daemon/api/casework";
 import { secureCallUrl } from "../src/daemon/api/voice";
 import { Tailscale } from "../src/daemon/tailscale";
-import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME } from "../src/daemon/seed";
+import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME, fleetPrompt } from "../src/daemon/seed";
 import { testConfig, TEST_TOKEN, tmpHomeDir } from "./helpers";
 
 // Deterministic signer; the bridge builds the keypair from this instead of opening the Seed vault.
@@ -358,6 +358,22 @@ describe("configured node", () => {
     expect(s.dogfood).toMatchObject({ triggerId: j1.triggerId, name: DOGFOOD_TRIGGER_NAME, enabled: true, nextSummary: "daily at 07:00 Europe/Madrid" });
     expect((await req(a, TEST_TOKEN, "/api/voice/dogfood", { method: "POST", body: JSON.stringify({ timeOfDay: "7am" }) })).status).toBe(502);
   });
+  test("prompt compares the companion's system prompt with the fleet persona and applies it only on POST", async () => {
+    expect((await req(a, KEY, "/api/voice/prompt")).status).toBe(403);
+    const before = await (await req(a, TEST_TOKEN, "/api/voice/prompt")).json();
+    expect(before).toMatchObject({ agentId: COMPANION_ID, name: "Casework Companion", changed: true, applied: false });
+    expect(before.desired).toBe(fleetPrompt("Casework Companion"));
+    expect(before.desired).toContain("wait for a yes");
+    expect(voiced.agents.get(COMPANION_ID)!.systemPrompt).toBe(before.current);
+
+    const applied = await (await req(a, TEST_TOKEN, "/api/voice/prompt", { method: "POST" })).json();
+    expect(applied).toMatchObject({ changed: true, applied: true });
+    expect(voiced.agents.get(COMPANION_ID)!.systemPrompt).toBe(before.desired);
+    expect(voiced.agents.get(COMPANION_ID)!.mcpServers).toContain("cyberdeck");
+    const again = await (await req(a, TEST_TOKEN, "/api/voice/prompt", { method: "POST" })).json();
+    expect(again).toMatchObject({ changed: false, applied: false });
+  });
+
   test("calls follow a continued session and reset mints a new one", async () => {
     const current = JSON.parse(readFileSync(join(a.home, "seed.json"), "utf8")).sessionId as string;
     voiced.sessions.set("session-next", { agentId: COMPANION_ID });

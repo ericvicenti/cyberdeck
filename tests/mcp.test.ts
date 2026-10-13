@@ -256,7 +256,7 @@ describe("mcp tools", () => {
   test("run_log refuses unknown files and reports empty logs", async () => {
     const client = await connect(srv.base);
     const r = parsed(await call(client, "run_log", { id: "nope" }));
-    expect(r).toEqual({ id: "nope", file: "result.md", text: "", size: 0 });
+    expect(r).toEqual({ brief: "result.md of run nope is empty so far.", id: "nope", file: "result.md", text: "", size: 0 });
     const bad = await call(client, "run_log", { id: "../etc", file: "result.md" });
     expect(bad.isError).toBe(true);
     await client.close();
@@ -269,6 +269,74 @@ describe("mcp tools", () => {
     const r = await call(client, "todo");
     expect(r.isError).toBe(true);
     expect(r.content[0].text).toContain("no Deck checkout");
+    await client.close();
+  });
+});
+
+describe("mcp brief mode", () => {
+  const sentence = (r: ToolResult) => {
+    const t = r.content[0]?.text ?? "";
+    expect(r.isError).toBeFalsy();
+    expect(t).not.toContain("\n");
+    expect(t.startsWith("{")).toBe(false);
+    expect(t.length).toBeGreaterThan(10);
+    expect(t.length).toBeLessThan(400);
+    expect((r.structuredContent as any).brief).toBe(t);
+    return t;
+  };
+
+  test("every tool accepts brief", async () => {
+    const client = await connect(srv.base);
+    const { tools } = await client.listTools();
+    for (const t of tools) expect((t.inputSchema as any).properties?.brief?.type, t.name).toBe("boolean");
+    await client.close();
+  });
+
+  test("read tools answer with one spoken sentence and the key numbers", async () => {
+    const client = await connect(srv.base);
+    expect(sentence(await call(client, "status", { brief: true }))).toContain("test-node runs Cyberdeck");
+    const fleet = await call(client, "fleet_status", { brief: true });
+    expect(sentence(fleet)).toContain("2 of 2 hosts online");
+    expect((fleet.structuredContent as any).hostsOnline).toBe(2);
+    expect(sentence(await call(client, "hosts", { brief: true }))).toBe("The fleet manifest lists 3 hosts: test-node (laptop), other (server), phone (phone).");
+    expect(sentence(await call(client, "projects", { brief: true }))).toBe("1 project, 1 active: Demo.");
+    expect(sentence(await call(client, "todo", { brief: true }))).toBe("1 handoff entry in 1 section; the newest, from 2026-10-07, says: Demo thing");
+    expect(sentence(await call(client, "todo", { brief: true, query: "nothing-like-this" }))).toContain("no entries");
+    expect(sentence(await call(client, "handoff", { brief: true }))).toBe("1 agent note: cc on test-node.");
+    expect(sentence(await call(client, "sessions", { brief: true }))).toMatch(/^1 session; the newest is (Claude Code|Codex) on /);
+    const repos = await call(client, "repos", { brief: true });
+    expect(sentence(repos)).toBe("test-node has 2 repos at risk, such as lonely, Livedemo.");
+    expect((repos.structuredContent as any).total).toBe(2);
+    expect(sentence(await call(client, "repos_detail", { repo: "Livedemo", brief: true }))).toContain("Livedemo");
+    expect(sentence(await call(client, "sessions_search", { query: "zzz-none", brief: true }))).toContain("No cc or cx sessions match");
+    const services = await call(client, "services", { probe: true, brief: true });
+    expect(sentence(services)).toContain("3 services checked, 1 down: web-api on other.");
+    expect((services.structuredContent as any).down).toEqual(["web-api on other"]);
+    expect(sentence(await call(client, "collab_tasks", { brief: true }))).toContain("collab task");
+    expect(sentence(await call(client, "scan", { brief: true }))).toMatch(/^(Rescan started on test-node|test-node is already scanning)/);
+    await client.close();
+  });
+
+  test("full answers still carry the data, with the sentence first", async () => {
+    const client = await connect(srv.base);
+    const status = parsed(await call(client, "status"));
+    expect(Object.keys(status)[0]).toBe("brief");
+    expect(status.node.nodeName).toBe("test-node");
+    expect(parsed(await call(client, "hosts")).length).toBe(3);
+    const services = parsed(await call(client, "services"));
+    expect(services.brief).toContain("1 down");
+    expect(services.rows.length).toBe(3);
+    await client.close();
+  });
+
+  test("write tools say what they did", async () => {
+    const client = await connect(srv.base);
+    expect(sentence(await call(client, "todo_add", { text: "**Brief** check", brief: true }))).toBe("Added to the handoff list under Open: Brief check");
+    expect(sentence(await call(client, "todo_done", { match: "Demo", brief: true }))).toBe("Removed from the handoff list: 2026-10-07 Demo thing");
+    expect(sentence(await call(client, "handoff_note", { host: "other", text: "checked", brief: true }))).toBe("Recorded on other's handoff note (handoff/other-seed.md).");
+    expect(sentence(await call(client, "note", { text: "hello **there**", brief: true }))).toBe("Noted in the inbox: hello there");
+    const logs = await call(client, "service_logs", { host: "test-node", name: "x", lines: 5, brief: true });
+    expect(sentence(logs)).toMatch(/^(The last 5 lines of x on test-node end with: |x on test-node has no log lines\.|Could not read the log of x on test-node)/);
     await client.close();
   });
 });

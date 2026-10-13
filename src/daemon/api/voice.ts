@@ -98,6 +98,19 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
     }
   });
 
+  // The companion's system prompt against the fleet persona; POST writes it. Node token only.
+  app.get("/api/voice/prompt", async (c) => {
+    if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);
+    try { return c.json(await bridge.prompt(false)); } catch (e) { return c.json(errorBody(e), errorStatus(e)); }
+  });
+  app.post("/api/voice/prompt", async (c) => {
+    if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);
+    try { return c.json(await bridge.prompt(true)); } catch (e) {
+      console.error("voice: prompt failed:", e instanceof Error ? e.message : e);
+      return c.json(errorBody(e), errorStatus(e));
+    }
+  });
+
   // Registers this daemon's MCP server with the agents server and picks (or creates) the agent.
   app.post("/api/voice/setup", async (c) => {
     if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);

@@ -53,7 +53,11 @@ MCP server, and grants it to the voice agent; see `docs/VOICE.md`).
 | `note` | append a dated line to `notes/inbox.md` | yes (Deck repo) |
 | `scan` | rescan this node's roots now | no (indexer) |
 
-Every result is JSON text plus the same object as `structuredContent`. On a node without a
+Every result is JSON text plus the same object as `structuredContent`. Object results start with
+a `brief` sentence a voice agent can read as-is. **Every tool also takes `brief: true`** (voice
+mode): the text is then just that one spoken sentence (what was found, the counts, the names that
+matter) and `structuredContent` carries the sentence plus the key numbers, so a call on a live
+call costs one short turn instead of a page of JSON. On a node without a
 Deck checkout (`fleetDir` unset: the Linux servers today) the deck-backed tools answer with a
 clear error and `status`, `repos`, `scan` still work.
 
