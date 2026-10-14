@@ -55,7 +55,7 @@ export function glanceBadge(g: Glance, tab: GlanceTab): { n: number; tone: "bad"
 export function glanceAsk(g: Glance, tab: GlanceTab): string {
   if (tab === "fleet") {
     const down = g.hosts.rows.filter((h) => h.online === false).map((h) => h.name);
-    return down.length ? `Why is ${down.join(" and ")} down?` : "How is the fleet doing?";
+    return down.length ? `Why ${down.length > 1 ? "are" : "is"} ${down.join(" and ")} down?` : "How is the fleet doing?";
   }
   if (tab === "services") {
     const d = g.services?.down ?? [];

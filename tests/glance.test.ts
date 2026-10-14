@@ -38,6 +38,7 @@ describe("glance", () => {
     const g = glance(overview({ status: null }), [{ name: "Yacht", online: true }, { name: "iris", online: false }]);
     expect(g.hosts.rows.map((h) => [h.name, h.online])).toEqual([["iris", false], ["Yacht", true]]);
     expect(glanceAsk(g, "fleet")).toBe("Why is iris down?");
+    expect(glanceAsk(glance(overview({ status: null }), [{ name: "iris", online: false }, { name: "starlight", online: false }]), "fleet")).toBe("Why are iris and starlight down?");
   });
 
   test("services: down and unknown rows split out, up counted", () => {
