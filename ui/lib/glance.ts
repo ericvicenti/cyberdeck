@@ -22,7 +22,9 @@ export type NodeSeen = { name: string; online: boolean };
 
 export function glance(ov: Overview, nodes: NodeSeen[] = []): Glance {
   const seen = new Map(nodes.map((n) => [n.name.toLowerCase(), n.online]));
-  const hostRows = (ov.status?.hosts ?? []).map((h) => (h.online == null && seen.has(h.name.toLowerCase()) ? { ...h, online: seen.get(h.name.toLowerCase())! } : h)).sort((a, b) => hostRank(a) - hostRank(b) || a.name.localeCompare(b.name));
+  // No manifest status (the fleet CLI timed out): the paired nodes are still a fleet.
+  const manifest = ov.status?.hosts ?? nodes.map((n): HostStatus => ({ name: n.name, kind: "cyberdeck", os: "node", roles: [], online: n.online, cyberdeck: null }));
+  const hostRows = manifest.map((h) => (h.online == null && seen.has(h.name.toLowerCase()) ? { ...h, online: seen.get(h.name.toLowerCase())! } : h)).sort((a, b) => hostRank(a) - hostRank(b) || a.name.localeCompare(b.name));
   const rows = ov.services?.rows ?? [];
   const tasks = ov.collab?.tasks ?? [];
   const live = tasks.filter((t) => ACTIVE.has(t.status) || t.status === "open").sort((a, b) => taskRank(a) - taskRank(b));

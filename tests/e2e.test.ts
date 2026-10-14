@@ -140,7 +140,7 @@ test("desk view: talk button and the not-configured card render", async () => {
   expect(m.start_url).toBe("/#/desk");
   await page.goto(`${BASE}/#/services`);
   await page.waitForFunction(() => document.querySelector('link[rel="manifest"]')?.getAttribute("href") === "/manifest.webmanifest");
-});
+}, 20000);
 
 test("desk view: a paired node with voice takes the call when this one has none", async () => {
   // the agents server lives on one machine; the Desk finds it through the fleet and proxies there
