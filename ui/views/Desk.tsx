@@ -8,7 +8,7 @@ import { api, post, navigate, ApiError } from "../lib/api";
 import { useVoice, voiceApi, micAllowedHere, type TranscriptLine, type AgentState, type VoicePhase } from "../lib/voice";
 import { MicIcon } from "../lib/icons";
 import { type Overview, isoAgo } from "../lib/control";
-import { glance, glanceAsk, glanceBadge, GLANCE_TABS, type GlanceTab } from "../lib/glance";
+import { glance, glanceAsk, glanceBadge, GLANCE_TABS, type GlanceTab, type NodeSeen } from "../lib/glance";
 
 type VoiceStatus = {
   configured: boolean;
@@ -279,13 +279,17 @@ const BADGE_TONE = { bad: "neon-red", warn: "neon-amber", ok: "text-zinc-500" } 
 function GlancePanel({ onLocked }: { onLocked: () => void }) {
   const [tab, setTab] = useState<GlanceTab>(() => (localStorage.getItem("cyberdeck-desk-glance") as GlanceTab | null) ?? "fleet");
   const [ov, setOv] = useState<Overview | null>(null);
+  const [nodes, setNodes] = useState<NodeSeen[]>([]);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
     const load = async () => {
       try {
-        const o = await api<Overview>("/api/control/overview");
-        if (alive) { setOv(o); setErr(null); }
+        const [o, n] = await Promise.all([
+          api<Overview>("/api/control/overview"),
+          api<{ self: { name: string }; nodes: NodeSeen[] }>("/api/fleet/nodes").catch(() => null),
+        ]);
+        if (alive) { setOv(o); setNodes(n ? [{ name: n.self.name, online: true }, ...n.nodes] : []); setErr(null); }
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) onLocked();
         else if (alive) setErr(e instanceof ApiError && e.status === 404 ? "No fleet dir on this node." : String(e instanceof Error ? e.message : e));
@@ -296,7 +300,7 @@ function GlancePanel({ onLocked }: { onLocked: () => void }) {
     return () => { alive = false; clearInterval(iv); };
   }, []);
   const pick = (t: GlanceTab) => { setTab(t); localStorage.setItem("cyberdeck-desk-glance", t); };
-  const g = ov ? glance(ov) : null;
+  const g = ov ? glance(ov, nodes) : null;
   const go = (view: string, params: Record<string, string> = {}) => () => navigate(view, params);
   const row = "flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-[12px] hover:bg-zinc-800/60";
 

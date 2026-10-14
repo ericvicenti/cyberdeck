@@ -17,8 +17,12 @@ const ACTIVE = new Set(["running", "review", "blocked"]);
 const hostRank = (h: HostStatus) => (h.online === false ? 0 : h.online == null ? 1 : 2);
 const taskRank = (t: Task) => (t.status === "running" ? 0 : t.status === "review" ? 1 : t.status === "blocked" ? 2 : 3);
 
-export function glance(ov: Overview): Glance {
-  const hostRows = [...(ov.status?.hosts ?? [])].sort((a, b) => hostRank(a) - hostRank(b) || a.name.localeCompare(b.name));
+/** Paired Cyberdeck nodes (GET /api/fleet/nodes): they settle hosts the manifest leaves unknown. */
+export type NodeSeen = { name: string; online: boolean };
+
+export function glance(ov: Overview, nodes: NodeSeen[] = []): Glance {
+  const seen = new Map(nodes.map((n) => [n.name.toLowerCase(), n.online]));
+  const hostRows = (ov.status?.hosts ?? []).map((h) => (h.online == null && seen.has(h.name.toLowerCase()) ? { ...h, online: seen.get(h.name.toLowerCase())! } : h)).sort((a, b) => hostRank(a) - hostRank(b) || a.name.localeCompare(b.name));
   const rows = ov.services?.rows ?? [];
   const tasks = ov.collab?.tasks ?? [];
   const live = tasks.filter((t) => ACTIVE.has(t.status) || t.status === "open").sort((a, b) => taskRank(a) - taskRank(b));

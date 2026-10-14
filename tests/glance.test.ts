@@ -28,6 +28,12 @@ describe("glance", () => {
     expect(g.handoffOpen).toBe(3);
   });
 
+  test("paired nodes settle hosts the manifest leaves unknown, never override it", () => {
+    const g = glance(overview(), [{ name: "Botical", online: true }, { name: "starlight", online: true }]);
+    expect(g.hosts).toMatchObject({ up: 3, down: 1, unknown: 0 });
+    expect(g.hosts.rows.find((h) => h.name === "starlight")?.online).toBe(false);
+  });
+
   test("services: down and unknown rows split out, up counted", () => {
     const s = glance(overview()).services!;
     expect(s.up).toBe(1);
