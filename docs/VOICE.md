@@ -216,6 +216,15 @@ other page advertises `/manifest.webmanifest` (Cyberdeck). The Home page's pairi
 Scan it, sign in (on the tailnet the Tailscale identity is enough), then Share → Add to Home Screen.
 There is no service worker on purpose: the UI must never be served stale after a fleet deploy.
 
+## Fleet / Services / Agents glance
+
+Under the TALK button the Desk shows the same overview the agent reads through its MCP tools
+(`GET /api/control/overview`, allowed for the Casework pairing key; refreshed every 60 s), in three tabs
+that mirror the iPad screen's Fleet and Agents tabs: hosts (down first), services that are down or unknown,
+and live collab tasks plus recent runs. Each tab's chip counts what needs a look, rows open the full view,
+and a "try asking" line suggests the question to put to the agent (`ui/lib/glance.ts`, tests
+`tests/glance.test.ts`). A node without a fleet dir says so instead.
+
 ## Not done
 
 - **Voice profile editing**: Cyberdeck applies the profile but has no UI or route to change it; the
