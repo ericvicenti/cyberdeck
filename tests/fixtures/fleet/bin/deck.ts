@@ -8,7 +8,7 @@ const out: Record<string, unknown> = {
     { name: "other", kind: "server", os: "linux", ssh: "other-alias", ts: null, roles: [], services: [{ name: "web-api", type: "systemd" }, { name: "db", type: "docker" }], online: null },
     { name: "phone", kind: "phone", os: "ios", ssh: null, ts: null, roles: [], services: [{ name: "app", type: "launchd" }], online: null },
   ],
-  todo: { sections: [{ title: "Open", entries: [{ date: "2026-10-07", text: "**Demo** thing" }] }] },
+  todo: { sections: [{ title: "Open", entries: [{ date: "2026-10-07", text: "**Demo** thing" }] }, { title: "Later", entries: [{ date: "2026-09-15", text: "Old [thing](x) nobody did" }] }] },
   handoff: [{ file: "test-node-cc.md", host: "test-node", agent: "cc", text: "hi" }],
   sessions: [{ host: "test-node", tool: "cc", id: "abc", title: "t", cwd: "/tmp", started: "2026-10-07T00:00:00Z", updated: "2026-10-07T00:00:00Z", file: "/tmp/abc.jsonl" }],
   "collab list": [{ id: "t1", title: "Task", project: "demo", host: "test-node", worker: "cx", reviewer: "cc", status: "open", created: "2026-10-07", body: "" }],
