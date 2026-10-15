@@ -225,6 +225,34 @@ and live collab tasks plus recent runs. Each tab's chip counts what needs a look
 and a "try asking" line suggests the question to put to the agent (`ui/lib/glance.ts`, tests
 `tests/glance.test.ts`). A node without a fleet dir says so instead.
 
+## Hands-free and push-to-talk
+
+The TALK button has two modes, picked with the small switch under it and remembered per browser
+(`cyberdeck-voice-mode` in localStorage; the planner is `ui/lib/talk.ts`, tests `tests/talk.test.ts`):
+
+- **hands-free** (the default): tap TALK to call, the mic stays open, tap END to hang up; a mute chip
+  closes the mic for a while.
+- **push to talk**: tap TALK to place the call; the mic is published but muted, and the button reads HOLD.
+  Hold it (or hold the space bar when a keyboard is attached, outside text fields) to open the mic, let go
+  to close it again; the ring is dashed green while the mic is closed and breathes green while it is open.
+  "end call" moves to a chip so the big button can be held. Switching modes mid-call takes effect at once.
+
+The iPad Talk tab (`casework/cyberdeck.tsx`) has the same two modes over the app's native call actions
+(`voice.start`, then `call.mute` on press-in / press-out), and its tab row doubles as the status bar: the
+Talk tab reads "TALK · LISTENING / THINKING / SPEAKING / MUTED / CONNECTING" with a matching LED from
+whatever tab is open, so a glance at the top of the screen says what the agent is doing.
+
+## The web Casework client is this Desk
+
+Decided 2026-10-15: the browser version of the Casework Desk is Cyberdeck's `#/desk`, not a web build of
+the Expo app. The Desk already does everything the iPad Talk tab does (LiveKit in the browser through
+`livekit-client`, the agent state, the transcript from the real session, mute, modes, new session), plus the
+Fleet / Services / Agents glance, installs as a PWA, and runs on any node of the fleet (a node without a
+voice bridge proxies to one that has it). The iPad app itself shows the whole web deck in its Deck tab, so
+both clients render the same UI from the same daemon; a second web client made of `.web.ts` shims in
+`remote-control` would duplicate the voice stack (react-native-webrtc has no browser twin) and the pairing
+flow for no new capability. The Expo app stays iOS only; `remote-control/README.md` points browsers here.
+
 ## Not done
 
 - **Voice profile editing**: Cyberdeck applies the profile but has no UI or route to change it; the

@@ -126,6 +126,17 @@ test("desk view: talk button and the not-configured card render", async () => {
   // nothing to talk to: the button is inert and the state label says so
   expect(await page.isDisabled('[data-testid="talk-button"]')).toBe(true);
   expect(await page.textContent('[data-testid="voice-state"]')).toContain("tap to talk");
+  // talk modes: hands-free is the default; push to talk is remembered across reloads and changes the state line
+  expect(await page.getAttribute('[data-testid="voice-mode-hands-free"]', "aria-pressed")).toBe("true");
+  expect(await page.getAttribute('[data-testid="talk-button"]', "data-mode")).toBe("hands-free");
+  await page.click('[data-testid="voice-mode-push-to-talk"]');
+  expect(await page.getAttribute('[data-testid="voice-mode-push-to-talk"]', "aria-pressed")).toBe("true");
+  expect(await page.textContent('[data-testid="voice-state"]')).toContain("hold to talk");
+  await page.reload();
+  await page.waitForSelector('[data-testid="talk-button"][data-mode="push-to-talk"]');
+  expect(await page.evaluate(() => localStorage.getItem("cyberdeck-voice-mode"))).toBe("push-to-talk");
+  await page.click('[data-testid="voice-mode-hands-free"]');
+  expect(await page.textContent('[data-testid="voice-state"]')).toContain("tap to talk");
   expect(await page.textContent('[data-testid="voice-status"]')).toContain("e2e-node");
   expect(await page.textContent('[data-testid="voice-transcript"]')).toContain("transcript");
   // the Fleet / Services / Agents glance sits under the TALK button; this node has no fleet dir and says so

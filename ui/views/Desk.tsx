@@ -5,7 +5,8 @@
 // not configured, the card explains why and offers the one-time setup.
 import { useEffect, useRef, useState } from "react";
 import { api, post, navigate, ApiError } from "../lib/api";
-import { useVoice, voiceApi, micAllowedHere, type TranscriptLine, type AgentState, type VoicePhase } from "../lib/voice";
+import { useVoice, voiceApi, micAllowedHere, type TranscriptLine } from "../lib/voice";
+import { talkFace, isTalkKey, TALK_MODES } from "../lib/talk";
 import { MicIcon } from "../lib/icons";
 import { type Overview, isoAgo } from "../lib/control";
 import { glance, glanceAsk, glanceBadge, GLANCE_TABS, type GlanceTab, type NodeSeen } from "../lib/glance";
@@ -38,26 +39,6 @@ function healthOf(h: unknown): { ok: boolean | null; label: string } {
   }
   return { ok: null, label: String(h) };
 }
-
-function stateLabel(phase: VoicePhase, agent: AgentState, muted: boolean): { text: string; tone: string } {
-  if (phase === "error") return { text: "failed · tap to retry", tone: "neon-red" };
-  if (phase === "connecting") return { text: "connecting", tone: "neon-amber" };
-  if (phase === "ending") return { text: "hanging up", tone: "text-zinc-500" };
-  if (phase === "idle") return { text: "tap to talk", tone: "text-zinc-500" };
-  if (muted) return { text: "muted", tone: "neon-amber" };
-  if (agent === "speaking") return { text: "speaking", tone: "neon" };
-  if (agent === "thinking") return { text: "thinking", tone: "neon-magenta" };
-  if (agent === "listening") return { text: "listening", tone: "neon-green" };
-  return { text: "waiting for the agent", tone: "text-zinc-400" };
-}
-
-const ringClass = (phase: VoicePhase, agent: AgentState): string => {
-  if (phase === "connecting") return "talk-connecting";
-  if (phase === "ending") return "talk-ending";
-  if (phase === "error") return "talk-error";
-  if (phase !== "live") return "";
-  return agent === "speaking" ? "talk-speaking" : agent === "thinking" ? "talk-thinking" : "talk-listening";
-};
 
 export function Desk({ onLocked }: { onLocked: () => void }) {
   const v = useVoice({ onLocked });
@@ -154,12 +135,32 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
 
   const configured = v.config?.configured === true;
   const live = v.phase === "live";
-  const label = stateLabel(v.phase, v.agentState, v.muted);
+  const face = talkFace(v.mode, v.phase, v.agentState, v.muted, v.held);
   const canTalk = configured && v.phase !== "ending" && micAllowedHere();
   const health = healthOf(status?.health);
   const agentName = status?.agent?.name ?? status?.agent?.id ?? v.config?.agentId;
   const sessionId = status?.sessionId ?? v.config?.sessionId;
   const glow = live ? 14 + v.level * 70 : 0;
+  // Push-to-talk from a keyboard: hold the space bar (outside text fields) to open the mic.
+  useEffect(() => {
+    if (!face.holdTalks) return;
+    const down = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (!isTalkKey(e.key, e.repeat, t?.tagName, !!t?.isContentEditable)) return;
+      e.preventDefault();
+      v.hold(true);
+    };
+    const up = (e: KeyboardEvent) => {
+      if (!isTalkKey(e.key, false, undefined, false)) return;
+      e.preventDefault();
+      v.hold(false);
+    };
+    const blur = () => v.hold(false);
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); window.removeEventListener("blur", blur); v.hold(false); };
+  }, [face.holdTalks, v.hold]);
   const glowColor = v.agentState === "speaking" ? "rgba(34,211,238,0.55)" : v.agentState === "thinking" ? "rgba(232,121,249,0.5)" : "rgba(163,230,53,0.55)";
 
   return (
@@ -197,21 +198,28 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
 
           <section className="hud-card flex flex-col items-center gap-4 px-4 py-8">
             <button
-              onClick={v.toggle}
+              onClick={face.tapToggles ? v.toggle : undefined}
+              onPointerDown={face.holdTalks ? (e) => { e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); v.hold(true); } : undefined}
+              onPointerUp={face.holdTalks ? () => v.hold(false) : undefined}
+              onPointerCancel={face.holdTalks ? () => v.hold(false) : undefined}
+              onLostPointerCapture={face.holdTalks ? () => v.hold(false) : undefined}
+              onContextMenu={face.holdTalks ? (e) => e.preventDefault() : undefined}
               disabled={!canTalk}
               data-testid="talk-button"
               data-phase={v.phase}
               data-agent-state={v.agentState}
-              aria-pressed={live || v.phase === "connecting"}
-              aria-label={live || v.phase === "connecting" ? "End call" : "Start call"}
-              className={`talk-btn ${ringClass(v.phase, v.agentState)}`}
+              data-mode={v.mode}
+              data-held={v.held || undefined}
+              aria-pressed={face.holdTalks ? v.held : live || v.phase === "connecting"}
+              aria-label={face.holdTalks ? "Hold to talk" : live || v.phase === "connecting" ? "End call" : "Start call"}
+              className={`talk-btn ${face.ring}`}
               style={glow ? { boxShadow: `0 0 ${glow}px ${glowColor}, inset 0 0 ${glow / 2}px ${glowColor}` } : undefined}
             >
-              {live || v.phase === "connecting" ? "end" : "talk"}
+              {face.button}
             </button>
-            <div className={`flex items-center gap-2 text-[12px] uppercase tracking-[0.2em] ${label.tone}`} data-testid="voice-state">
-              <span className={`led ${v.phase === "live" ? (v.agentState === "thinking" ? "led-run" : "led-on") : v.phase === "connecting" ? "led-warn" : v.phase === "error" ? "led-err" : "led-off"}`} />
-              {label.text}
+            <div className={`flex items-center gap-2 text-[12px] uppercase tracking-[0.2em] ${face.tone}`} data-testid="voice-state">
+              <span className={`led ${v.phase === "live" ? (v.agentState === "thinking" ? "led-run" : v.muted ? "led-warn" : "led-on") : v.phase === "connecting" ? "led-warn" : v.phase === "error" ? "led-err" : "led-off"}`} />
+              {face.state}
             </div>
             {live && (
               <div className="h-1 w-40 overflow-hidden rounded-sm bg-zinc-800" aria-hidden>
@@ -219,12 +227,20 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
               </div>
             )}
             <div className="flex flex-wrap items-center justify-center gap-2">
-              {live && (
+              {face.muteChip && (
                 <button onClick={v.toggleMute} data-testid="voice-mute" className={`hud-chip ${v.muted ? "neon-amber" : "text-zinc-300"} hover:text-zinc-100`}>
                   <MicIcon size={12} className={v.muted ? "opacity-50" : ""} />
                   {v.muted ? "unmute" : "mute"}
                 </button>
               )}
+              {face.endChip && (
+                <button onClick={v.stop} data-testid="voice-end" className="hud-chip neon-red hover:text-zinc-100">end call</button>
+              )}
+              <div className="flex items-center gap-0.5 rounded-md border border-zinc-800 p-0.5" role="group" aria-label="Talk mode" data-testid="voice-mode" title="hands-free keeps the mic open for the whole call; push to talk opens it only while TALK (or the space bar) is held">
+                {TALK_MODES.map(([key, name]) => (
+                  <button key={key} onClick={() => v.setMode(key)} aria-pressed={v.mode === key} data-testid={`voice-mode-${key}`} className={`rounded px-2 py-0.5 text-[10px] uppercase tracking-wider ${v.mode === key ? "bg-zinc-800 neon" : "text-zinc-500 hover:text-zinc-300"}`}>{name}</button>
+                ))}
+              </div>
               {!live && v.phase !== "connecting" && (
                 <label className="hud-chip cursor-pointer text-zinc-400 hover:text-zinc-200" title="Send a 'Hi' on join so the agent speaks first">
                   <input type="checkbox" checked={v.greet} onChange={(e) => v.setGreet(e.target.checked)} className="h-3 w-3 accent-cyan-400" data-testid="voice-greet" />
