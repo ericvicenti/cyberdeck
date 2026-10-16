@@ -31,7 +31,8 @@ function Stat({ label, value, color = C.text }: { label: string; value: string |
 const ago = (iso?: string) => { if (!iso) return ''; const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000); return s < 90 ? `${s | 0}s` : s < 5400 ? `${(s / 60) | 0}m` : s < 172800 ? `${(s / 3600) | 0}h` : `${(s / 86400) | 0}d`; };
 
 export default function Cyberdeck() {
-  const { connection, status } = useRuntime();
+  const { connection, status, call } = useRuntime();
+  const callState = talkState(call);
   const [tab, setTab] = useState<'deck' | 'apps' | 'talk' | 'fleet' | 'agents' | 'sessions' | 'run'>('deck');
   // The web deck's current route, kept here so the inline and the full-screen WebView open on the same page.
   const [route, setRoute] = useState('#/');
@@ -63,7 +64,7 @@ export default function Cyberdeck() {
       <View style={{ flex: 1 }} />
       <Button label={busy ? 'syncing' : 'refresh'} onPress={() => void refresh()} disabled={busy} />
     </View>
-    <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>{tabs.map(([key, label]) => <Pressable key={key} onPress={() => setTab(key)} style={{ paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: tab === key ? '#102a33' : 'transparent', borderWidth: 1, borderColor: tab === key ? C.cyan : C.line }}><Text style={{ color: tab === key ? C.cyan : C.dim, fontSize: 12, letterSpacing: 1, fontWeight: '700' }}>{label.toUpperCase()}</Text></Pressable>)}</View>
+    <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>{tabs.map(([key, label]) => <Pressable key={key} accessibilityRole="tab" accessibilityState={{ selected: tab === key }} accessibilityLabel={key === 'talk' && callState ? `Talk, ${callState.label}` : label} onPress={() => setTab(key)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: tab === key ? '#102a33' : 'transparent', borderWidth: 1, borderColor: key === 'talk' && callState ? callState.color : tab === key ? C.cyan : C.line }}>{key === 'talk' && callState ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: callState.color }} /> : null}<Text style={{ color: key === 'talk' && callState ? callState.color : tab === key ? C.cyan : C.dim, fontSize: 12, letterSpacing: 1, fontWeight: '700' }}>{label.toUpperCase()}{key === 'talk' && callState ? ` · ${callState.label.toUpperCase()}` : ''}</Text></Pressable>)}</View>
     {error && (tab === 'fleet' || tab === 'agents') ? <Text style={{ color: C.red }}>{error}</Text> : null}
     {tab === 'deck' ? <DeckTab route={route} setRoute={setRoute} /> : null}
     {tab === 'apps' ? <AppsTab json={json} openWeb={(next) => { setRoute(next); setTab('deck'); }} /> : null}
@@ -151,6 +152,19 @@ function AppsTab({ json, openWeb }: { json: <T,>(p: string, i?: RequestInit) => 
 // (text + speaker identity: the local speaker is the identity the daemon minted, the
 // agent is everyone else). The app also sends "Hi" on lk.chat on join, so the agent greets.
 type TalkLine = { id: number; who: 'me' | 'agent'; text: string };
+type TalkMode = 'hands-free' | 'push-to-talk';
+type CallLike = { status: string; muted?: boolean; agentState?: string; error?: string };
+/** The call's one-word state for the tab row (null when there is no call): listening / thinking / speaking / muted / connecting. */
+function talkState(call: CallLike | undefined): { label: string; color: string } | null {
+  if (!call) return null;
+  if (call.status === 'connecting' || call.status === 'reconnecting') return { label: 'connecting', color: C.amber };
+  if (call.status !== 'connected') return null;
+  const agent = call.agentState?.toLowerCase();
+  if (agent === 'speaking') return { label: 'speaking', color: C.cyan };
+  if (agent === 'thinking') return { label: 'thinking', color: C.magenta };
+  if (call.muted) return { label: 'muted', color: C.amber };
+  return { label: 'listening', color: C.green };
+}
 type VoiceConfig = { configured: boolean; provider?: string; reason?: string; agentId?: string; sessionId?: string };
 type VoiceStatus = { configured: boolean; reason?: string; agent?: { id: string; name?: string }; sessionId?: string; health?: unknown };
 const healthOk = (h: unknown): boolean | null => h == null ? null : typeof h === 'boolean' ? h : typeof h === 'string' ? /^(ok|up|healthy|ready)$/i.test(h) : typeof h === 'object' ? (typeof (h as any).ok === 'boolean' ? (h as any).ok : typeof (h as any).status === 'string' ? /^(ok|up|healthy|ready)$/i.test((h as any).status) : (h as any).error ? false : null) : null;
@@ -163,6 +177,9 @@ function TalkTab({ json }: { json: <T,>(p: string, i?: RequestInit) => Promise<T
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
+  // hands-free keeps the mic open; push-to-talk mutes it after the call is up and opens it only while TALK is held.
+  const [mode, setMode] = useState<TalkMode>('hands-free');
+  const [held, setHeld] = useState(false);
   const toggling = useRef(false);
   const seen = useRef<object | undefined>(undefined);
   const nextId = useRef(1);
@@ -197,9 +214,22 @@ function TalkTab({ json }: { json: <T,>(p: string, i?: RequestInit) => Promise<T
   async function toggle() {
     if (toggling.current) return;
     toggling.current = true; setBusy(true); setError('');
-    try { await run({ name: active ? 'call.stop' : 'voice.start' }); }
+    try {
+      await run({ name: active ? 'call.stop' : 'voice.start' });
+      if (!active && mode === 'push-to-talk') await run({ name: 'call.mute', args: { muted: true } });
+    }
     catch (cause) { setError(String(cause)); }
-    finally { toggling.current = false; setBusy(false); }
+    finally { toggling.current = false; setHeld(false); setBusy(false); }
+  }
+  async function hold(on: boolean) {
+    if (!active || mode !== 'push-to-talk') return;
+    setHeld(on);
+    try { await run({ name: 'call.mute', args: { muted: !on } }); } catch (cause) { setError(String(cause)); }
+  }
+  async function switchMode(next: TalkMode) {
+    setMode(next); setHeld(false);
+    // Mid-call the switch takes effect at once: hands-free opens the mic, push-to-talk closes it until held.
+    if (active) await run({ name: 'call.mute', args: { muted: next === 'push-to-talk' } }).catch((cause) => setError(String(cause)));
   }
   async function resetSession() {
     if (active) await run({ name: 'call.stop' }).catch(() => {});
@@ -210,9 +240,12 @@ function TalkTab({ json }: { json: <T,>(p: string, i?: RequestInit) => Promise<T
   }
 
   const agentState = call.agentState?.toLowerCase();
+  const ptt = mode === 'push-to-talk';
+  const holding = ptt && active && !connecting;
   const phase = call.error || error ? 'error' : !active ? 'idle' : connecting ? 'connecting' : call.muted ? 'muted' : agentState === 'speaking' ? 'speaking' : agentState === 'thinking' ? 'thinking' : 'listening';
-  const color = { idle: C.dim, connecting: C.amber, muted: C.amber, listening: C.green, thinking: C.magenta, speaking: C.cyan, error: C.red }[phase];
-  const label = { idle: 'tap to talk', connecting: 'connecting', muted: 'muted', listening: 'listening', thinking: 'thinking', speaking: 'speaking', error: call.error || error }[phase];
+  const color = { idle: C.dim, connecting: C.amber, muted: holding ? C.green : C.amber, listening: C.green, thinking: C.magenta, speaking: C.cyan, error: C.red }[phase];
+  const label = { idle: ptt ? 'tap to call · then hold to talk' : 'tap to talk', connecting: 'connecting', muted: holding ? 'hold to talk' : 'muted', listening: holding ? 'listening · let go when done' : 'listening', thinking: 'thinking', speaking: 'speaking', error: call.error || error }[phase];
+  const face = active ? (holding ? (held ? 'TALKING' : 'HOLD') : 'END') : 'TALK';
   const configured = config?.configured === true;
   const agentName = vstatus?.agent?.name ?? vstatus?.agent?.id ?? config?.agentId;
   const sessionId = vstatus?.sessionId ?? config?.sessionId;
@@ -231,13 +264,20 @@ function TalkTab({ json }: { json: <T,>(p: string, i?: RequestInit) => Promise<T
     </View> : null}
 
     <View style={{ ...panel, alignItems: 'center', paddingVertical: 28, gap: 16 }}>
-      <Pressable accessibilityRole="button" accessibilityLabel={active ? 'End call' : 'Start call'} disabled={busy || (!active && (status !== 'connected' || !configured))} onPress={() => void toggle()}
-        style={{ width: 200, height: 200, borderRadius: 100, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0e1119', borderWidth: active ? 3 : 2, borderColor: color, opacity: busy || (!active && (status !== 'connected' || !configured)) ? 0.45 : 1, shadowColor: color, shadowOpacity: active ? 0.55 : 0, shadowRadius: phase === 'speaking' ? 34 : 20 }}>
+      <Pressable accessibilityRole="button" accessibilityLabel={holding ? 'Hold to talk' : active ? 'End call' : 'Start call'} disabled={busy || (!active && (status !== 'connected' || !configured))}
+        onPress={holding ? undefined : () => void toggle()} onPressIn={holding ? () => void hold(true) : undefined} onPressOut={holding ? () => void hold(false) : undefined} delayLongPress={100000}
+        style={{ width: 200, height: 200, borderRadius: 100, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0e1119', borderWidth: active ? 3 : 2, borderStyle: holding && !held ? 'dashed' : 'solid', borderColor: color, opacity: busy || (!active && (status !== 'connected' || !configured)) ? 0.45 : 1, shadowColor: color, shadowOpacity: active && (!holding || held) ? 0.55 : 0, shadowRadius: phase === 'speaking' ? 34 : 20 }}>
         <View style={{ width: size, height: size, borderRadius: size / 2, borderWidth: 1, borderColor: color, opacity: active ? 0.5 : 0.15, position: 'absolute' }} />
-        <Text style={{ color, fontSize: 26, fontWeight: '700', letterSpacing: 6, fontFamily: 'Menlo' }}>{active ? 'END' : 'TALK'}</Text>
+        <Text style={{ color, fontSize: 26, fontWeight: '700', letterSpacing: 6, fontFamily: 'Menlo' }}>{face}</Text>
       </Pressable>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><Led on={phase === 'error' ? false : active ? true : null} warn={phase === 'connecting' || phase === 'muted'} /><Text style={{ color, fontSize: 12, letterSpacing: 2, fontWeight: '700' }}>{String(label).toUpperCase()}</Text></View>
-      {active ? <Button label={call.muted ? 'unmute' : 'mute'} color={call.muted ? C.amber : C.cyan} onPress={() => void run({ name: 'call.mute', args: { muted: !call.muted } }).catch((cause) => setError(String(cause)))} /> : null}
+      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center' }}>
+        {active && !ptt ? <Button label={call.muted ? 'unmute' : 'mute'} color={call.muted ? C.amber : C.cyan} onPress={() => void run({ name: 'call.mute', args: { muted: !call.muted } }).catch((cause) => setError(String(cause)))} /> : null}
+        {holding ? <Button label="end call" color={C.red} onPress={() => void toggle()} /> : null}
+        <View style={{ flexDirection: 'row', borderWidth: 1, borderColor: C.line, borderRadius: 8, padding: 2 }}>
+          {(['hands-free', 'push-to-talk'] as TalkMode[]).map((m) => <Pressable key={m} accessibilityRole="button" accessibilityState={{ selected: mode === m }} onPress={() => void switchMode(m)} style={{ paddingVertical: 6, paddingHorizontal: 10, borderRadius: 6, backgroundColor: mode === m ? '#102a33' : 'transparent' }}><Text style={{ color: mode === m ? C.cyan : C.dim, fontSize: 10, letterSpacing: 1, fontWeight: '700' }}>{m === 'hands-free' ? 'HANDS-FREE' : 'PUSH TO TALK'}</Text></Pressable>)}
+        </View>
+      </View>
     </View>
 
     <View style={panel}>

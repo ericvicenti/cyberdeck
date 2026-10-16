@@ -53,6 +53,11 @@ export interface CyberdeckConfig {
   backup?: { targets: string[] };
   /** Seed agents bridge (voice): which agents server to sign into and as whom. See docs/VOICE.md. */
   seed?: Partial<SeedConfig>;
+  /** Voice is centralized: `hub` names the paired node that runs the voice system (LiveKit and the voice-capable
+   *  agents server), and every `/api/voice/*` route of this node relays there. Naming this node means "answer
+   *  here"; unset means this node's own bridge, else the first paired node that has one. Env CYBERDECK_VOICE_HUB
+   *  overrides. See docs/VOICE.md, "The voice hub". */
+  voice?: { hub?: string };
   /** The MCP server (docs/AGENTS.md). `nodeTools: false` withholds the shell / file / deck_context tools
    *  that give a Seed agent the same reach on this machine as cc and cx have (default on). */
   mcp?: { nodeTools?: boolean };
@@ -77,6 +82,11 @@ export interface SeedConfig {
   keyFile: string;
   /** Extra memory-pack sources synced into the agents' ~/memory/fleet/notes (directories of markdown files). */
   memoryDirs: string[];
+  /** The voice hub's files (docs/VOICE.md, "Voice profile"): the companion file holding `profile: {voice, speed}`
+   *  and the agents server's env file holding SEED_AGENTS_VOICE_INTERNAL_TOKEN. Unset: the CaseworkSeed
+   *  app-support files of the original experiments server. */
+  companionFile?: string;
+  runtimeFile?: string;
 }
 
 export const SEED_DEFAULTS: SeedConfig = {
@@ -84,6 +94,12 @@ export const SEED_DEFAULTS: SeedConfig = {
   keyFile: join(CYBERDECK_HOME, "seed-key"),
   memoryDirs: [],
 };
+
+/** The voice hub this node must relay to (config `voice.hub`, env `CYBERDECK_VOICE_HUB`), or undefined. */
+export function voiceHub(cfg: Pick<CyberdeckConfig, "voice">, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const hub = (env.CYBERDECK_VOICE_HUB ?? cfg.voice?.hub ?? "").trim();
+  return hub || undefined;
+}
 
 /** Claude Code's auto-memory directory for a working directory (`~/.claude/projects/<cwd slug>/memory`). */
 export function claudeMemoryDir(cwd: string): string {
