@@ -593,7 +593,7 @@ enum InputMode: String { case controller, keyboard, pointer }
         let target = max(0, min(max(0, number(playback["duration"]) - 1), position() + delta))
         let relative = target - number(playback["offset"])
         if string(playback["session"]).isEmpty || (relative >= 0 && target < number(playback["availableEnd"]) - 1) {
-            player.seek(to: CMTime(seconds: relative, preferredTimescale: 600))
+            player.seek(to: CMTime(seconds: relative, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
         } else { play(hash: playbackHash, file: playbackFile, position: target, title: playbackTitle, autoplay: player.rate > 0) }
     }
 
