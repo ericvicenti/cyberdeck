@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' blob: data:; img-src 'self' blob: data:; worker-src 'self' blob:; media-src 'self' blob:; font-src 'self' data:; base-uri 'none'; form-action 'none'"
+    />
+    <title>The Vault player</title>
+    <link rel="stylesheet" href="/vault-player.css" />
+    <link rel="stylesheet" href="/emulatorjs/4.2.3/emulator.min.css" />
+  </head>
+  <body>
+    <div id="game"></div>
+    <p id="player-error" role="alert" hidden></p>
+    <script src="/emulatorjs/4.2.3/emulator.min.js"></script>
+    <script src="/vault-player.js"></script>
+  </body>
+</html>

@@ -125,6 +125,14 @@ export const BotIcon = (p: P) => (
   </svg>
 );
 
+export const SeedIcon = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M12 21v-8" />
+    <path d="M12 13c0-4 3-7 8-7 0 4.5-3 7-8 7z" />
+    <path d="M12 15c0-3.5-2.6-6-7-6 0 3.8 2.6 6 7 6z" />
+  </svg>
+);
+
 export const PulseIcon = (p: P) => (
   <svg {...base(p)}>
     <path d="M3 12h4l2-6 4 12 2-6h6" />

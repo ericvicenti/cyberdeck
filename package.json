@@ -4,25 +4,31 @@
   "private": true,
   "description": "Self-hosted fleet-and-data guardian: indexes your machines, keeps novel data redundant, converges every box to your setup.",
   "type": "module",
-  "engines": { "bun": ">=1.3.3" },
+  "engines": {
+    "bun": ">=1.3.3"
+  },
   "scripts": {
     "dev": "bun run --hot src/daemon/main.ts",
-    "dev:ui": "vite",
-    "build": "vite build",
+    "dev:ui": "bun run prepare:emulator && vite",
+    "build": "bun run prepare:emulator && vite build",
     "start": "bun run src/daemon/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test tests",
     "test:unit": "bun test tests/fsops.test.ts tests/auth.test.ts tests/api.test.ts tests/term.test.ts tests/scan.test.ts tests/install.test.ts tests/cmux.test.ts tests/dashboard.test.ts tests/casework.test.ts tests/cloud.test.ts tests/audio.test.ts",
-    "test:e2e": "bun test tests/e2e.test.ts"
+    "test:e2e": "bun test tests/e2e.test.ts",
+    "prepare:emulator": "bun scripts/prepare-emulator.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
+    "@seed-hypermedia/agents-ui": "0.1.11",
     "@seed-hypermedia/client": "0.0.100",
     "bun-pty": "^0.4.10",
     "hono": "^4.6.0",
     "playwright": "^1.62.1",
     "video.js": "^8.24.0",
-    "zod": "3.25.76"
+    "zod": "3.25.76",
+    "@novnc/novnc": "1.5.0",
+    "guacamole-common-js": "1.5.0"
   },
   "devDependencies": {
     "@codemirror/commands": "^6.11.0",
@@ -44,6 +50,8 @@
     "react-dom": "^19.0.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.0",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "@types/novnc__novnc": "^1.6.0",
+    "@types/guacamole-common-js": "^1.5.5"
   }
 }

@@ -220,19 +220,20 @@ export function registerFleetRoutes(
     upgradeWebSocket((c: any) => {
       const node = getNode(c.req.param("id"));
       let peer: WebSocket | null = null;
-      const pending: string[] = [];
+      const pending: (string | ArrayBuffer)[] = [];
       return {
-        onOpen(_ev: unknown, ws: { send: (s: string) => void; close: () => void }) {
+        onOpen(_ev: unknown, ws: { send: (s: string | ArrayBuffer) => void; close: () => void }) {
           if (!node) {
             ws.send(JSON.stringify({ t: "data", data: "\r\nunknown node\r\n" }));
             ws.close();
             return;
           }
           peer = new WebSocket(node.url.replace(/^http/, "ws") + peerPath(c, node));
+          peer.binaryType = "arraybuffer";
           peer.onopen = () => {
             for (const msg of pending.splice(0)) peer!.send(msg);
           };
-          peer.onmessage = (m) => ws.send(String(m.data));
+          peer.onmessage = (m) => ws.send(m.data);
           peer.onclose = () => ws.close();
           peer.onerror = () => {
             ws.send(JSON.stringify({ t: "data", data: `\r\ncould not reach ${node.name}\r\n` }));
@@ -240,7 +241,7 @@ export function registerFleetRoutes(
           };
         },
         onMessage(ev: { data: unknown }) {
-          const msg = String(ev.data);
+          const msg = ev.data instanceof ArrayBuffer ? ev.data : String(ev.data);
           if (peer && peer.readyState === WebSocket.OPEN) peer.send(msg);
           else pending.push(msg);
         },
@@ -252,6 +253,12 @@ export function registerFleetRoutes(
         },
       };
     });
+  // Desktop frames can be binary (VNC) or text (RDP/Guacamole).
+  app.get("/api/nodes/:id/desktop/stream", proxyWs((c, node) => {
+    const query = new URLSearchParams({ token: node.token });
+    for (const key of ["width", "height"]) { const value = c.req.query(key); if (value) query.set(key, value); }
+    return `/api/desktop/stream?${query}`;
+  }));
   // Ephemeral terminal on a peer (/api/term) and attach to a peer's live session.
   app.get("/api/nodes/:id/term", proxyWs((c, node) => { const cwd = c.req.query("cwd"); return `/api/term?token=${encodeURIComponent(node.token)}${cwd ? `&cwd=${encodeURIComponent(cwd)}` : ""}`; }));
   // Remote browser screencast on a peer (frames and input are JSON text frames, so the string pipe is enough).

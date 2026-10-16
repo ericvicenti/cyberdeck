@@ -4,7 +4,7 @@
 import { NetworkMap } from "../components/NetworkMap";
 import { useEffect, useState } from "react";
 import { api, post, navigate, setActiveNode, fmtBytes, fmtAgo, ApiError } from "../lib/api";
-import { ServerIcon, FolderIcon, TerminalIcon, GitIcon } from "../lib/icons";
+import { ServerIcon, FolderIcon, TerminalIcon, GitIcon, GridIcon } from "../lib/icons";
 import type { Overview } from "../lib/control";
 import type { Dashboard, UsageSummary } from "../../src/daemon/api/dashboard";
 import type { CodexResets } from "../../src/daemon/codexrpc";
@@ -155,7 +155,7 @@ function UsageWidget({ title, usage, testId, node, nodeName, isSelf, onRefresh }
 
 // ---------------------------------------------------------------- node card ----
 
-function NodeCard(props: { name: string; subtitle: string; online: boolean; status: NodeStatus | null; isSelf?: boolean; onBrowse?: () => void; onTerminal?: () => void; onRepos?: () => void; onUnpair?: () => void; testId?: string }) {
+function NodeCard(props: { name: string; subtitle: string; online: boolean; status: NodeStatus | null; isSelf?: boolean; onBrowse?: () => void; onTerminal?: () => void; onDesktop?: () => void; onRepos?: () => void; onUnpair?: () => void; testId?: string }) {
   const s = props.status;
   return (
     <div className="hud-card p-4" data-testid={props.testId}>
@@ -215,6 +215,11 @@ function NodeCard(props: { name: string; subtitle: string; online: boolean; stat
         {props.onTerminal && (
           <button onClick={props.onTerminal} disabled={!props.online} className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-[11px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-40">
             <TerminalIcon size={13} /> Shell
+          </button>
+        )}
+        {props.onDesktop && (
+          <button onClick={props.onDesktop} disabled={!props.online} title={`Open ${props.name}'s desktop`} className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-[11px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-40">
+            <GridIcon size={13} /> Desktop
           </button>
         )}
         {props.onUnpair && (
@@ -352,8 +357,7 @@ export function Home({ onLocked }: { onLocked: () => void }) {
   }, []);
 
   const goto = (id: string, name: string, view: string) => {
-    setActiveNode(id, name);
-    navigate(view);
+    navigate(view, { node: id });
   };
 
   const pair = async () => {
@@ -615,6 +619,7 @@ export function Home({ onLocked }: { onLocked: () => void }) {
             onRepos={() => goto("", "", "data")}
             onBrowse={() => goto("", "", "files")}
             onTerminal={() => goto("", "", "term")}
+            onDesktop={() => goto("", "", "desktop")}
           />
           {info?.nodes.map((n) => (
             <NodeCard
@@ -626,6 +631,7 @@ export function Home({ onLocked }: { onLocked: () => void }) {
               onRepos={() => goto(n.id, n.name, "data")}
               onBrowse={() => goto(n.id, n.name, "files")}
               onTerminal={() => goto(n.id, n.name, "term")}
+              onDesktop={() => goto(n.id, n.name, "desktop")}
               onUnpair={async () => {
                 await api(`/api/fleet/nodes/${n.id}`, { method: "DELETE" });
                 load();

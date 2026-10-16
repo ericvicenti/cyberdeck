@@ -1,3 +1,6 @@
+import { useRouteTitle } from "../lib/navigation";
+import { AfterglowFrame } from "./AfterglowFrame";
+import { Vault } from "./Vault";
 import { useEffect, useState } from "react";
 import { api, ApiError, navigate } from "../lib/api";
 import { CaseworkConsole, inCasework, openNative, type CaseworkApp } from "./CaseworkConsole";
@@ -19,13 +22,19 @@ export function Applications({ params, onLocked }: { params: URLSearchParams; on
   }, []);
   const app = apps.find(a => a.id === params.get("app"));
   const example = casework?.apps.find(a => a.id === params.get("app"));
+  const missing = loaded && !!params.get("app") && !app && !example && !["vimm", "steam"].includes(params.get("app")!);
+  useRouteTitle(missing ? "Application not found" : example || app?.id === "afterglow" ? undefined : app?.name);
+  if (missing) return <section className="p-6"><h1 className="text-xl">Application not found</h1><p className="my-3">“{params.get("app")}” is not configured on this machine.</p><button onClick={() => navigate("applications")}>← Applications</button></section>;
+  if (params.get("app") === "vimm") return <Vault params={params} onLocked={onLocked} />;
+  if (params.get("app") === "steam") return <Vault params={new URLSearchParams("tab=steam")} onLocked={onLocked} />;
   if (example) return <section className="flex h-full flex-col" aria-label={example.name}>
     <div className="flex shrink-0 items-center gap-4 border-b border-zinc-800 px-4 py-2 text-sm">
       <button onClick={() => navigate("applications")} className="text-cyan-300">← Applications</button>
       <strong>{example.name}</strong><span className="text-zinc-500">Casework example app</span>
     </div>
-    <div className="min-h-0 flex-1"><CaseworkConsole app={example} onLocked={onLocked} /></div>
+    <div className="min-h-0 flex-1"><CaseworkConsole app={example} params={params} onLocked={onLocked} /></div>
   </section>;
+  if (app?.id === "afterglow") return <AfterglowFrame key={app.url} url={app.url} params={params} name={app.name} />;
   if (app) return <section className="flex h-full flex-col" aria-label={app.name}>
     <div className="flex shrink-0 items-center gap-4 border-b border-zinc-800 px-4 py-2 text-sm">
       <button onClick={() => navigate("applications")} className="text-cyan-300">← Applications</button>
@@ -38,7 +47,7 @@ export function Applications({ params, onLocked }: { params: URLSearchParams; on
     <button className="mt-4 rounded-lg border border-cyan-700 px-4 py-2 text-sm text-cyan-300" onClick={pair}>Connect Casework remote</button>
     {pairing && <div role="dialog" aria-label="Connect Casework" className="mt-4 max-w-md rounded-xl border border-zinc-700 bg-zinc-900 p-5"><h2 className="text-lg">Connect buoy</h2><p className="my-3 text-sm text-zinc-400">In Casework, open Server settings → Scan pairing QR → Use this server. Keep Tailscale connected. {casework?.kiosk ? "This gives control of this machine’s whole Cyberdeck screen, with the deck and its example apps underneath." : "The device then runs the whole deck, with the example apps under Apps."}</p><div className="max-w-72 [&>svg]:h-auto [&>svg]:w-full" dangerouslySetInnerHTML={{ __html: pairing.qr }} /><button className="mt-3 text-cyan-300" onClick={() => setPairing(null)}>Done</button></div>}
     {error && <p role="alert" className="mt-4 text-red-300">{error}</p>}
-    <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3"><button onClick={() => navigate("spotify")} className="rounded-xl border border-emerald-900 bg-zinc-900 p-6 text-left hover:border-emerald-400"><span className="mb-4 block text-3xl text-emerald-400">♫</span><strong className="text-xl">Spotify</strong><p className="mt-2 text-sm text-zinc-400">Open your Spotify player with your existing login.</p><span className="mt-5 block text-sm text-emerald-400">Open Spotify →</span></button>{apps.map(a => <button key={a.id} onClick={() => navigate("applications", { app: a.id })} className="rounded-xl border border-zinc-800 bg-zinc-900 p-6 text-left hover:border-cyan-500">
+    <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3"><button onClick={() => navigate("spotify")} className="rounded-xl border border-emerald-900 bg-zinc-900 p-6 text-left hover:border-emerald-400"><span className="mb-4 block text-3xl text-emerald-400">♫</span><strong className="text-xl">Spotify</strong><p className="mt-2 text-sm text-zinc-400">Open your Spotify player with your existing login.</p><span className="mt-5 block text-sm text-emerald-400">Open Spotify →</span></button><button onClick={() => navigate("applications", { app: "vimm" })} className="rounded-xl border border-lime-900 bg-zinc-900 p-6 text-left hover:border-lime-400"><span className="mb-4 block text-3xl text-lime-300">◈</span><strong className="text-xl">The Vault</strong><p className="mt-2 text-sm text-zinc-400">Rediscover the classics. Browse and search Vimm’s Lair with box art, console collections, and your own saved list.</p><span className="mt-5 block text-sm text-lime-300">Explore The Vault →</span></button>{apps.map(a => <button key={a.id} onClick={() => navigate("applications", { app: a.id })} className="rounded-xl border border-zinc-800 bg-zinc-900 p-6 text-left hover:border-cyan-500">
       <span className="mb-4 block text-3xl text-lime-300">▶</span><strong className="text-xl">{a.name}</strong><p className="mt-2 text-sm text-zinc-400">{a.description}</p><span className="mt-5 block text-sm text-cyan-300">Open {a.name} →</span>
     </button>)}{casework?.apps.map(a => <button key={a.id} data-testid={`app-${a.id}`} onClick={() => navigate("applications", { app: a.id })} className="rounded-xl border border-lime-900 bg-zinc-900 p-6 text-left hover:border-lime-400">
       <span className="mb-4 block text-3xl text-lime-300">◈</span><strong className="text-xl">{a.name}</strong><span className="hud-badge ml-3 align-middle text-lime-300">Casework example</span><p className="mt-2 text-sm text-zinc-400">{a.description}</p>
