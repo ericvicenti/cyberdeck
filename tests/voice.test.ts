@@ -13,7 +13,7 @@ import { initSchema } from "../src/daemon/db";
 import { createServer } from "../src/daemon/server";
 import { seedConfig } from "../src/daemon/config";
 import { caseworkAllows } from "../src/daemon/api/casework";
-import { secureCallUrl } from "../src/daemon/api/voice";
+import { createVoiceRelay, secureCallUrl } from "../src/daemon/api/voice";
 import { Tailscale } from "../src/daemon/tailscale";
 import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME, fleetPrompt } from "../src/daemon/seed";
 import { testConfig, TEST_TOKEN, tmpHomeDir } from "./helpers";
@@ -78,7 +78,7 @@ function fakeAgents(opts: { voice: boolean }) {
         case "SetMcpServer": mcp.set(a.name, a.config); return ok({ _: "SetMcpServerResponse", server: { name: a.name, status: { state: "ok", checkedAt: Date.now() }, tools: [{ name: "status" }, { name: "todo" }] } });
         case "GetAgent": { const d = agents.get(a.agentId); return d ? ok({ _: "GetAgentResponse", agent: { id: a.agentId, definition: d }, sessionCount: 0 }) : err(404, "Agent not found"); }
         case "UpdateAgent": if (!agents.has(a.agentId)) return err(404, "Agent not found"); agents.set(a.agentId, a.definition); return ok({ _: "UpdateAgentResponse", agent: { id: a.agentId, definition: a.definition } });
-        case "CreateAgent": { const id = `agent-${++n}`; agents.set(id, a.definition); return ok({ _: "CreateAgentResponse", agentId: id }); }
+        case "CreateAgent": { if (a.definition?.modelProvider === "Missing") return err(404, "Model provider not found"); const id = `agent-${++n}`; agents.set(id, a.definition); return ok({ _: "CreateAgentResponse", agentId: id }); }
         case "CreateSession": { if (!agents.has(a.agentId)) return err(404, "Agent not found"); const id = `session-${++n}`; sessions.set(id, { agentId: a.agentId, title: a.title }); if (a.agentId !== COMPANION_ID) queryEvents.set(id, []); return ok({ _: "CreateSessionResponse", sessionId: id }); }
         case "ListSessions": return ok({ _: "ListSessionsResponse", sessions: [...sessions].filter(([, s]) => s.agentId === a.agentId).map(([id, s]) => ({ id, ...s, status: "idle", createdAt: 1, updatedAt: 2 })) });
         case "MessageSession": {
@@ -132,7 +132,8 @@ function fakeAgents(opts: { voice: boolean }) {
         case "ListModelProviders": return ok({ _: "ListModelProvidersResponse", providers: [...providers.values()] });
         case "SetModelProvider": {
           const p = a.provider;
-          if (!p?.name || !p.type) return err(400, "Provider name and type are required");
+          if (typeof a.name !== "string" || !a.name) return err(400, "Provider name is required");
+          if (!p?.type) return err(400, "Provider name and type are required");
           if (p.authMode === "subscription" && !p.secretRefs?.oauth) return err(400, "subscription providers need secretRefs.oauth");
           providers.set(p.name, { name: p.name, type: p.type, authMode: p.authMode ?? "api-key", authStatus: "ok" });
           return ok({ _: "SetModelProviderResponse", provider: providers.get(p.name) });
@@ -148,6 +149,13 @@ function fakeAgents(opts: { voice: boolean }) {
           const t = { id: `trigger-${++n}`, account: "x", agentId: a.agentId, name: a.trigger.name, enabled: a.trigger.enabled !== false, source: a.trigger.source, prompt: a.trigger.prompt, continuation: a.trigger.continuation, createdAt: Date.now(), updatedAt: Date.now() };
           triggers.set(a.agentId, [...(triggers.get(a.agentId) ?? []), t]);
           return ok({ _: "CreateAgentTriggerResponse", trigger: t });
+        }
+        case "UpdateAgentTrigger": {
+          const list = [...triggers.values()].flat();
+          const t = list.find((x) => x.id === a.triggerId);
+          if (!t) return err(404, "Trigger not found");
+          Object.assign(t, a.patch ?? {}, { updatedAt: Date.now() });
+          return ok({ _: "UpdateAgentTriggerResponse", trigger: t });
         }
         case "CreateVoiceSession": {
           if (!opts.voice) return err(501, "Voice is not available on this server");
@@ -196,7 +204,7 @@ function fakeAgents(opts: { voice: boolean }) {
   };
 }
 
-type Node = { base: string; wsBase: string; home: string; stop: () => void; cleanup: () => void };
+type Node = { base: string; wsBase: string; home: string; db: Database; stop: () => void; cleanup: () => void };
 function startNode(agentsUrl: string, prefix: string, companion?: object, runtimeToken?: string, extra: Partial<import("../src/daemon/config").CyberdeckConfig> = {}): Node {
   const { dir, cleanup } = tmpHomeDir(prefix);
   const companionFile = join(dir, "companion.json");
@@ -208,7 +216,7 @@ function startNode(agentsUrl: string, prefix: string, companion?: object, runtim
   initSchema(db);
   const s = createServer(db, testConfig({ port: 4777, ...extra, seed: { agentsUrl, ...(extra.seed ?? {}) } }), TEST_TOKEN, "stw-test", { caseworkKey: KEY, caseworkExperiencesDir: FIXTURES, persistOwner: false, cloudSync: false, tailscale: new Tailscale(async () => null), seed: { home: dir, companionFile, runtimeFile } });
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: s.fetch, websocket: s.websocket });
-  return { base: `http://127.0.0.1:${server.port}`, wsBase: `ws://127.0.0.1:${server.port}`, home: dir, stop: () => { s.sessions.close(); void server.stop(true); }, cleanup };
+  return { base: `http://127.0.0.1:${server.port}`, wsBase: `ws://127.0.0.1:${server.port}`, home: dir, db, stop: () => { s.sessions.close(); void server.stop(true); }, cleanup };
 }
 const req = (node: Node, token: string, path: string, init: RequestInit = {}) => fetch(`${node.base}${path}`, { ...init, headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...init.headers } });
 
@@ -223,7 +231,8 @@ function welcome(node: Node): Promise<any> {
 }
 
 let voiced: ReturnType<typeof fakeAgents>, muted: ReturnType<typeof fakeAgents>;
-let a: Node, b: Node, c: Node;
+let a: Node, b: Node, c: Node, d: Node, e: Node, f: Node;
+const pair = (from: Node, id: string, name: string, to: Node) => from.db.query("INSERT INTO nodes (id,name,url,token,added_at) VALUES (?,?,?,?,?)").run(id, name, to.base, TEST_TOKEN, Date.now());
 beforeAll(() => {
   voiced = fakeAgents({ voice: true });
   muted = fakeAgents({ voice: false });
@@ -231,8 +240,17 @@ beforeAll(() => {
   b = startNode(muted.url, "voice-b");
   // Same companion and profile, but a runtime token the agents server rejects.
   c = startNode(voiced.url, "voice-c", { agentId: COMPANION_ID, profile: { voice: "v-other", speed: 1.2 } }, "stale-token");
+  // The voice relay: f is a configured node (set up in its describe); d has no bridge and is paired with
+  // a dead url, b and f (f answers); e only with b (nobody answers).
+  f = startNode(voiced.url, "voice-f", { agentId: COMPANION_ID, profile: { voice: "v", speed: 1 } }, RUNTIME_TOKEN);
+  d = startNode(muted.url, "voice-d");
+  pair(d, "n-dead", "Dead", { base: "http://127.0.0.1:9" } as Node);
+  pair(d, "n-b", "Muted", b);
+  pair(d, "n-voice", "Yacht", f);
+  e = startNode(muted.url, "voice-e");
+  pair(e, "n-b", "Muted", b);
 });
-afterAll(() => { for (const n of [a, b, c]) { n.stop(); n.cleanup(); } voiced.stop(); muted.stop(); });
+afterAll(() => { for (const n of [a, b, c, d, e, f]) { n.stop(); n.cleanup(); } voiced.stop(); muted.stop(); });
 
 describe("secure call url", () => {
   const hosts = new Set(["localhost", "127.0.0.1", "192.168.1.131"]);
@@ -438,6 +456,17 @@ describe("configured node", () => {
     const s = await (await req(a, TEST_TOKEN, "/api/voice/status")).json();
     expect(s.dogfood).toMatchObject({ triggerId: j1.triggerId, name: DOGFOOD_TRIGGER_NAME, enabled: true, nextSummary: "daily at 07:00 Europe/Madrid" });
     expect((await req(a, TEST_TOKEN, "/api/voice/dogfood", { method: "POST", body: JSON.stringify({ timeOfDay: "7am" }) })).status).toBe(502);
+
+    // A trigger made by an older build (stale prompt) gets the current wording; the schedule stays.
+    stored[0].prompt = "Daily fleet check-in. Old wording that let the agent skip the note.";
+    const j3 = await (await req(a, TEST_TOKEN, "/api/voice/dogfood", { method: "POST", body: JSON.stringify({}) })).json();
+    expect(j3).toMatchObject({ created: false, updated: true, triggerId: j1.triggerId, nextSummary: "daily at 07:00 Europe/Madrid" });
+    expect(stored[0].prompt).toBe(DOGFOOD_PROMPT);
+    const patches = voiced.actions.filter((x) => x._ === "UpdateAgentTrigger");
+    expect(patches.length).toBe(1);
+    expect(patches[0]).toMatchObject({ triggerId: j1.triggerId, patch: { prompt: DOGFOOD_PROMPT } });
+    expect((await (await req(a, TEST_TOKEN, "/api/voice/dogfood", { method: "POST", body: JSON.stringify({}) })).json()).updated).toBe(false);
+    expect(voiced.actions.filter((x) => x._ === "UpdateAgentTrigger").length).toBe(1);
   });
   test("prompt compares the companion's system prompt with the fleet persona and applies it only on POST", async () => {
     expect((await req(a, KEY, "/api/voice/prompt")).status).toBe(403);
@@ -498,6 +527,142 @@ describe("configured node", () => {
   });
 });
 
+
+describe("voice relay", () => {
+  beforeAll(async () => { expect((await req(f, TEST_TOKEN, "/api/voice/setup", { method: "POST", body: "{}" })).status).toBe(200); });
+  test("a node without a bridge answers for voice through the paired node that has one", async () => {
+    const own = await (await req(f, KEY, "/api/voice/config")).json();
+    const cfg = await (await req(d, KEY, "/api/voice/config")).json();
+    expect(cfg).toEqual({ ...own, via: { node: "n-voice", name: "Yacht" } });
+    const grant = await (await req(d, KEY, "/api/voice/livekit", { method: "POST" })).json();
+    expect(grant).toMatchObject({ url: "wss://livekit.example/", via: { node: "n-voice", name: "Yacht" } });
+    expect(grant.room).toMatch(/^room-/);
+    expect(grant.token).toMatch(/^jwt-/);
+    const t = await (await req(d, KEY, "/api/voice/transcript?limit=5")).json();
+    expect(t.supported).toBe(true);
+    expect(t.messages.map((m: any) => m.role)).toContain("assistant");
+    expect(t.via).toEqual({ node: "n-voice", name: "Yacht" });
+    const s = await (await req(d, TEST_TOKEN, "/api/voice/status")).json();
+    expect(s.via).toEqual({ node: "n-voice", name: "Yacht" });
+    expect(s.agent).toMatchObject({ id: own.agentId });
+    expect(s.local).toMatchObject({ configured: false });
+    expect(s.local.reason).toContain("no voice pipeline");
+    // /api/state and the Casework welcome say configured, naming the node that answers.
+    const state = await (await req(d, KEY, "/api/state")).json();
+    expect(state.voice).toMatchObject({ configured: true, provider: "livekit", via: { node: "n-voice", name: "Yacht" } });
+    const w = await welcome(d);
+    expect(w.voice).toMatchObject({ configured: true, via: { name: "Yacht" } });
+    // The relay never bounces: a peer asked directly answers for itself only.
+    const direct = await (await req(d, KEY, "/api/voice/config", { headers: { "x-cyberdeck-voice-direct": "1" } })).json();
+    expect(direct).toMatchObject({ configured: false, provider: "none" });
+  }, 20000);
+
+  test("a session reset through the relay mints the session on the voice node", async () => {
+    const before = (await (await req(d, KEY, "/api/voice/config")).json()).sessionId;
+    const r = await (await req(d, KEY, "/api/voice/session/reset", { method: "POST", body: "{}" })).json();
+    expect(r.via).toEqual({ node: "n-voice", name: "Yacht" });
+    expect(r.sessionId).toBeTruthy();
+    expect(r.sessionId).not.toBe(before);
+    expect((await (await req(f, KEY, "/api/voice/config")).json()).sessionId).toBe(r.sessionId);
+  }, 20000);
+
+  test("paired only with nodes that have no voice, the node stays unconfigured", async () => {
+    const cfg = await (await req(e, KEY, "/api/voice/config")).json();
+    expect(cfg).toMatchObject({ configured: false, provider: "none" });
+    expect(cfg.via).toBeUndefined();
+    expect((await req(e, KEY, "/api/voice/livekit", { method: "POST" })).status).toBe(503);
+    const state = await (await req(e, KEY, "/api/state")).json();
+    expect(state.voice).toMatchObject({ configured: false, provider: "none" });
+  }, 20000);
+});
+
+describe("voice hub", () => {
+  const rows = (): import("../src/daemon/api/fleet").NodeRow[] => [
+    { id: "n-yacht", name: "Yacht", url: "http://127.0.0.1:9", token: "t", added_at: 1, last_seen: 1 } as any,
+    { id: "n-clipper", name: "clipper", url: "http://127.0.0.1:9", token: "t", added_at: 1, last_seen: 1 } as any,
+  ];
+  test("a pinned hub is found by name or id without probing anyone", async () => {
+    const probe = async () => { throw new Error("must not probe"); };
+    const byName = createVoiceRelay(rows, probe, { hub: "Clipper", self: "yacht" });
+    expect(byName.pinned).toBe("Clipper");
+    expect((await byName.find())?.id).toBe("n-clipper");
+    const byId = createVoiceRelay(rows, probe, { hub: "n-yacht", self: "clipper" });
+    expect((await byId.find())?.name).toBe("Yacht");
+    const unpaired = createVoiceRelay(rows, probe, { hub: "nowhere", self: "yacht" });
+    expect(unpaired.pinned).toBe("nowhere");
+    expect(await unpaired.find()).toBeNull();
+  });
+  test("a hub that names this node means local voice; no hub means discovery", async () => {
+    const self = createVoiceRelay(rows, async () => true, { hub: " clipper ", self: "Clipper" });
+    expect(self.pinned).toBeUndefined();
+    const none = createVoiceRelay(rows, async () => true, { self: "yacht" });
+    expect(none.pinned).toBeUndefined();
+    expect((await none.find())?.id).toBe("n-yacht");
+  });
+
+  let g: Node, h: Node, i: Node;
+  beforeAll(async () => {
+    // g has a working bridge of its own but is pinned to the hub "Hub" (= f): everything relays there.
+    g = startNode(voiced.url, "voice-g", { agentId: COMPANION_ID, profile: { voice: "v", speed: 1 } }, RUNTIME_TOKEN, { voice: { hub: "hub" } });
+    pair(g, "n-hub", "Hub", f);
+    // h is pinned to a hub it is not paired with.
+    h = startNode(voiced.url, "voice-h", { agentId: COMPANION_ID }, RUNTIME_TOKEN, { voice: { hub: "Clipper" } });
+    pair(h, "n-hub", "Hub", f);
+    // i names itself as the hub: its own bridge answers.
+    i = startNode(voiced.url, "voice-i", { agentId: COMPANION_ID }, RUNTIME_TOKEN, { nodeName: "Clipper", voice: { hub: "clipper" } });
+    pair(i, "n-hub", "Hub", f);
+    // Setup always targets the node itself; g, h and i get working bridges of their own, f is the hub.
+    for (const n of [f, g, h, i]) expect((await req(n, TEST_TOKEN, "/api/voice/setup", { method: "POST", body: "{}" })).status).toBe(200);
+  });
+  afterAll(() => { for (const n of [g, h, i]) { n.stop(); n.cleanup(); } });
+
+  test("every voice route of a node pinned to the hub goes there, even with a bridge of its own", async () => {
+    const own = await (await req(f, KEY, "/api/voice/config")).json();
+    const cfg = await (await req(g, KEY, "/api/voice/config")).json();
+    expect(cfg).toEqual({ ...own, via: { node: "n-hub", name: "Hub" } });
+    const grant = await (await req(g, KEY, "/api/voice/livekit", { method: "POST" })).json();
+    expect(grant).toMatchObject({ url: "wss://livekit.example/", via: { node: "n-hub", name: "Hub" } });
+    const s = await (await req(g, TEST_TOKEN, "/api/voice/status")).json();
+    expect(s.via).toEqual({ node: "n-hub", name: "Hub" });
+    expect(s.local).toMatchObject({ configured: true });
+    const t = await (await req(g, KEY, "/api/voice/transcript?limit=5")).json();
+    expect(t.via).toEqual({ node: "n-hub", name: "Hub" });
+    const state = await (await req(g, KEY, "/api/state")).json();
+    expect(state.voice).toMatchObject({ configured: true, via: { node: "n-hub", name: "Hub" } });
+    expect((await welcome(g)).voice).toMatchObject({ configured: true, via: { name: "Hub" } });
+    // Asked directly (as the hub itself would ask), the node answers for itself.
+    const direct = await (await req(g, KEY, "/api/voice/config", { headers: { "x-cyberdeck-voice-direct": "1" } })).json();
+    expect(direct).toMatchObject({ configured: true });
+    expect(direct.via).toBeUndefined();
+  }, 20000);
+
+  test("a hub that is not paired leaves the node without voice and says so", async () => {
+    const cfg = await (await req(h, KEY, "/api/voice/config")).json();
+    expect(cfg).toMatchObject({ configured: false, provider: "none" });
+    expect(cfg.reason).toContain("voice hub Clipper is not paired");
+    const call = await req(h, KEY, "/api/voice/livekit", { method: "POST" });
+    expect(call.status).toBe(503);
+    expect((await call.json()).reason).toContain("not paired");
+    const s = await (await req(h, TEST_TOKEN, "/api/voice/status")).json();
+    expect(s.configured).toBe(false);
+    expect(s.reason).toContain("not paired");
+    expect(s.local).toMatchObject({ configured: true });
+    expect((await req(h, KEY, "/api/voice/session/reset", { method: "POST", body: "{}" })).status).toBe(503);
+    expect((await req(h, KEY, "/api/voice/transcript")).status).toBe(503);
+    const state = await (await req(h, KEY, "/api/state")).json();
+    expect(state.voice).toMatchObject({ configured: false, provider: "none" });
+    expect(state.voice.reason).toContain("not paired");
+  }, 20000);
+
+  test("a node that is itself the hub answers locally and never relays", async () => {
+    const cfg = await (await req(i, KEY, "/api/voice/config")).json();
+    expect(cfg).toMatchObject({ configured: true, provider: "livekit" });
+    expect(cfg.via).toBeUndefined();
+    const grant = await (await req(i, KEY, "/api/voice/livekit", { method: "POST" })).json();
+    expect(grant.url).toBe("wss://livekit.example/");
+    expect(grant.via).toBeUndefined();
+  }, 20000);
+});
 
 describe("Seed text queries", () => {
   test("create, list, message, read, rename and delete are signed server actions; voice stays separate", async () => {
@@ -602,6 +767,20 @@ describe("Seed text queries", () => {
         expect(voiced.memory.get(agentId)!.size).toBe(4);
       } finally { fresh.stop(); fresh.cleanup(); }
     } finally { h.stop(); h.cleanup(); }
+  });
+  test("setup on an identity without a model provider keeps the MCP registration and says to log in", async () => {
+    const n = startNode(voiced.url, "voice-noprov", undefined, undefined, { seed: { modelProvider: "Missing" } });
+    try {
+      const r = await req(n, TEST_TOKEN, "/api/voice/setup", { method: "POST", body: JSON.stringify({ adopt: false }) });
+      expect(r.status).toBe(502);
+      const body = await r.json() as any;
+      expect(body.error).toContain("cyberdeck seed login");
+      expect(body.error).toContain('"Missing"');
+      const state = JSON.parse(readFileSync(join(n.home, "seed.json"), "utf8"));
+      expect(state.mcpRegisteredAt).toBeGreaterThan(0);
+      expect(state.agentId).toBeUndefined();
+      expect(voiced.mcp.has("cyberdeck")).toBe(true);
+    } finally { n.stop(); n.cleanup(); }
   });
   test("keygen gives a node without a vault its own signing identity", async () => {
     const { dir, cleanup } = tmpHomeDir("voice-key");
