@@ -22,10 +22,12 @@ import { PromptBar } from "./components/PromptBar";
 import { applyInstallTarget } from "./lib/pwa";
 
 // Seed's agents UI is a large bundle of its own; load it when the view opens.
+const Desktop = lazy(() => import("./views/Desktop").then((m) => ({ default: m.Desktop })));
 const SeedAgents = lazy(() => import("./views/SeedAgents"));
 
 const NAV = [
   { view: "fleet", label: "Home", icon: ServerIcon },
+  { view: "desktop", label: "Desktop", icon: GridIcon },
   { view: "applications", label: "Applications", icon: GridIcon },
   { view: "spotify", label: "Spotify", icon: MusicIcon },
   { view: "desk", label: "Desk", icon: MicIcon },
@@ -106,6 +108,7 @@ export function App() {
 
   const view = (
     <>
+      {route.view === "desktop" && <Suspense fallback={<div className="p-6">Loading desktop…</div>}><Desktop key={`desktop-${nodeGen}-${nodeId}`} /></Suspense>}
       {route.view === "fleet" && <Home onLocked={lock} key={`fleet-${nodeGen}`} />}
       {route.view === "applications" && <Applications params={route.params} onLocked={lock} />}
       {route.view === "desk" && <Desk onLocked={lock} key={`desk-${nodeGen}-${nodeId}`} />}

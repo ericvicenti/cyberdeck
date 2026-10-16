@@ -1,0 +1,73 @@
+# Backport of Apache Guacamole GUACAMOLE-2328 (Apache-2.0).
+# https://github.com/apache/guacamole-server/commit/ab36756b596520ae2a94cd4d25e406e0b5aa820b
+--- a/src/protocols/rdp/rdp.c
++++ b/src/protocols/rdp/rdp.c
+@@ -151,5 +151,4 @@
+- * Prepares the FreeRDP instance for connection by setting up session-specific
+- * configurations like graphics, plugins, and RDP settings. This involves
+- * integrating Guacamole's custom rendering handlers (for bitmaps, glyphs,
+- * and pointers). If using a freerdp instance that does not expect a
+- * LoadChannels callback then this function manually loads RDP channels.
++ * Prepares the FreeRDP instance for connection by pushing Guacamole's
++ * session-specific settings and registering the FreeRDP add-in provider. If
++ * using a freerdp instance that does not expect a LoadChannels callback then
++ * this function manually loads RDP channels.
+@@ -163,2 +161,0 @@
+- *     Returns FALSE if an error occurs during the initialization of the
+- *     FreeRDP GDI system.
+@@ -169 +165,0 @@
+-    rdpGraphics* graphics = context->graphics;
+@@ -193,0 +190,40 @@
++
++    /*
++     * If the freerdp instance does not have a LoadChannels callback for
++     * loading plugins we use the PreConnect callback to load plugins instead.
++     */
++    #ifndef RDP_INST_HAS_LOAD_CHANNELS
++        rdp_freerdp_load_channels(instance);
++    #endif
++
++    return TRUE;
++}
++
++/**
++ * Initializes the FreeRDP GDI and registers Guacamole's rendering handlers,
++ * once the connection sequence has completed.
++ *
++ * This must occur within PostConnect rather than PreConnect. FreeRDP's
++ * gdi_init() requires that the rdpContext cache already exist, and that cache
++ * is not created until the connection sequence reaches Confirm Active, after
++ * PreConnect has returned. Calling gdi_init() any earlier dereferences a NULL
++ * cache within gdi_init_ex() (FreeRDP 3.31.0 and later). PostConnect is also
++ * where FreeRDP's own clients call gdi_init(), and is where the GDI is sized
++ * using the display geometry the server actually negotiated.
++ *
++ * The update handlers registered here must be registered after gdi_init(), as
++ * gdi_init() installs FreeRDP's own BeginPaint, EndPaint, and DesktopResize
++ * handlers, silently replacing any registered beforehand.
++ *
++ * @param instance
++ *     The FreeRDP instance which has completed its connection sequence.
++ *
++ * @return
++ *     Returns TRUE if post-connection initialization completes successfully.
++ *     Returns FALSE if an error occurs during the initialization of the
++ *     FreeRDP GDI system.
++ */
++static BOOL rdp_freerdp_post_connect(freerdp* instance) {
++
++    rdpContext* context = GUAC_RDP_CONTEXT(instance);
++    rdpGraphics* graphics = context->graphics;
+@@ -223,8 +258,0 @@
+-    /*
+-     * If the freerdp instance does not have a LoadChannels callback for
+-     * loading plugins we use the PreConnect callback to load plugins instead.
+-     */
+-    #ifndef RDP_INST_HAS_LOAD_CHANNELS
+-        rdp_freerdp_load_channels(instance);
+-    #endif
+-
+@@ -231,0 +260 @@
++
+@@ -551,0 +581 @@
++    rdp_inst->PostConnect = rdp_freerdp_post_connect;

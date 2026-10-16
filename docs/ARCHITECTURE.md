@@ -887,3 +887,12 @@ artifact for machine convergence ("facets" will later template this file).
   corpus.
 - ~~Vault sync conflict handling~~ — resolved: per-item version vectors with
   conflict-copy semantics (SECURITY.md §6).
+
+### Physical host desktop
+
+`api/desktop.ts` exposes owner-only `/api/desktop/status` and `/api/desktop/stream`.
+`config.desktop` opts in to loopback VNC (macOS Screen Sharing) or RDP through loopback guacd
+(GNOME/Wayland). The daemon owns the RDP handshake and credential file; the browser handles
+Mac authentication for each connection. `ui/views/Desktop.tsx` uses noVNC/Guacamole and
+releases the connection on host switch or unmount. `/api/nodes/:id/desktop/stream` relays
+binary or text frames to the selected paired host. See README for host setup.
