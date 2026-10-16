@@ -1,17 +1,26 @@
 # Voice on Cyberdeck
 
 Talk to a Seed agent about the fleet from the Casework iPad app or the web Desk. Cyberdeck does not
-run speech itself: it signs into a Seed agents server as one of this Mac's vault identities, keeps a
+run speech itself: it signs into a Seed agents server as one of this node's identities, keeps a
 pointer to the agent and session the calls go to, and hands the client a LiveKit room. The agents
 server's voice worker transcribes the caller, runs the Seed session as the LLM (with Cyberdeck's own
 MCP tools enabled), and speaks the reply back.
 
+**Voice is centralized.** The whole voice system (LiveKit, the voice-capable agents server, the
+speech keys, the voice profile) runs on one node of the fleet, the **voice hub**: clipper since
+2026-10-16. Every other node is configured with `voice.hub` and relays each of its `/api/voice/*`
+routes there, so the iPad app (which only talks to the node it is paired with), the web Desk on any
+node and the CLI all reach the same server, agent and session. The Desk has no machine to pick.
+
 ```
-Casework app / web Desk
-   │  GET  /api/voice/config          -> {configured, provider: "livekit"}
-   │  POST /api/voice/livekit         -> {url, token, room, identity, expiresAt}
+Casework app / web Desk / cyberdeck seed CLI, on any node
+   │  GET  /api/voice/config          -> {configured, provider: "livekit", via: {node, name}}
+   │  POST /api/voice/livekit         -> {url, secureUrl, token, room, identity, expiresAt, via}
    ▼
-Cyberdeck daemon (src/daemon/api/voice.ts, src/daemon/seed.ts)
+Cyberdeck daemon on that node: relays every /api/voice/* route to the hub (config voice.hub)
+   │  fleet proxy, x-cyberdeck-voice-direct
+   ▼
+Cyberdeck daemon on the hub, clipper (src/daemon/api/voice.ts, src/daemon/seed.ts)
    │  signed DAG-CBOR AgentsAction envelope, POST /api/message
    │  CreateVoiceSession {sessionId}
    ▼
@@ -53,16 +62,30 @@ node token and the LiveKit token are never logged.
 
 ## Configuration
 
-`~/.cyberdeck/config.json`:
+`~/.cyberdeck/config.json`. On every node but the hub:
 
 ```json
+"voice": { "hub": "clipper" }
+```
+
+On the hub itself (the `seed` block is only read where the bridge answers locally):
+
+```json
+"voice": { "hub": "clipper" },
 "seed": {
   "agentsUrl": "http://127.0.0.1:3053",
-  "identity": "main",
   "modelProvider": "OpenAI",
-  "model": "gpt-6-sol"
+  "model": "gpt-6-sol",
+  "companionFile": "/Users/ericvicenti/Library/Application Support/CyberdeckSeed/companion.json",
+  "runtimeFile": "/Users/ericvicenti/Library/Application Support/CyberdeckSeed/runtime.json"
 }
 ```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `voice.hub` | unset | Name (or node id) of the paired node that runs the voice system. Set, every voice route relays there, whatever this node's own bridge says; naming this node means "answer here". Unset: this node's bridge, else the first paired node that has one. Env `CYBERDECK_VOICE_HUB` overrides. |
+| `seed.companionFile` | `~/Library/Application Support/CaseworkSeed/companion.json` | Where the voice profile (and a Casework Companion to adopt) is read. |
+| `seed.runtimeFile` | `~/Library/Application Support/CaseworkSeed/runtime.json` | The agents server's env file; its `SEED_AGENTS_VOICE_INTERNAL_TOKEN` lets the bridge apply the profile per room. |
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -93,15 +116,28 @@ stored credentials. `cyberdeck seed providers` lists what the identity has. Then
 --no-adopt` and the first query (or `cyberdeck seed sync`) create the agents.
 
 An agents server for such a node is the Seed repo's `agents/` service run with `bun src/main.ts`
-and an env file: on clipper, launchd `sh.cyberdeck.seed-agents` runs
-`~/Library/Application Support/CyberdeckSeed/run-server.py` (umask 077, env from `runtime.json`:
-port 3053, DB and data dir under that folder, `SEED_AGENTS_HM_SERVER_URL=https://hyper.media`,
-subscription auth on) from `~/Code/Seed/agents`. No voice there yet (LiveKit, Deepgram and Cartesia
-keys are only on yacht's experiments server).
+and an env file. **The hub, clipper** (since 2026-10-16, moved from yacht's experiments server):
 
-Today the default points at the **experiments** agents server on this Mac (launchd
-`com.casework.seed-experiments`, worktree `~/Code/Seed-worktrees/agent-voice`). That instance was
-set up by the Casework experiments and already owns the "Casework Companion" agent.
+- launchd `sh.cyberdeck.seed-agents` runs `~/Library/Application Support/CyberdeckSeed/run-server.py`
+  (umask 077, env from `runtime.json`, never logged) from the worktree
+  `~/Code/Seed-worktrees/agent-voice/agents`, which is the Seed branch `voice-tool-feedback-pr` at the
+  commit yacht ran (voice is not on Seed main yet; its migrations are older than main's, so the
+  server has its own database `agents-voice.sqlite` and data dir `data-voice` in that folder; the
+  Seed.app-binary server's database from before the move is kept beside it). Port 3053, hyper.media
+  gateway, subscription auth, `SEED_AGENTS_VOICE_ENABLED=1`, worker `child`, Deepgram + Cartesia keys,
+  `SEED_AGENTS_LIVEKIT_URL=ws://127.0.0.1:7880`, `SEED_AGENTS_LIVEKIT_PUBLIC_URL=ws://100.72.8.73:7880`
+  (clipper's tailnet address: media reaches it from any tailnet device).
+- launchd `sh.cyberdeck.livekit` runs `livekit-server --config .../CyberdeckSeed/livekit.yaml`
+  (port 7880, rtc 7881/7882, `node_ip` the tailnet address; the API key and secret in
+  `CyberdeckSeed/secrets/livekit.json` match `runtime.json`).
+- `tailscale serve --bg --https=7443 http://127.0.0.1:7880` publishes LiveKit as
+  `wss://clipper.<tailnet>:7443` (the `secureUrl` every grant carries) and `--https=443` the Desk.
+- The identity is the node key (`z6Mku4qH…`), the OpenAI subscription provider was copied into the
+  new database, `cyberdeck seed setup --no-adopt`, `sync --voice` and `dogfood` were re-run there.
+
+yacht's former experiments server (`com.casework.seed-experiments`) keeps running for the Casework
+experiments but with voice off (`SEED_AGENTS_VOICE_ENABLED=0`, LiveKit unloaded, no `:7443`), so no
+node can discover it as a voice peer.
 
 ## Setup
 
@@ -176,14 +212,15 @@ cyberdeck seed prompt [--apply]  # the agent's system prompt vs the fleet person
 
 ## Voice profile
 
-The Casework host keeps Eric's chosen voice in `~/Library/Application Support/CaseworkSeed/companion.json`
-as `profile: {voice: <Cartesia voice id>, speed}`. The agents server applies a profile per room through
+The chosen voice lives in the hub's companion file (`seed.companionFile`, on clipper
+`~/Library/Application Support/CyberdeckSeed/companion.json`, copied from the Casework host's
+`CaseworkSeed/companion.json` on yacht) as `profile: {voice: <Cartesia voice id>, speed}`. The agents server applies a profile per room through
 its internal runtime route (`POST /api/voice/runtime {room, profile}`, bearer
 `SEED_AGENTS_VOICE_INTERNAL_TOKEN`), which the worker consults when it speaks. Every
 `POST /api/voice/livekit` now does what the casework-host script did: right after `CreateVoiceSession`
-it reads the profile from `companion.json`, reads the token from `SEED_AGENTS_VOICE_INTERNAL_TOKEN` in
-`~/Library/Application Support/CaseworkSeed/runtime.json` (the experiments server's env file; env
-`CYBERDECK_SEED_VOICE_INTERNAL_TOKEN` overrides, tests pass a `runtimeFile`), and posts
+it reads the profile from the companion file, reads the token from `SEED_AGENTS_VOICE_INTERNAL_TOKEN` in
+the agents server's env file (`seed.runtimeFile`; env `CYBERDECK_SEED_VOICE_INTERNAL_TOKEN` overrides,
+tests pass a `runtimeFile`), and posts
 `{room, profile}` with a 5 s timeout. The call never fails on this step: the response's `profile`
 says `applied: true`, or `applied: false` with the reason (`no voice runtime token (...)`,
 `voice runtime HTTP 401`, a timeout), and the room speaks with the worker's default voice. A profile
@@ -192,8 +229,8 @@ skipped silently and `profile` is absent.
 
 `status` reports `profile: {voice, speed, runtimeToken, source}` whenever `companion.json` has a valid
 profile, so `cyberdeck seed status` and the Desk's bridge strip ("voice 13ff5deb x1") show which voice
-calls will use and whether the token to apply it is on hand (amber LED when it is not). Nodes other
-than the one running the experiments server have neither file and carry no profile.
+calls will use and whether the token to apply it is on hand (amber LED when it is not). Only the hub
+has the files; relayed status carries the hub's profile.
 
 ## Dogfood: the daily fleet check-in
 
@@ -212,43 +249,41 @@ created; edit the time in the agent's Triggers tab afterwards.
 
 All of these go through the local daemon's HTTP API with the node token, like the other commands.
 
-## Nodes without voice
+## The voice hub
 
-The agents server runs on one machine (today Yacht), so only that node has a bridge of its own.
-Every other node's daemon relays the pairing-key voice routes (`config`, `livekit`, `status`,
-`transcript`, `session/reset`) to the first paired node whose `/api/voice/config` says configured
-(`createVoiceRelay` in `src/daemon/api/voice.ts`: the peers of the fleet `nodes` table are probed
-at once with a 4 s bound, the winner is kept 60 s, a miss 15 s, and the node that answered last is
-asked first). Relayed answers carry `via: {node, name}`, `/api/state` and the Casework `welcome`
-say `configured: true` with the same `via`, and `cyberdeck seed status` prints a `relayed:` line.
-This is what lets the iPad app, which only ever talks to the node it is paired with, place calls
-from any node. Probes and relayed requests set the `x-cyberdeck-voice-direct` header, which makes
-the peer answer for itself only, so two voice-less nodes never bounce a request between them.
-"Run setup" still targets the node itself.
+The voice system runs on one node, named by `voice.hub` on every node (`createVoiceRelay` in
+`src/daemon/api/voice.ts` with `pinned`). A node whose hub is another node relays `config`, `livekit`,
+`status`, `transcript` and `session/reset` to that paired peer through the fleet proxy (20 s timeout),
+whatever its own bridge says, and every answer carries `via: {node, name}`; `status` adds the local
+bridge under `local`. `setup`, `dogfood` and `prompt` always target the node itself. A request that
+arrives with the `x-cyberdeck-voice-direct` header is never relayed again, so a misconfigured hub
+cannot bounce. When the hub is not paired with the node, voice is simply off there with the reason
+`voice hub clipper is not paired with this node` (pair it from Home). `/api/state`, the Casework
+`welcome` frame and `cyberdeck seed status` (`voice hub: clipper (…) answers every voice route of this
+node`) say the same.
 
-The web Desk keeps its own fallback for the case the daemon cannot resolve (a node whose pairing is
-one-sided): when the node in view says `configured: false`, `ui/lib/voice.ts` (`findVoiceNode`)
-asks the other nodes of the fleet (`/api/fleet/nodes`, online ones, plus this daemon when a remote
-node is in view) through the proxy and sends the call, status, transcript and session reset to the
-first one that is configured. The bridge strip reads `node Starlight → Yacht` in both cases. The
-not-configured card only shows when no reachable node has voice (a stopped Tailscale looks like
-that: every paired node is offline).
+The web Desk talks only to the daemon in view and shows the hub in its bridge strip (`voice clipper`);
+the machine dropdown of the shell is hidden on the Desk because there is nothing to pick. Without a
+hub configured (not the fleet's setup), a node with no bridge of its own still finds the first paired
+node whose `/api/voice/config` says configured (probe 4 s, found peer trusted 60 s, miss 15 s) and
+relays there, so nothing breaks on a node that missed the config.
 
 ## Browser microphone and HTTPS
 
 Browsers only expose `getUserMedia` on secure origins, so the web Desk can place calls from
 `http://localhost:4777` on the node itself but not from a plain-HTTP tailnet address. Run
-`cyberdeck serve` and use `https://<node>.<tailnet>.ts.net`. The LiveKit `url` the experiments server
-hands out is its own (today a LAN `ws://` address), so the caller must be able to reach that too.
-An https page cannot open that plain `ws://` address at all (mixed content). When `tailscale serve`
-publishes the call server's port over TLS on the voice node, `POST /api/voice/livekit` adds
-`secureUrl` (the `wss://` twin, `secureCallUrl` in `api/voice.ts`) and an https Desk connects there;
-without it the Desk fails with a message naming the fix. On yacht (2026-10-09):
+`cyberdeck serve` and use `https://<node>.<tailnet>.ts.net`. The LiveKit `url` the hub hands out is
+clipper's tailnet `ws://` address, so the caller must be on the tailnet. An https page cannot open a
+plain `ws://` address at all (mixed content): the hub publishes LiveKit over TLS and
+`POST /api/voice/livekit` adds `secureUrl` (the `wss://` twin, `secureCallUrl` in `api/voice.ts`,
+computed on the hub and relayed as is), which an https Desk uses; without it the Desk fails with a
+message naming the fix. On clipper:
 
-    tailscale serve --bg --https=7443 http://127.0.0.1:7880   # LiveKit signaling -> wss://yacht.<tailnet>:7443
+    tailscale serve --bg --https=7443 http://127.0.0.1:7880   # LiveKit signaling -> wss://clipper.<tailnet>:7443
 
-Media still flows over WebRTC to the addresses LiveKit advertises (`rtc.node_ip`, today the LAN IP),
-so a phone on the home network works; off-LAN calls need the droplet's LiveKit (ROADMAP P4).
+Media flows over WebRTC to the address LiveKit advertises (`rtc.node_ip`, clipper's tailnet IP), so
+any tailnet device works, on the LAN or not; a device that is not on the tailnet (the buoy iPad until
+Tailscale is installed there) cannot reach the hub at all.
 
 ## Phone home-screen button
 
@@ -301,9 +336,12 @@ flow for no new capability. The Expo app stays iOS only; `remote-control/README.
 
 - **Voice profile editing**: Cyberdeck applies the profile but has no UI or route to change it; the
   Casework host's `set_voice` tool (or editing `companion.json`) is still how it is chosen.
-- **Production agents server** is not wired: the default is the local experiments instance. Pointing
-  `seed.agentsUrl` at a hosted server also needs the MCP URL to be reachable from there
-  (docs/AGENTS.md, Reachability) and that server to run a voice pipeline.
+- **Voice on Seed main**: the hub runs the unmerged Seed voice branch at a pinned commit. When the
+  voice PRs land, point the clipper worktree at main, merge the two databases' agents (or re-run
+  setup) and drop the `agents-voice.sqlite` split.
+- **Production agents server** is not wired: pointing `seed.agentsUrl` at a hosted server also needs
+  the MCP URL to be reachable from there (docs/AGENTS.md, Reachability) and that server to run a
+  voice pipeline.
 - **Transcript** is the session's durable events, not the live call: the LiveKit transcription
   events arrive on the client (the Desk shows them live and reloads the durable tail when the call
   ends), not through this daemon.

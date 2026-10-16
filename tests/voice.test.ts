@@ -13,7 +13,7 @@ import { initSchema } from "../src/daemon/db";
 import { createServer } from "../src/daemon/server";
 import { seedConfig } from "../src/daemon/config";
 import { caseworkAllows } from "../src/daemon/api/casework";
-import { secureCallUrl } from "../src/daemon/api/voice";
+import { createVoiceRelay, secureCallUrl } from "../src/daemon/api/voice";
 import { Tailscale } from "../src/daemon/tailscale";
 import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME, fleetPrompt } from "../src/daemon/seed";
 import { testConfig, TEST_TOKEN, tmpHomeDir } from "./helpers";
@@ -573,6 +573,94 @@ describe("voice relay", () => {
     expect((await req(e, KEY, "/api/voice/livekit", { method: "POST" })).status).toBe(503);
     const state = await (await req(e, KEY, "/api/state")).json();
     expect(state.voice).toMatchObject({ configured: false, provider: "none" });
+  }, 20000);
+});
+
+describe("voice hub", () => {
+  const rows = (): import("../src/daemon/api/fleet").NodeRow[] => [
+    { id: "n-yacht", name: "Yacht", url: "http://127.0.0.1:9", token: "t", added_at: 1, last_seen: 1 } as any,
+    { id: "n-clipper", name: "clipper", url: "http://127.0.0.1:9", token: "t", added_at: 1, last_seen: 1 } as any,
+  ];
+  test("a pinned hub is found by name or id without probing anyone", async () => {
+    const probe = async () => { throw new Error("must not probe"); };
+    const byName = createVoiceRelay(rows, probe, { hub: "Clipper", self: "yacht" });
+    expect(byName.pinned).toBe("Clipper");
+    expect((await byName.find())?.id).toBe("n-clipper");
+    const byId = createVoiceRelay(rows, probe, { hub: "n-yacht", self: "clipper" });
+    expect((await byId.find())?.name).toBe("Yacht");
+    const unpaired = createVoiceRelay(rows, probe, { hub: "nowhere", self: "yacht" });
+    expect(unpaired.pinned).toBe("nowhere");
+    expect(await unpaired.find()).toBeNull();
+  });
+  test("a hub that names this node means local voice; no hub means discovery", async () => {
+    const self = createVoiceRelay(rows, async () => true, { hub: " clipper ", self: "Clipper" });
+    expect(self.pinned).toBeUndefined();
+    const none = createVoiceRelay(rows, async () => true, { self: "yacht" });
+    expect(none.pinned).toBeUndefined();
+    expect((await none.find())?.id).toBe("n-yacht");
+  });
+
+  let g: Node, h: Node, i: Node;
+  beforeAll(async () => {
+    // g has a working bridge of its own but is pinned to the hub "Hub" (= f): everything relays there.
+    g = startNode(voiced.url, "voice-g", { agentId: COMPANION_ID, profile: { voice: "v", speed: 1 } }, RUNTIME_TOKEN, { voice: { hub: "hub" } });
+    pair(g, "n-hub", "Hub", f);
+    // h is pinned to a hub it is not paired with.
+    h = startNode(voiced.url, "voice-h", { agentId: COMPANION_ID }, RUNTIME_TOKEN, { voice: { hub: "Clipper" } });
+    pair(h, "n-hub", "Hub", f);
+    // i names itself as the hub: its own bridge answers.
+    i = startNode(voiced.url, "voice-i", { agentId: COMPANION_ID }, RUNTIME_TOKEN, { nodeName: "Clipper", voice: { hub: "clipper" } });
+    pair(i, "n-hub", "Hub", f);
+    // Setup always targets the node itself; g, h and i get working bridges of their own, f is the hub.
+    for (const n of [f, g, h, i]) expect((await req(n, TEST_TOKEN, "/api/voice/setup", { method: "POST", body: "{}" })).status).toBe(200);
+  });
+  afterAll(() => { for (const n of [g, h, i]) { n.stop(); n.cleanup(); } });
+
+  test("every voice route of a node pinned to the hub goes there, even with a bridge of its own", async () => {
+    const own = await (await req(f, KEY, "/api/voice/config")).json();
+    const cfg = await (await req(g, KEY, "/api/voice/config")).json();
+    expect(cfg).toEqual({ ...own, via: { node: "n-hub", name: "Hub" } });
+    const grant = await (await req(g, KEY, "/api/voice/livekit", { method: "POST" })).json();
+    expect(grant).toMatchObject({ url: "wss://livekit.example/", via: { node: "n-hub", name: "Hub" } });
+    const s = await (await req(g, TEST_TOKEN, "/api/voice/status")).json();
+    expect(s.via).toEqual({ node: "n-hub", name: "Hub" });
+    expect(s.local).toMatchObject({ configured: true });
+    const t = await (await req(g, KEY, "/api/voice/transcript?limit=5")).json();
+    expect(t.via).toEqual({ node: "n-hub", name: "Hub" });
+    const state = await (await req(g, KEY, "/api/state")).json();
+    expect(state.voice).toMatchObject({ configured: true, via: { node: "n-hub", name: "Hub" } });
+    expect((await welcome(g)).voice).toMatchObject({ configured: true, via: { name: "Hub" } });
+    // Asked directly (as the hub itself would ask), the node answers for itself.
+    const direct = await (await req(g, KEY, "/api/voice/config", { headers: { "x-cyberdeck-voice-direct": "1" } })).json();
+    expect(direct).toMatchObject({ configured: true });
+    expect(direct.via).toBeUndefined();
+  }, 20000);
+
+  test("a hub that is not paired leaves the node without voice and says so", async () => {
+    const cfg = await (await req(h, KEY, "/api/voice/config")).json();
+    expect(cfg).toMatchObject({ configured: false, provider: "none" });
+    expect(cfg.reason).toContain("voice hub Clipper is not paired");
+    const call = await req(h, KEY, "/api/voice/livekit", { method: "POST" });
+    expect(call.status).toBe(503);
+    expect((await call.json()).reason).toContain("not paired");
+    const s = await (await req(h, TEST_TOKEN, "/api/voice/status")).json();
+    expect(s.configured).toBe(false);
+    expect(s.reason).toContain("not paired");
+    expect(s.local).toMatchObject({ configured: true });
+    expect((await req(h, KEY, "/api/voice/session/reset", { method: "POST", body: "{}" })).status).toBe(503);
+    expect((await req(h, KEY, "/api/voice/transcript")).status).toBe(503);
+    const state = await (await req(h, KEY, "/api/state")).json();
+    expect(state.voice).toMatchObject({ configured: false, provider: "none" });
+    expect(state.voice.reason).toContain("not paired");
+  }, 20000);
+
+  test("a node that is itself the hub answers locally and never relays", async () => {
+    const cfg = await (await req(i, KEY, "/api/voice/config")).json();
+    expect(cfg).toMatchObject({ configured: true, provider: "livekit" });
+    expect(cfg.via).toBeUndefined();
+    const grant = await (await req(i, KEY, "/api/voice/livekit", { method: "POST" })).json();
+    expect(grant.url).toBe("wss://livekit.example/");
+    expect(grant.via).toBeUndefined();
   }, 20000);
 });
 

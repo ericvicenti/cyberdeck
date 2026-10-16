@@ -140,20 +140,23 @@ export function App() {
           {cmuxCount != null && <button className="hud-chip text-zinc-300 hover:text-zinc-100" onClick={() => navigate("cmux")}><span className="led led-on" />cmux {cmuxCount}</button>}
         </div>
         <div className="flex-1" />
-        <select
-          value={nodeId}
-          onChange={(e) => switchNode(e.target.value)}
-          data-testid="node-switcher"
-          className="max-w-[45vw] rounded-sm border border-zinc-800 bg-zinc-900 px-2 py-0.5 text-[11px] uppercase tracking-wider text-zinc-300 outline-none focus:border-zinc-600"
-          title="Which machine you are operating on"
-        >
-          <option value="">{fleet?.self.name ?? "this machine"} (local)</option>
-          {fleet?.nodes.map((n) => (
-            <option key={n.id} value={n.id} disabled={!n.online}>
-              {n.name} {n.online ? "" : "(offline)"}
-            </option>
-          ))}
-        </select>
+        {/* The Desk has no machine to pick: voice always goes through the hub (docs/VOICE.md). */}
+        {route.view !== "desk" && (
+          <select
+            value={nodeId}
+            onChange={(e) => switchNode(e.target.value)}
+            data-testid="node-switcher"
+            className="max-w-[45vw] rounded-sm border border-zinc-800 bg-zinc-900 px-2 py-0.5 text-[11px] uppercase tracking-wider text-zinc-300 outline-none focus:border-zinc-600"
+            title="Which machine you are operating on"
+          >
+            <option value="">{fleet?.self.name ?? "this machine"} (local)</option>
+            {fleet?.nodes.map((n) => (
+              <option key={n.id} value={n.id} disabled={!n.online}>
+                {n.name} {n.online ? "" : "(offline)"}
+              </option>
+            ))}
+          </select>
+        )}
       </header>
 
       <div className="flex min-h-0 flex-1">

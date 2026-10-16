@@ -153,30 +153,34 @@ test("desk view: talk button and the not-configured card render", async () => {
   await page.waitForFunction(() => document.querySelector('link[rel="manifest"]')?.getAttribute("href") === "/manifest.webmanifest");
 }, 20000);
 
-test("desk view: a paired node with voice takes the call when this one has none", async () => {
-  // the agents server lives on one machine; the Desk finds it through the fleet and proxies there
+test("desk view: the daemon relays voice to the hub; the page names it and has no machine dropdown", async () => {
+  // voice is centralized: the daemon in view answers with `via` and the page talks to nobody else
   const calls: string[] = [];
-  await page.route("**/api/fleet/nodes", (r) => r.fulfill({ json: { self: { name: "e2e-node" }, nodes: [{ id: "n-off", name: "Offline", online: false }, { id: "n-voice", name: "Yacht", online: true }] } }));
-  await page.route("**/api/nodes/n-voice/proxy/voice/**", (r) => {
-    const path = new URL(r.request().url()).pathname.split("/proxy/")[1];
+  await page.route("**/api/voice/**", (r) => {
+    const path = new URL(r.request().url()).pathname.split("/api/")[1];
     calls.push(path);
-    if (path === "voice/config") return r.fulfill({ json: { configured: true, provider: "livekit", engine: "seed", agentId: "agent-1", sessionId: "sess-1234abcd" } });
-    if (path === "voice/status") return r.fulfill({ json: { configured: true, agent: { id: "agent-1", name: "Companion" }, sessionId: "sess-1234abcd", health: { ok: true } } });
-    return r.fulfill({ json: { supported: true, messages: [{ role: "assistant", text: "hello from yacht", at: 1 }] } });
+    const via = { node: "n-hub", name: "Clipper" };
+    if (path === "voice/config") return r.fulfill({ json: { configured: true, provider: "livekit", engine: "seed", agentId: "agent-1", sessionId: "sess-1234abcd", via } });
+    if (path === "voice/status") return r.fulfill({ json: { configured: true, agent: { id: "agent-1", name: "Companion" }, sessionId: "sess-1234abcd", health: { ok: true }, via } });
+    return r.fulfill({ json: { supported: true, messages: [{ role: "assistant", text: "hello from clipper", at: 1 }], via } });
   });
   try {
     await page.goto(`${BASE}/#/fleet`);
+    expect(await page.isVisible('[data-testid="node-switcher"]')).toBe(true);
     await page.goto(`${BASE}/#/desk`);
     await page.waitForSelector('[data-testid="talk-button"]');
-    await waitFor(async () => (await page.textContent('[data-testid="voice-node"]'))?.includes("Yacht") ?? false);
+    await waitFor(async () => (await page.textContent('[data-testid="voice-node"]'))?.includes("Clipper") ?? false);
+    expect(await page.isVisible('[data-testid="node-switcher"]')).toBe(false);
     expect(await page.isVisible('[data-testid="voice-unconfigured"]')).toBe(false);
     await waitFor(async () => (await page.textContent('[data-testid="voice-status"]'))?.includes("Companion") ?? false);
-    await waitFor(async () => (await page.textContent('[data-testid="voice-transcript"]'))?.includes("hello from yacht") ?? false);
+    await waitFor(async () => (await page.textContent('[data-testid="voice-transcript"]'))?.includes("hello from clipper") ?? false);
     expect(calls).toContain("voice/config");
     expect(calls.some((c) => c.startsWith("voice/transcript"))).toBe(true);
+    expect(calls.every((c) => !c.includes("/proxy/"))).toBe(true);
+    await page.goto(`${BASE}/#/fleet`);
+    await page.waitForSelector('[data-testid="node-switcher"]');
   } finally {
-    await page.unroute("**/api/fleet/nodes");
-    await page.unroute("**/api/nodes/n-voice/proxy/voice/**");
+    await page.unroute("**/api/voice/**");
   }
 }, 30000);
 

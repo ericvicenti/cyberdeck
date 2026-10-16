@@ -131,7 +131,7 @@ switch (cmd) {
       console.log(`agent:         ${s.agent ? `${s.agent.name ?? "?"} (${s.agent.id})` : "not set up"}`);
       console.log(`session:       ${s.sessionId ?? "none"}`);
       console.log(`mcp registered: ${when(s.mcpRegisteredAt)}   last call: ${when(s.lastCallAt)}`);
-      if (s.via) console.log(`relayed:       this node has no voice bridge; ${s.via.name} (${s.via.node}) answers for it`);
+      if (s.via) console.log(`voice hub:     ${s.via.name} (${s.via.node}) answers every voice route of this node`);
       if (s.dogfood) console.log(`dogfood:       ${s.dogfood.name} (${s.dogfood.triggerId}) ${s.dogfood.enabled ? "enabled" : "disabled"}, ${s.dogfood.nextSummary ?? ""}; last fired ${when(s.dogfood.lastFiredAt)}${s.dogfood.lastError ? `; last error: ${s.dogfood.lastError}` : ""}`);
       if (s.profile) console.log(`voice profile: ${s.profile.voice} x${s.profile.speed} (${s.profile.runtimeToken ? "runtime token on hand" : "NO runtime token: calls keep the worker's default voice"})`);
       console.log(s.configured ? "voice: ready (provider livekit)" : `voice: not configured — ${s.reason}`);

@@ -5,7 +5,7 @@
 // not configured, the card explains why and offers the one-time setup.
 import { useEffect, useRef, useState } from "react";
 import { api, post, navigate, ApiError } from "../lib/api";
-import { useVoice, voiceApi, micAllowedHere, type TranscriptLine } from "../lib/voice";
+import { useVoice, micAllowedHere, type TranscriptLine } from "../lib/voice";
 import { talkFace, isTalkKey, TALK_MODES } from "../lib/talk";
 import { MicIcon } from "../lib/icons";
 import { type Overview, isoAgo } from "../lib/control";
@@ -55,7 +55,7 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
     // A slower answer from the node that was asked before the route changed must not win.
     const load = ++statusLoad.current;
     try {
-      const s = await voiceApi<VoiceStatus>(v.route, "/api/voice/status");
+      const s = await api<VoiceStatus>("/api/voice/status");
       if (load === statusLoad.current) setStatus(s);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) onLocked();
@@ -64,7 +64,7 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
   };
   const loadHistory = async () => {
     try {
-      const t = await voiceApi<TranscriptHistory>(v.route, "/api/voice/transcript?limit=20");
+      const t = await api<TranscriptHistory>("/api/voice/transcript?limit=20");
       if (!t.supported || !t.messages) { setHistory([]); return; }
       setHistory(t.messages.map((m, i) => ({ id: `h:${i}:${m.at ?? ""}`, who: m.role === "user" ? "me" : "agent", text: m.text, final: true, at: m.at ?? 0 })));
     } catch {
@@ -78,10 +78,10 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
   const resolved = v.config !== null;
   useEffect(() => {
     if (resolved) void loadStatus();
-  }, [resolved, v.route?.node]);
+  }, [resolved, v.config?.via?.node]);
   useEffect(() => {
     if (v.config?.configured) void loadHistory();
-  }, [v.config?.configured, v.route?.node]);
+  }, [v.config?.configured, v.config?.via?.node]);
   // After a call ends, the session on the agents server holds the full exchange: reload it
   // and drop the live lines so nothing shows twice.
   useEffect(() => {
@@ -119,7 +119,7 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
     setBusy("reset");
     setNote(null);
     try {
-      const r = await voiceApi<{ sessionId?: string; room?: { name: string; switched: boolean; error?: string } }>(v.route, "/api/voice/session/reset", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(liveRoom ? { room: liveRoom } : {}) });
+      const r = await api<{ sessionId?: string; room?: { name: string; switched: boolean; error?: string } }>("/api/voice/session/reset", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(liveRoom ? { room: liveRoom } : {}) });
       v.clearTranscript();
       setHistory([]);
       const id = r.sessionId ? `new session ${r.sessionId.slice(0, 8)}` : "new session";
@@ -258,7 +258,7 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
               <span className="hud-chip text-zinc-300" title={sessionId ?? ""}><span className={`led ${sessionId ? "led-run" : "led-off"}`} />session {sessionId ? sessionId.slice(0, 8) : "—"}</span>
               {configured && <button onClick={resetSession} disabled={busy !== ""} data-testid="voice-new-session" className="hud-chip text-zinc-300 hover:text-zinc-100 disabled:opacity-40">{busy === "reset" ? "resetting…" : "new session"}</button>}
               {status?.profile && <span className="hud-chip text-zinc-300" data-testid="voice-profile" title={status.profile.runtimeToken ? `Cartesia voice ${status.profile.voice} at ${status.profile.speed}x, applied to every call` : `Cartesia voice ${status.profile.voice}: no runtime token on this node, calls keep the worker's default voice`}><span className={`led ${status.profile.runtimeToken ? "led-on" : "led-warn"}`} />voice {status.profile.voice.slice(0, 8)} ×{status.profile.speed}</span>}
-              <span className="hud-chip text-zinc-300" data-testid="voice-node" title={v.route ? `${nodeName || "This node"} has no voice bridge: calls go through ${v.route.name}` : v.config?.via ? `${nodeName || "This node"} has no voice bridge: its daemon relays the calls to ${v.config.via.name}` : ""}><span className="led led-on" />node {nodeName || "—"}{v.route ? ` → ${v.route.name}` : v.config?.via ? ` → ${v.config.via.name}` : ""}</span>
+              <span className="hud-chip text-zinc-300" data-testid="voice-node" title={v.config?.via ? `Voice is centralized: ${nodeName || "this node"} relays every call to the voice hub, ${v.config.via.name}` : "This node runs the voice system itself"}><span className="led led-on" />voice {v.config?.via ? v.config.via.name : nodeName || "—"}</span>
               {status?.identity && <span className="hud-chip text-zinc-300" title={status.identity.principal ?? ""}><span className={`led ${status.identity.available ? "led-on" : "led-warn"}`} />identity {status.identity.available ? (status.identity.principal ?? "ok").slice(0, 12) : "missing"}</span>}
             </div>
             {configured && note && <p className="mt-2 text-[11px] text-zinc-400" data-testid="voice-note">{note}</p>}

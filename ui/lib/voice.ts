@@ -6,7 +6,7 @@
 // transcript, a mic level and a mute switch on top.
 import type { Room, LocalAudioTrack, Participant, RemoteTrack, TranscriptionSegment } from "livekit-client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, activeNode, ApiError, type ApiInit } from "./api";
+import { api, ApiError } from "./api";
 import { readTalkMode, TALK_MODE_KEY, type TalkMode } from "./talk";
 
 export type VoicePhase = "idle" | "connecting" | "live" | "ending" | "error";
@@ -14,7 +14,7 @@ export type VoicePhase = "idle" | "connecting" | "live" | "ending" | "error";
 export type AgentState = "initializing" | "listening" | "thinking" | "speaking" | "idle";
 export type TranscriptLine = { id: string; who: "me" | "agent"; text: string; final: boolean; at: number };
 
-/** `via`: the paired node that answers for this one because it has no voice bridge (the daemon relays). */
+/** `via`: the voice hub, the paired node the daemon in view relays every voice route to (docs/VOICE.md). */
 export type VoiceConfig = { configured: boolean; provider: "livekit" | "none"; reason?: string; agentId?: string; sessionId?: string; via?: { node: string; name: string } };
 /** `secureUrl`: the wss:// twin of `url` an https page must use (see secureCallUrl in api/voice.ts). */
 type LivekitGrant = { url: string; secureUrl?: string; token: string; room: string; identity: string; expiresAt?: number };
@@ -26,11 +26,10 @@ export type Voice = {
   room: string | null;
   /** Readable reason for `phase === 'error'`; cleared by the next start. */
   error?: string;
-  /** Last `/api/voice/config` answer; null until loaded, `configured:false` + `reason` when voice is off. */
+  /** Last `/api/voice/config` answer; null until loaded, `configured:false` + `reason` when voice is off,
+   *  `via` naming the hub when the daemon relays the calls there. */
   config: VoiceConfig | null;
   configError?: string;
-  /** Set when the calls go to another node because the one in view has no voice; the Desk sends its own requests there too. */
-  route: VoiceRoute | null;
   transcript: TranscriptLine[];
   /** Local mic level 0..1 while live (0 when muted or idle). */
   level: number;
@@ -51,42 +50,6 @@ export type Voice = {
   refreshConfig: () => Promise<void>;
   clearTranscript: () => void;
 };
-
-/** A paired node whose daemon answers for voice when the one in view has no voice bridge. */
-export type VoiceRoute = { node: string; name: string };
-
-/** A voice request, sent to the node in view or through the local daemon's proxy to `route`. */
-export function voiceApi<T>(route: VoiceRoute | null, path: string, init?: ApiInit): Promise<T> {
-  if (!route) return api<T>(path, init);
-  return api<T>(route.node === "local" ? path : `/api/nodes/${route.node}/proxy/${path.slice("/api/".length)}`, { ...init, local: true });
-}
-const voicePost = <T,>(route: VoiceRoute | null, path: string, body: unknown): Promise<T> =>
-  voiceApi<T>(route, path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-
-const ROUTE_KEY = "cyberdeck-voice-route";
-const askVoiceNode = (route: VoiceRoute) => voiceApi<VoiceConfig>(route, "/api/voice/config", { signal: AbortSignal.timeout(8000) }).then((config) => ({ route, config })).catch(() => null);
-
-/** The first other node of the fleet (this daemon included, when a remote node is in view) with voice set up. */
-async function findVoiceNode(): Promise<{ route: VoiceRoute; config: VoiceConfig } | null> {
-  const viewed = activeNode();
-  // The node that took the last call answers in milliseconds; the fleet listing probes every peer first.
-  try {
-    const last = JSON.parse(localStorage.getItem(ROUTE_KEY) ?? "null") as VoiceRoute | null;
-    const again = last?.node && last.node !== (viewed || "local") ? await askVoiceNode(last) : null;
-    if (again?.config.configured) return again;
-  } catch {}
-  const fleet = await api<{ self?: { name?: string }; nodes?: { id: string; name: string; online?: boolean }[] }>("/api/fleet/nodes").catch(() => null);
-  if (!fleet) return null;
-  const routes: VoiceRoute[] = [
-    ...(viewed ? [{ node: "local", name: fleet.self?.name ?? "this node" }] : []),
-    ...(fleet.nodes ?? []).filter((n) => n.online && n.id !== viewed).map((n) => ({ node: n.id, name: n.name })),
-  ];
-  // The first node that says yes wins: a peer that is slow to answer (or to fail) must not hold the call up.
-  const asked = routes.map((route) => askVoiceNode(route).then((a) => (a?.config.configured ? a : Promise.reject(new Error("no voice")))));
-  const found = await Promise.any(asked).catch(() => null);
-  try { if (found) localStorage.setItem(ROUTE_KEY, JSON.stringify(found.route)); } catch {}
-  return found;
-}
 
 type LiveKit = typeof import("livekit-client");
 let livekitModule: Promise<LiveKit> | undefined;
@@ -126,8 +89,6 @@ export function useVoice({ onLocked }: { onLocked?: () => void } = {}): Voice {
   const [error, setError] = useState<string | undefined>();
   const [config, setConfig] = useState<VoiceConfig | null>(null);
   const [configError, setConfigError] = useState<string | undefined>();
-  const [route, setRoute] = useState<VoiceRoute | null>(null);
-  const routeRef = useRef<VoiceRoute | null>(null);
   const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
   const [roomName, setRoomName] = useState<string | null>(null);
   const [level, setLevel] = useState(0);
@@ -159,23 +120,18 @@ export function useVoice({ onLocked }: { onLocked?: () => void } = {}): Voice {
     try { localStorage.setItem(GREET_KEY, on ? "1" : "0"); } catch {}
   }, []);
 
+  // The daemon in view answers for voice itself or relays to the hub (`via`); the page never routes calls on its own.
   const refreshConfig = useCallback(async () => {
-    let own: VoiceConfig;
-    let ownError: string | undefined;
     try {
-      own = await api<VoiceConfig>("/api/voice/config");
+      setConfig(await api<VoiceConfig>("/api/voice/config"));
+      setConfigError(undefined);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) { onLockedRef.current?.(); return; }
       // An older daemon without the voice routes reads as "not configured" with a reason.
-      ownError = describeVoiceError(e);
-      own = { configured: false, provider: "none", reason: ownError };
+      const reason = describeVoiceError(e);
+      setConfig({ configured: false, provider: "none", reason });
+      setConfigError(reason);
     }
-    // The agents server lives on one machine of the fleet: when this node has no voice, a paired one takes the call.
-    const other = own.configured ? null : await findVoiceNode();
-    routeRef.current = other?.route ?? null;
-    setRoute(other?.route ?? null);
-    setConfig(other?.config ?? own);
-    setConfigError(other ? undefined : ownError);
   }, []);
 
   useEffect(() => { void refreshConfig(); }, [refreshConfig]);
@@ -262,7 +218,7 @@ export function useVoice({ onLocked }: { onLocked?: () => void } = {}): Voice {
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error(window.isSecureContext ? "Microphone access is not available in this browser" : "The microphone needs HTTPS or localhost");
       // The LiveKit SDK is large; only the first call on this page pays for it.
-      const [grant, { Room, RoomEvent, Track, createAudioAnalyser }] = await Promise.all([voicePost<LivekitGrant>(routeRef.current, "/api/voice/livekit", {}), loadLiveKit()]);
+      const [grant, { Room, RoomEvent, Track, createAudioAnalyser }] = await Promise.all([api<LivekitGrant>("/api/voice/livekit", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }), loadLiveKit()]);
       if (superseded()) return;
       // An https page may not open a plain ws:// socket (other than to localhost), and the SDK only reports a generic failure.
       // The daemon offers a wss:// twin (secureUrl) when tailscale serve publishes the call server over TLS.
@@ -403,5 +359,5 @@ export function useVoice({ onLocked }: { onLocked?: () => void } = {}): Voice {
     };
   }, [stop]);
 
-  return { phase, agentState, room: roomName, error, config, configError, route, transcript, level, muted, greet, setGreet, mode, setMode, held, hold, start, stop, toggle, toggleMute, refreshConfig, clearTranscript };
+  return { phase, agentState, room: roomName, error, config, configError, transcript, level, muted, greet, setGreet, mode, setMode, held, hold, start, stop, toggle, toggleMute, refreshConfig, clearTranscript };
 }

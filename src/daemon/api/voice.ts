@@ -3,10 +3,11 @@
 // POST /api/voice/livekit -> join the LiveKit room with {url, token, room}. The Casework pairing
 // key reaches everything here except setup (caseworkAllows in api/casework.ts).
 //
-// The agents server lives on one machine of the fleet. A node without a bridge of its own relays
-// the call routes to the first paired node that is configured (VoiceRelay), so the iPad app, which
-// only ever talks to the node it is paired with, places calls from any node. Answers that went
-// through a peer carry `via: {node, name}`.
+// The voice system lives on one machine of the fleet, the hub. With `voice.hub` set, every node relays
+// the call routes to that paired node (VoiceRelay), whatever its own bridge says, so the iPad app,
+// which only ever talks to the node it is paired with, and every web Desk place calls through the
+// hub. Without a hub, a node with no bridge relays to the first paired node that is configured.
+// Answers that went through a peer carry `via: {node, name}`.
 import type { Hono } from "hono";
 import { networkInterfaces } from "os";
 import { SeedBridge, SeedError } from "../seed";
@@ -53,11 +54,23 @@ const RELAY_TTL_MS = 60_000;
 const RELAY_MISS_TTL_MS = 15_000;
 
 export type VoiceRelay = {
-  /** The paired node whose `/api/voice/config` says configured, or null when none does (cached). */
+  /** The paired node that answers for voice: the hub when one is pinned (null when it is not paired), else
+   *  the peer whose `/api/voice/config` says configured, or null when none does (cached). */
   find: () => Promise<NodeRow | null>;
   /** Forget the cached answer (tests, re-pairing). */
   reset: () => void;
+  /** The hub's name when this node must relay there (set and not this node); undefined when voice is local or discovered. */
+  readonly pinned?: string;
 };
+
+export type VoiceRelayOptions = {
+  /** `voice.hub`: the paired node that runs the voice system; naming `self` means this node answers itself. */
+  hub?: string;
+  /** This node's own name. */
+  self?: string;
+};
+
+const sameName = (a: string | undefined, b: string | undefined) => !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
 
 type Probe = (node: NodeRow) => Promise<boolean>;
 
@@ -74,12 +87,21 @@ const probeConfig: Probe = async (node) => {
 };
 
 /**
- * Finds the paired node with a voice bridge. The node that answered last is asked first (it answers
- * in milliseconds); otherwise every peer is probed at once and the first "configured" wins.
+ * Finds the paired node that answers for voice. With a hub pinned it is that node, by name (or id), no
+ * probe: `find` is null only while the hub is not paired. Otherwise the node that answered last is asked
+ * first (it answers in milliseconds); else every peer is probed at once and the first "configured" wins.
  */
-export function createVoiceRelay(peers: () => NodeRow[], probe: Probe = probeConfig): VoiceRelay {
+export function createVoiceRelay(peers: () => NodeRow[], probe: Probe = probeConfig, opts: VoiceRelayOptions = {}): VoiceRelay {
   let cached: { node: NodeRow | null; at: number } | null = null;
   let inFlight: Promise<NodeRow | null> | null = null;
+  const hub = opts.hub?.trim() || undefined;
+  if (hub && !sameName(hub, opts.self)) {
+    return {
+      pinned: hub,
+      async find() { return peers().find((r) => sameName(r.name, hub) || r.id === hub) ?? null; },
+      reset() {},
+    };
+  }
   const lookup = async (): Promise<NodeRow | null> => {
     const rows = peers();
     if (rows.length === 0) throw new Error("no peers");
@@ -101,8 +123,15 @@ export function createVoiceRelay(peers: () => NodeRow[], probe: Probe = probeCon
 
 export const viaOf = (node: NodeRow): VoiceVia => ({ node: node.id, name: node.name });
 
+/** Why a node whose hub is not paired has no voice. */
+export const hubUnpaired = (hub: string) => `voice hub ${hub} is not paired with this node (pair it from Home, or change voice.hub)`;
+
 /** The shape `/api/state` and the Casework welcome carry: this node's bridge, or the peer that answers for it. */
 export async function voiceSummary(bridge: SeedBridge, relay?: VoiceRelay): Promise<{ configured: boolean; provider: "livekit" | "none"; engine: "seed"; reason?: string; via?: VoiceVia }> {
+  if (relay?.pinned) {
+    const node = await relay.find().catch(() => null);
+    return node ? { configured: true, provider: "livekit", engine: "seed", via: viaOf(node) } : { configured: false, provider: "none", engine: "seed", reason: hubUnpaired(relay.pinned) };
+  }
   const own = await bridge.voiceSummary();
   if (own.configured || !relay) return own;
   const node = await relay.find().catch(() => null);
@@ -127,12 +156,16 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
     }, 5000).unref?.();
   }
 
-  // The peer that answers for a node without a bridge, unless the caller asked this node directly.
+  // The peer that answers for this node: the pinned hub whatever the local bridge says, else (for a node
+  // without a bridge) the discovered peer. Never when the caller asked this node directly.
   const relayFor = async (c: any): Promise<NodeRow | null> => {
     if (!deps.relay || c.req.header(DIRECT_HEADER)) return null;
+    if (deps.relay.pinned) return deps.relay.find().catch(() => null);
     if ((await bridge.status()).configured) return null;
     return deps.relay.find().catch(() => null);
   };
+  // A pinned hub that is not paired: this node has no voice, and says why (the local bridge is not consulted).
+  const hubMissing = (c: any): string | null => (deps.relay?.pinned && !c.req.header(DIRECT_HEADER) ? hubUnpaired(deps.relay.pinned) : null);
   // Forwards the request to the peer and returns its answer with `via` (and the peer's status code).
   const relayed = async (c: any, node: NodeRow, path: string, init: RequestInit = {}) => {
     try {
@@ -147,11 +180,11 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
   };
 
   app.get("/api/voice/config", async (c) => {
+    const node = await relayFor(c);
+    if (node) return relayed(c, node, "/api/voice/config");
+    const missing = hubMissing(c);
+    if (missing) return c.json({ configured: false, provider: "none", engine: "seed", reason: missing });
     const s = await bridge.status();
-    if (!s.configured) {
-      const node = await relayFor(c);
-      if (node) return relayed(c, node, "/api/voice/config");
-    }
     return c.json({
       configured: s.configured,
       provider: s.configured ? "livekit" : "none",
@@ -163,12 +196,12 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
   });
 
   app.post("/api/voice/livekit", async (c) => {
+    const node = await relayFor(c);
+    if (node) return relayed(c, node, "/api/voice/livekit", { method: "POST" });
+    const missing = hubMissing(c);
+    if (missing) return c.json({ error: "voice not configured", reason: missing }, 503);
     const s = await bridge.status();
-    if (!s.configured) {
-      const node = await relayFor(c);
-      if (node) return relayed(c, node, "/api/voice/livekit", { method: "POST" });
-      return c.json({ error: "voice not configured", reason: s.reason }, 503);
-    }
+    if (!s.configured) return c.json({ error: "voice not configured", reason: s.reason }, 503);
     try {
       const v = await bridge.createVoiceSession();
       const secureUrl = deps.serveOrigin ? await secureCallUrl(v.url, deps.serveOrigin) : null;
@@ -182,18 +215,18 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
   // This node's own bridge; when a peer answers for it, the peer's status with `via` and this node's under `local`.
   app.get("/api/voice/status", async (c) => {
     const s = await bridge.status();
-    if (!s.configured) {
-      const node = await relayFor(c);
-      if (node) {
-        try {
-          const res = await peerFetch(node, "/api/voice/status", { headers: { [DIRECT_HEADER]: "1" }, signal: AbortSignal.timeout(20_000) });
-          const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-          if (body && typeof body === "object") return c.json({ ...body, via: viaOf(node), local: s }, res.status as any);
-        } catch (e) {
-          console.error(`voice: status relay to ${node.name} failed:`, e instanceof Error ? e.message : e);
-        }
+    const node = await relayFor(c);
+    if (node) {
+      try {
+        const res = await peerFetch(node, "/api/voice/status", { headers: { [DIRECT_HEADER]: "1" }, signal: AbortSignal.timeout(20_000) });
+        const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+        if (body && typeof body === "object") return c.json({ ...body, via: viaOf(node), local: s }, res.status as any);
+      } catch (e) {
+        console.error(`voice: status relay to ${node.name} failed:`, e instanceof Error ? e.message : e);
       }
     }
+    const missing = hubMissing(c);
+    if (missing) return c.json({ ...s, configured: false, reason: missing, local: s });
     return c.json(s);
   });
 
@@ -202,6 +235,8 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
     const body = await c.req.json().catch(() => ({}));
     const node = await relayFor(c);
     if (node) return relayed(c, node, "/api/voice/session/reset", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}) });
+    const missing = hubMissing(c);
+    if (missing) return c.json({ error: "voice not configured", reason: missing }, 503);
     try { return c.json(await bridge.resetSession({ room: typeof body?.room === "string" ? body.room : undefined })); }
     catch (e) { return c.json(errorBody(e), errorStatus(e)); }
   });
@@ -210,6 +245,8 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
     const limit = Number(c.req.query("limit") ?? 20);
     const node = await relayFor(c);
     if (node) return relayed(c, node, `/api/voice/transcript?limit=${Number.isFinite(limit) ? limit : 20}`);
+    const missing = hubMissing(c);
+    if (missing) return c.json({ supported: true, messages: [], error: missing }, 503);
     try { return c.json(await bridge.transcript(Number.isFinite(limit) ? limit : 20)); }
     catch (e) { return c.json({ supported: true, messages: [], ...errorBody(e) }, errorStatus(e)); }
   });

@@ -6,7 +6,7 @@ import { createBunWebSocket } from "hono/bun";
 import { serveStatic } from "hono/bun";
 import { join } from "path";
 import type { Database } from "bun:sqlite";
-import { saveConfigPatch, seedConfig, type CyberdeckConfig } from "./config";
+import { saveConfigPatch, seedConfig, type CyberdeckConfig, voiceHub } from "./config";
 import { getConnInfo } from "hono/bun";
 import { Tailscale, isLoopback, isTailscaleIp } from "./tailscale";
 import { bus } from "./events";
@@ -219,9 +219,11 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   registerCmuxRoutes(app);
   const isFullAuth = (c: { req: { raw: Request } }) => { const m = authByReq.get(c.req.raw)?.method; return m === "token" || m === "tailscale"; };
   // Seed agents bridge: voice calls from the Casework app / web Desk go to a Seed agent (docs/VOICE.md).
-  const seed = new SeedBridge({ config: seedConfig(cfg), port: cfg.port, token, home: opts.seed?.home, companionFile: opts.seed?.companionFile, runtimeFile: opts.seed?.runtimeFile, roots: cfg.roots, fleetDir: cfg.fleetDir, nodeTools: cfg.mcp?.nodeTools !== false });
-  // A node without a bridge relays its voice routes to the first paired node that has one.
-  const voiceRelay = createVoiceRelay(() => db.query("SELECT id, name, url, token, added_at, last_seen FROM nodes ORDER BY last_seen DESC").all() as NodeRow[]);
+  const seedCfg = seedConfig(cfg);
+  const seed = new SeedBridge({ config: seedCfg, port: cfg.port, token, home: opts.seed?.home, companionFile: opts.seed?.companionFile ?? seedCfg.companionFile, runtimeFile: opts.seed?.runtimeFile ?? seedCfg.runtimeFile, roots: cfg.roots, fleetDir: cfg.fleetDir, nodeTools: cfg.mcp?.nodeTools !== false });
+  // Voice is centralized on the hub (config voice.hub): every voice route relays to that paired node. Without
+  // a hub, a node without a bridge relays to the first paired node that has one.
+  const voiceRelay = createVoiceRelay(() => db.query("SELECT id, name, url, token, added_at, last_seen FROM nodes ORDER BY last_seen DESC").all() as NodeRow[], undefined, { hub: voiceHub(cfg), self: cfg.nodeName });
   casework = registerCaseworkRoutes(app, { token, nodeName: cfg.nodeName, kiosk: cfg.kiosk?.enabled, upgradeWebSocket, isFullAuth, experiencesDir: opts.caseworkExperiencesDir, key: opts.caseworkKey, voice: () => voiceSummary(seed, voiceRelay), secureOrigin: () => ts.serveOrigin(cfg.port), seedBridge: cfg.casework });
   registerDesktopRoutes(app, cfg, upgradeWebSocket, isFullAuth);
   registerVoiceRoutes(app, seed, { isFullAuth, serveOrigin: (port) => ts.serveOrigin(port), relay: voiceRelay });
