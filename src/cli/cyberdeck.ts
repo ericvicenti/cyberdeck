@@ -16,13 +16,14 @@ function token(): string {
   return existsSync(p) ? readFileSync(p, "utf8").trim() : "";
 }
 
-async function api(path: string, init?: RequestInit): Promise<any> {
+async function api(path: string, init?: RequestInit & { text?: boolean }): Promise<any> {
+  const { text, ...rest } = init ?? {};
   const res = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: { authorization: `Bearer ${token()}`, ...(init?.body ? { "content-type": "application/json" } : {}) },
+    ...rest,
+    headers: { authorization: `Bearer ${token()}`, ...(rest.body ? { "content-type": "application/json" } : {}) },
   });
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
-  return res.json();
+  return text ? res.text() : res.json();
 }
 const when = (ms?: number) => (ms ? new Date(ms).toLocaleString() : "never");
 
@@ -126,14 +127,20 @@ switch (cmd) {
     if (sub === "status") {
       const s = await api("/api/voice/status").catch(fail);
       console.log(`agents server: ${s.agentsUrl}  (${s.health?.ok ? `up${s.health.voice ? ", voice" : ", NO voice"}${s.health.version ? `, ${s.health.version}` : ""}` : `down: ${s.health?.error ?? "?"}`})`);
-      console.log(`identity:      ${s.identity.name} ${s.identity.available ? `-> ${s.identity.principal}` : `(unavailable: ${s.identity.error ?? "?"})`}`);
+      console.log(`identity:      ${s.identity.source === "file" ? "node key file" : s.identity.source === "env" ? "env key" : s.identity.name} ${s.identity.available ? `-> ${s.identity.principal}` : `(unavailable: ${s.identity.error ?? "?"})`}`);
       console.log(`agent:         ${s.agent ? `${s.agent.name ?? "?"} (${s.agent.id})` : "not set up"}`);
       console.log(`session:       ${s.sessionId ?? "none"}`);
       console.log(`mcp registered: ${when(s.mcpRegisteredAt)}   last call: ${when(s.lastCallAt)}`);
       if (s.dogfood) console.log(`dogfood:       ${s.dogfood.name} (${s.dogfood.triggerId}) ${s.dogfood.enabled ? "enabled" : "disabled"}, ${s.dogfood.nextSummary ?? ""}; last fired ${when(s.dogfood.lastFiredAt)}${s.dogfood.lastError ? `; last error: ${s.dogfood.lastError}` : ""}`);
       if (s.profile) console.log(`voice profile: ${s.profile.voice} x${s.profile.speed} (${s.profile.runtimeToken ? "runtime token on hand" : "NO runtime token: calls keep the worker's default voice"})`);
       console.log(s.configured ? "voice: ready (provider livekit)" : `voice: not configured — ${s.reason}`);
-      if (!s.configured) process.exit(1);
+      const h = await api("/api/voice/harness").catch(() => null);
+      if (h) {
+        console.log(`harness:       ${h.queryAgent ? `${h.queryAgent.name ?? "?"} (${h.queryAgent.id}) ${h.queryAgent.model ?? "?"}${h.queryAgent.reasoningLevel ? `@${h.queryAgent.reasoningLevel}` : ""}, prompt ${h.queryAgent.promptCurrent ? "current" : "STALE (run cyberdeck seed sync)"}, ${h.queryAgent.memoryFiles} pack files` : "no harness agent yet (first prompt-bar query creates it, or cyberdeck seed sync)"}`);
+        if (h.voiceAgent) console.log(`voice agent:   ${h.voiceAgent.name ?? "?"} prompt ${h.voiceAgent.managed ? (h.voiceAgent.promptCurrent ? "managed, current" : "managed, STALE") : "not managed (cyberdeck seed sync --voice adopts it)"}, ${h.voiceAgent.memoryFiles} pack files`);
+        console.log(`sources:       rules ${h.sources.rules ?? "none"}; deck ${h.sources.deck ?? "none"}; ${h.sources.notes} notes from ${h.sources.memoryDirs.join(", ") || "no memory dir"}; node tools ${h.nodeTools ? "on" : "off"}`);
+      }
+      if (!s.configured && !h?.queryAgent) process.exit(1);
     } else if (sub === "setup") {
       const name = flags.includes("--name") ? flags[flags.indexOf("--name") + 1] : undefined;
       const r = await api("/api/voice/setup", { method: "POST", body: JSON.stringify({ new: flags.includes("--new"), adopt: !flags.includes("--no-adopt"), ...(name ? { name } : {}) }) }).catch(fail);
@@ -141,6 +148,41 @@ switch (cmd) {
       console.log(`session: ${r.sessionId}`);
       console.log(`mcp:     ${r.mcp.name} -> ${r.mcp.url} (${r.mcp.state ?? "unknown"}${typeof r.mcp.tools === "number" ? `, ${r.mcp.tools} tools` : ""}${r.mcp.error ? `: ${r.mcp.error}` : ""})`);
       for (const w of r.warnings ?? []) console.log(`warning: ${w}`);
+    } else if (sub === "sync") {
+      // Prompt, memory pack and definition of the agents, from this node's files; --voice adopts the companion's prompt too.
+      const r = await api("/api/voice/harness/sync", { method: "POST", body: JSON.stringify({ voice: flags.includes("--voice"), force: flags.includes("--force") }) }).catch(fail);
+      console.log(`sources: rules ${r.sources.rules ?? "none"}; deck ${r.sources.deck ?? "none"}; ${r.sources.notes} notes; prompt ${r.promptBytes} chars`);
+      for (const a of r.agents) console.log(`${a.role.padEnd(8)} ${a.name ?? "?"} (${a.agentId}): ${a.created ? "created" : a.definition.length ? `updated ${a.definition.join(", ")}` : a.skipped ? `skipped (${a.skipped})` : "definition unchanged"}; memory ${a.memory.written} written, ${a.memory.deleted} deleted, ${a.memory.unchanged} unchanged of ${a.memory.files}${a.memory.error ? ` (error: ${a.memory.error})` : ""}`);
+      for (const w of r.warnings ?? []) console.log(`warning: ${w}`);
+    } else if (sub === "prompt-text") {
+      console.log(await api("/api/voice/harness/prompt", { text: true }).catch(fail));
+    } else if (sub === "keygen") {
+      // A node identity for machines without a Seed vault (~/.cyberdeck/seed-key).
+      const r = await api("/api/voice/keygen", { method: "POST", body: JSON.stringify({ force: flags.includes("--force") }) }).catch(fail);
+      console.log(`${r.created ? "created" : "kept existing"} ${r.keyFile}`);
+      console.log(`identity: ${r.available ? `${r.principal} (${r.source === "file" ? "node key file" : r.source === "env" ? "CYBERDECK_SEED_KEY_SEED still wins over the file" : "the vault account still wins; the file is unused"})` : `unavailable: ${r.error}`}`);
+    } else if (sub === "providers") {
+      const r = await api("/api/voice/providers").catch(fail);
+      for (const p of r.providers) console.log(`${p.name}: ${p.type}${p.authMode ? ` (${p.authMode})` : ""}${p.authStatus ? ` ${p.authStatus}` : ""}`);
+      if (!r.providers.length) console.log("no model providers on this identity: run `cyberdeck seed login`");
+    } else if (sub === "login") {
+      // "Sign in with ChatGPT" for the agents server identity: open the URL, paste the redirect URL (or code) back.
+      if (flags.includes("--code")) {
+        const r = await api("/api/voice/login", { method: "POST", body: JSON.stringify({ code: flags[flags.indexOf("--code") + 1] }) }).catch(fail);
+        console.log(`login ${r.status}${r.provider ? `; provider ${r.provider} saved` : ""}${r.error ? `: ${r.error}` : ""}`);
+      } else if (flags.includes("--status")) {
+        const r = await api("/api/voice/login", { method: "POST", body: JSON.stringify({ status: true }) }).catch(fail);
+        console.log(`login ${r.status}${r.provider ? `; provider ${r.provider} saved` : ""}${r.error ? `: ${r.error}` : ""}`);
+      } else {
+        const r = await api("/api/voice/login", { method: "POST", body: JSON.stringify({}) }).catch(fail);
+        console.log(`Open this URL in a browser signed in to ChatGPT, approve, then paste the URL it redirects to (localhost:1455/...) here:\n\n${r.authUrl}\n`);
+        process.stdout.write("redirect URL or code: ");
+        const code = (await new Promise<string>((res) => { let buf = ""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (d) => { buf += d; if (buf.includes("\n")) res(buf); }); process.stdin.on("end", () => res(buf)); })).trim();
+        if (!code) { console.log("no code entered; run `cyberdeck seed login --code <url>` later (the login stays pending a while)"); process.exit(1); }
+        const done = await api("/api/voice/login", { method: "POST", body: JSON.stringify({ code, loginId: r.loginId }) }).catch(fail);
+        console.log(`login ${done.status}${done.provider ? `; provider ${done.provider} saved` : ""}${done.error ? `: ${done.error}` : ""}`);
+        process.exit(done.status === "completed" ? 0 : 1);
+      }
     } else if (sub === "reset-session") {
       const r = await api("/api/voice/session/reset", { method: "POST" }).catch(fail);
       console.log(`new session: ${r.sessionId}${r.previous ? ` (was ${r.previous})` : ""}`);
@@ -169,7 +211,7 @@ switch (cmd) {
       for (const m of r.messages ?? []) console.log(`[${new Date(m.at).toLocaleTimeString()}] ${m.role}: ${m.text}`);
       if (!r.messages?.length) console.log("(no messages)");
     } else {
-      console.log("usage: cyberdeck seed status | setup [--new] [--no-adopt] [--name <agent>] | reset-session | call | transcript [n] | dogfood [--tz <zone>] [--at HH:MM] | prompt [--apply]");
+      console.log("usage: cyberdeck seed status | setup [--new] [--no-adopt] [--name <agent>] | sync [--voice] [--force] | prompt-text | keygen [--force] | login [--code <url>|--status] | providers | reset-session | call | transcript [n] | dogfood [--tz <zone>] [--at HH:MM] | prompt [--apply]");
       process.exit(1);
     }
     break;
@@ -193,6 +235,6 @@ usage: cyberdeck <command>
   update     pull own source, rebuild, restart
   serve      expose the UI as https://<node>.<tailnet> via tailscale serve (serve off: stop)
   mcp        connection details for MCP clients such as Seed Agents (--json)
-  seed       voice bridge to the Seed agents server: status | setup [--new] | reset-session | call | transcript | dogfood | prompt [--apply]
+  seed       Seed agents bridge: status | setup | sync [--voice] | keygen | login | providers | reset-session | call | transcript | dogfood | prompt [--apply]
   whoami     how the local daemon sees this caller`);
 }

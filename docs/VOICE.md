@@ -68,11 +68,36 @@ node token and the LiveKit token are never logged.
 |---|---|---|
 | `agentsUrl` | `http://127.0.0.1:3053` | The agents server. Its `GET /api/health` must report `voice: true`. Env `CYBERDECK_SEED_AGENTS_URL` overrides. |
 | `identity` | `main` | Vault account name that signs. Env `CYBERDECK_SEED_IDENTITY` overrides. |
-| `modelProvider`, `model` | `OpenAI`, `gpt-6-sol` | Used only when setup has to create the agent. The provider name must be one configured on the agents server for that account. |
+| `modelProvider`, `model` | `OpenAI`, `gpt-6-sol` | The harness agent's model (applied by the sync; also used when setup creates the voice agent). The provider name must be one configured on the agents server for that account (`cyberdeck seed login` creates `OpenAI`). Env `CYBERDECK_SEED_MODEL` overrides the model. |
+| `reasoningLevel` | `medium` | Reasoning level of the harness agent (`low`…`max` for gpt-6; `""` = provider default). Env `CYBERDECK_SEED_REASONING` overrides. |
+| `keyFile` | `~/.cyberdeck/seed-key` | A node identity for machines without a Seed vault (32 bytes of hex, `cyberdeck seed keygen`). Used when it exists and `CYBERDECK_SEED_KEY_SEED` is unset. |
+| `memoryDirs` | Claude Code's memory dir for the first scan root | Extra directories of markdown notes for the memory pack (docs/AGENTS.md, "The harness"). |
 | `agentId`, `sessionId` | unset | Optional fixed pointers; normally setup fills `seed.json` instead. |
 
-State lives in `~/.cyberdeck/seed.json` (`{agentId, sessionId, mcpRegisteredAt, lastCallAt}`, mode
-0600); it is written by setup, by session changes, and by every call.
+State lives in `~/.cyberdeck/seed.json` (`{agentId, sessionId, queryAgentId, mcpRegisteredAt, mcpTools,
+lastCallAt, dogfoodTriggerId, memoryPacks, login}`, mode 0600); it is written by setup, by the harness
+sync, by session changes, and by every call.
+
+### Nodes without a Seed vault
+
+A Mac without the Seed app (clipper) or a Linux server has no vault to sign with. `cyberdeck seed
+keygen` writes a fresh Ed25519 seed to `keyFile` (mode 0600) and the bridge signs as that node
+identity from then on (`cyberdeck seed status` says `node key file -> z6Mk…`). The identity is its own
+account on the agents server: it owns the agents and MCP record it creates, and it needs its own model
+provider. `cyberdeck seed login` runs "Sign in with ChatGPT" for it (the agents server must run with
+`SEED_AGENTS_SUBSCRIPTION_AUTH=true`): it prints the authorize URL, you open it in a browser that is
+signed in to ChatGPT, approve, and paste the `localhost:1455/...` URL it redirects to (or just the
+code) back into the prompt (`cyberdeck seed login --code <url>` works later too; `--status` polls).
+On completion the bridge saves a `subscription` provider named `modelProvider` that references the
+stored credentials. `cyberdeck seed providers` lists what the identity has. Then `cyberdeck seed setup
+--no-adopt` and the first query (or `cyberdeck seed sync`) create the agents.
+
+An agents server for such a node is the Seed repo's `agents/` service run with `bun src/main.ts`
+and an env file: on clipper, launchd `sh.cyberdeck.seed-agents` runs
+`~/Library/Application Support/CyberdeckSeed/run-server.py` (umask 077, env from `runtime.json`:
+port 3053, DB and data dir under that folder, `SEED_AGENTS_HM_SERVER_URL=https://hyper.media`,
+subscription auth on) from `~/Code/Seed/agents`. No voice there yet (LiveKit, Deepgram and Cartesia
+keys are only on yacht's experiments server).
 
 Today the default points at the **experiments** agents server on this Mac (launchd
 `com.casework.seed-experiments`, worktree `~/Code/Seed-worktrees/agent-voice`). That instance was

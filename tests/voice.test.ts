@@ -37,6 +37,9 @@ function fakeAgents(opts: { voice: boolean }) {
   const secrets = new Map<string, Uint8Array>();
   const mcp = new Map<string, Record<string, any>>();
   const triggers = new Map<string, Record<string, any>[]>();
+  const memory = new Map<string, Map<string, string>>();
+  const providers = new Map<string, Record<string, any>>();
+  const logins = new Map<string, "pending" | "completed" | "failed">();
   const runtimeCalls: { auth: string | null; body: any }[] = [];
   const sockets = new Set<any>();
   let heldMessage: { entered: () => void; wait: Promise<void> } | null = null;
@@ -110,6 +113,33 @@ function fakeAgents(opts: { voice: boolean }) {
           return ok({ _: "GetSessionResponse", session: { id: a.sessionId, agentId: s.agentId, status: "idle", ...(s.continuedTo ? { continuedTo: { continuationId: "c", sessionId: s.continuedTo, reason: "context", createdAt: 1 } } : {}) }, events: (queryEvents.get(a.sessionId) ?? events).slice(-(a.limit ?? events.length)), systemPromptMarkdown: "" });
         }
         case "ListAgentTriggers": return ok({ _: "ListAgentTriggersResponse", triggers: triggers.get(a.agentId) ?? [] });
+        case "ListAgentMemoryDir": {
+          if (!agents.has(a.agentId)) return err(404, "Agent not found");
+          const m = memory.get(a.agentId) ?? new Map<string, string>();
+          const prefix = a.path ? `${String(a.path).replace(/\/$/, "")}/` : "";
+          const entries = [...m].filter(([p]) => p.startsWith(prefix)).map(([p, c]) => ({ path: p, type: "file", size: c.length }));
+          return ok({ _: "ListAgentMemoryDirResponse", agentId: a.agentId, path: a.path ?? "", entries, entryCount: entries.length });
+        }
+        case "WriteAgentMemoryFile": {
+          if (!agents.has(a.agentId)) return err(404, "Agent not found");
+          if (typeof a.path !== "string" || a.path.startsWith("/") || a.path.includes("..")) return err(400, "Invalid memory path");
+          const m = memory.get(a.agentId) ?? new Map<string, string>();
+          m.set(a.path, String(a.content));
+          memory.set(a.agentId, m);
+          return ok({ _: "WriteAgentMemoryFileResponse", agentId: a.agentId, entry: { path: a.path, type: "file", size: String(a.content).length } });
+        }
+        case "DeleteAgentMemoryFile": { const deleted = memory.get(a.agentId)?.delete(a.path) ?? false; return ok({ _: "DeleteAgentMemoryFileResponse", agentId: a.agentId, path: a.path, deleted }); }
+        case "ListModelProviders": return ok({ _: "ListModelProvidersResponse", providers: [...providers.values()] });
+        case "SetModelProvider": {
+          const p = a.provider;
+          if (!p?.name || !p.type) return err(400, "Provider name and type are required");
+          if (p.authMode === "subscription" && !p.secretRefs?.oauth) return err(400, "subscription providers need secretRefs.oauth");
+          providers.set(p.name, { name: p.name, type: p.type, authMode: p.authMode ?? "api-key", authStatus: "ok" });
+          return ok({ _: "SetModelProviderResponse", provider: providers.get(p.name) });
+        }
+        case "StartProviderOAuth": { if (a.providerType !== "openai") return err(400, "Unsupported provider type"); const id = `login-${++n}`; logins.set(id, "pending"); return ok({ _: "StartProviderOAuthResponse", loginId: id, authUrl: `https://auth.example/authorize?state=${id}`, expiresAt: Date.now() + 600_000 }); }
+        case "SubmitProviderOAuthCode": { if (!logins.has(a.loginId)) return err(404, "Login not found"); logins.set(a.loginId, String(a.code).includes("code=good") ? "completed" : "failed"); return ok({ _: "SubmitProviderOAuthCodeResponse" }); }
+        case "GetProviderOAuthStatus": { const st = logins.get(a.loginId); if (!st) return err(404, "Login not found"); return ok({ _: "ProviderOAuthStatusResponse", loginId: a.loginId, status: st, ...(st === "completed" ? { secretName: "oauth-openai-1" } : st === "failed" ? { error: "invalid code" } : {}) }); }
         case "CreateAgentTrigger": {
           if (!agents.has(a.agentId)) return err(404, "Agent not found");
           const sc = a.trigger?.source?.schedule;
@@ -151,6 +181,8 @@ function fakeAgents(opts: { voice: boolean }) {
     secrets,
     mcp,
     triggers,
+    memory,
+    providers,
     runtimeCalls,
     holdNextMessage() {
       let entered!: () => void;
@@ -165,7 +197,7 @@ function fakeAgents(opts: { voice: boolean }) {
 }
 
 type Node = { base: string; wsBase: string; home: string; stop: () => void; cleanup: () => void };
-function startNode(agentsUrl: string, prefix: string, companion?: object, runtimeToken?: string): Node {
+function startNode(agentsUrl: string, prefix: string, companion?: object, runtimeToken?: string, extra: Partial<import("../src/daemon/config").CyberdeckConfig> = {}): Node {
   const { dir, cleanup } = tmpHomeDir(prefix);
   const companionFile = join(dir, "companion.json");
   if (companion) writeFileSync(companionFile, JSON.stringify(companion));
@@ -174,7 +206,7 @@ function startNode(agentsUrl: string, prefix: string, companion?: object, runtim
   if (runtimeToken) writeFileSync(runtimeFile, JSON.stringify({ SEED_AGENTS_VOICE_INTERNAL_TOKEN: runtimeToken, SEED_AGENTS_HTTP_PORT: "3053" }));
   const db = new Database(":memory:");
   initSchema(db);
-  const s = createServer(db, testConfig({ port: 4777, seed: { agentsUrl } }), TEST_TOKEN, "stw-test", { caseworkKey: KEY, caseworkExperiencesDir: FIXTURES, persistOwner: false, cloudSync: false, tailscale: new Tailscale(async () => null), seed: { home: dir, companionFile, runtimeFile } });
+  const s = createServer(db, testConfig({ port: 4777, ...extra, seed: { agentsUrl, ...(extra.seed ?? {}) } }), TEST_TOKEN, "stw-test", { caseworkKey: KEY, caseworkExperiencesDir: FIXTURES, persistOwner: false, cloudSync: false, tailscale: new Tailscale(async () => null), seed: { home: dir, companionFile, runtimeFile } });
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: s.fetch, websocket: s.websocket });
   return { base: `http://127.0.0.1:${server.port}`, wsBase: `ws://127.0.0.1:${server.port}`, home: dir, stop: () => { s.sessions.close(); void server.stop(true); }, cleanup };
 }
@@ -220,7 +252,10 @@ describe("secure call url", () => {
 describe("seed config", () => {
   test("defaults, file values, then env overrides", () => {
     const env = {} as NodeJS.ProcessEnv;
-    expect(seedConfig({}, env)).toEqual({ agentsUrl: "http://127.0.0.1:3053", identity: "main", modelProvider: "OpenAI", model: "gpt-6-sol" });
+    expect(seedConfig({}, env)).toEqual({ agentsUrl: "http://127.0.0.1:3053", identity: "main", modelProvider: "OpenAI", model: "gpt-6-sol", reasoningLevel: "medium", keyFile: join(process.env.HOME!, ".cyberdeck", "seed-key"), memoryDirs: [join(process.env.HOME!, ".claude", "projects", "-Users-ericvicenti-Code", "memory")] });
+    expect(seedConfig({ roots: ["/srv/work"], seed: { reasoningLevel: "", memoryDirs: ["/x"] } }, env)).toMatchObject({ reasoningLevel: "", memoryDirs: ["/x"] });
+    expect(seedConfig({ roots: ["/srv/work"] }, env).memoryDirs).toEqual([join(process.env.HOME!, ".claude", "projects", "-srv-work", "memory")]);
+    expect(seedConfig({}, { CYBERDECK_SEED_MODEL: "gpt-6-astra", CYBERDECK_SEED_REASONING: "high" } as NodeJS.ProcessEnv)).toMatchObject({ model: "gpt-6-astra", reasoningLevel: "high" });
     expect(seedConfig({ seed: { agentsUrl: "http://a:1/", identity: "" } }, env).agentsUrl).toBe("http://a:1");
     expect(seedConfig({ seed: { agentsUrl: "http://a:1/", identity: "" } }, env).identity).toBe("main");
     const over = seedConfig({ seed: { agentsUrl: "http://a:1" } }, { CYBERDECK_SEED_AGENTS_URL: "http://b:2", CYBERDECK_SEED_IDENTITY: "alt" } as NodeJS.ProcessEnv);
@@ -252,7 +287,7 @@ describe("unconfigured node", () => {
   });
   test("status shows the identity even when calls are off", async () => {
     const s = await (await req(b, TEST_TOKEN, "/api/voice/status")).json();
-    expect(s.identity).toMatchObject({ name: "main", available: true, principal: EXPECTED_PRINCIPAL });
+    expect(s.identity).toMatchObject({ name: "main", source: "env", available: true, principal: EXPECTED_PRINCIPAL });
     expect(s.health).toMatchObject({ ok: true, voice: false });
     expect(s.agent).toBeUndefined();
   });
@@ -475,7 +510,13 @@ describe("Seed text queries", () => {
     expect(JSON.parse(readFileSync(join(a.home, "seed.json"), "utf8")).sessionId).toBe(voiceSession);
     const id = s.id.slice(5);
     expect((await req(a, TEST_TOKEN, `/api/sessions/${s.id}/message`, { method: "POST", body: JSON.stringify({ text: "hello", cwd: "~/Code/Deck", nodeName: "yacht", clientMessageId: "retry-safe-id" }) })).status).toBe(200);
-    expect(voiced.actions.findLast((x) => x._ === "MessageSession")).toMatchObject({ sessionId: id, clientMessageId: "retry-safe-id", content: [{ type: "text", text: "hello" }, { type: "context", lines: ["Fleet machine: yacht", "Working directory: ~/Code/Deck"] }] });
+    const msg = voiced.actions.findLast((x) => x._ === "MessageSession");
+    // (copied first: bun's toMatchObject with an asymmetric matcher rewrites the received array in place)
+    const ctxLines = [...(msg.content[1].lines as string[])];
+    expect(msg).toMatchObject({ sessionId: id, clientMessageId: "retry-safe-id", content: [{ type: "text", text: "hello" }, { type: "context" }] });
+    expect(ctxLines).toContain("Working directory: ~/Code/Deck");
+    expect(ctxLines[0]).toStartWith("Fleet machine: yacht (another fleet host");
+    expect(ctxLines.at(-1)).toStartWith("Time: ");
     const transcript = await (await req(a, TEST_TOKEN, `/api/sessions/${s.id}/transcript?beforeSeq=5`)).json() as any;
     expect(transcript.events.some((e: any) => e.event.content === "Seed reply: hello")).toBe(true);
     expect(voiced.actions.findLast((x) => x._ === "GetSession").beforeSeq).toBe(5);
@@ -487,6 +528,111 @@ describe("Seed text queries", () => {
     expect(voiced.sessions.get(id)?.title).toBe("Renamed query");
     expect((await req(a, TEST_TOKEN, `/api/sessions/${s.id}`, { method: "DELETE" })).status).toBe(200);
     expect(voiced.sessions.has(id)).toBe(false);
+  });
+  test("harness sync: prompt from this node's AGENTS.md files, memory pack, idempotent, and the companion only on request", async () => {
+    const root = mkdtempSync(join(tmpdir(), "harness-root-"));
+    writeFileSync(join(root, "AGENTS.md"), "# Fleet rules\n\nNever commit at the root.\n");
+    const deck = mkdtempSync(join(tmpdir(), "harness-deck-"));
+    writeFileSync(join(deck, "AGENTS.md"), "# Deck agent protocol\n\nRun deck context first.\n");
+    const mem = mkdtempSync(join(tmpdir(), "harness-mem-"));
+    writeFileSync(join(mem, "MEMORY.md"), "- index\n");
+    writeFileSync(join(mem, "seed-prod-hosts.md"), "---\nname: seed-prod-hosts\ndescription: ssh hm is not the agents VM\n---\n\nThe fact.\n");
+    const h = startNode(voiced.url, "voice-h", undefined, undefined, { roots: [root], fleetDir: deck, seed: { memoryDirs: [mem], reasoningLevel: "high" } });
+    try {
+      expect((await req(h, TEST_TOKEN, "/api/voice/setup", { method: "POST", body: JSON.stringify({ adopt: false }) })).status).toBe(200);
+      const sync = async (body: object = {}) => (await req(h, TEST_TOKEN, "/api/voice/harness/sync", { method: "POST", body: JSON.stringify(body) })).json() as Promise<any>;
+      const r1 = await sync();
+      expect(r1.sources).toMatchObject({ rules: join(root, "AGENTS.md"), deck: join(deck, "AGENTS.md"), notes: 1 });
+      const harness = r1.agents.find((x: any) => x.role === "harness");
+      expect(harness.created).toBe(true);
+      const def = voiced.agents.get(harness.agentId)!;
+      expect(def.name).toBe("Cyberdeck");
+      expect(def.reasoningLevel).toBe("high");
+      expect(def.mcpServers).toEqual(["cyberdeck"]);
+      for (const s of ["Never commit at the root.", "Run deck context first.", "`cyberdeck__shell`", "`cyberdeck__deck_context`", "~/memory/fleet/README.md"]) expect(def.systemPrompt).toContain(s);
+      expect(def.metadata.cyberdeck.promptHash).toHaveLength(64);
+      expect(harness.memory).toMatchObject({ written: 4, deleted: 0, files: 4 });
+      const files = voiced.memory.get(harness.agentId)!;
+      expect([...files.keys()].sort()).toEqual(["fleet/README.md", "fleet/code-agents.md", "fleet/deck-protocol.md", "fleet/notes/seed-prod-hosts.md"]);
+      expect(files.get("fleet/README.md")).toContain("ssh hm is not the agents VM");
+      // The voice agent created by setup gets the pack but keeps its own prompt until adopted.
+      const voice = r1.agents.find((x: any) => x.role === "voice");
+      expect(voice.skipped).toContain("not managed");
+      expect(voice.memory.written).toBe(4);
+      // Second run: nothing to do.
+      const r2 = await sync();
+      expect(r2.agents.map((x: any) => [x.definition, x.memory.written, x.memory.deleted, x.memory.unchanged])).toEqual([[[], 0, 0, 4], [[], 0, 0, 4]]);
+      // Changed rules: the prompt and the one pack file follow.
+      writeFileSync(join(root, "AGENTS.md"), "# Fleet rules\n\nAlways run deck sync.\n");
+      const r3 = await sync();
+      const h3 = r3.agents.find((x: any) => x.role === "harness");
+      expect(h3.definition).toEqual(["systemPrompt"]);
+      expect(h3.memory).toMatchObject({ written: 1, unchanged: 3 });
+      expect(voiced.agents.get(harness.agentId)!.systemPrompt).toContain("Always run deck sync.");
+      // A pack file the agent lost is rewritten even though the manifest says it is current.
+      voiced.memory.get(harness.agentId)!.delete("fleet/deck-protocol.md");
+      expect((await sync()).agents[0].memory.written).toBe(1);
+      // Adopt the companion: spoken persona plus the same knowledge.
+      const r4 = await sync({ voice: true });
+      const v4 = r4.agents.find((x: any) => x.role === "voice");
+      expect(v4.definition).toEqual(["systemPrompt"]);
+      const vdef = voiced.agents.get(v4.agentId)!;
+      expect(vdef.systemPrompt).toContain("fleet companion");
+      expect(vdef.systemPrompt).toContain("Always run deck sync.");
+      expect(vdef.model).toBe("gpt-6-sol");
+      expect((await sync()).agents.find((x: any) => x.role === "voice").definition).toEqual([]);
+      const st = await (await req(h, TEST_TOKEN, "/api/voice/harness")).json() as any;
+      expect(st.queryAgent).toMatchObject({ id: harness.agentId, name: "Cyberdeck", reasoningLevel: "high", promptCurrent: true, memoryFiles: 4 });
+      expect(st.voiceAgent).toMatchObject({ managed: true, promptCurrent: true, memoryFiles: 4 });
+      expect(st.nodeTools).toBe(true);
+      expect(await (await req(h, TEST_TOKEN, "/api/voice/harness/prompt")).text()).toContain("Always run deck sync.");
+      // The prompt bar's first query uses that agent instead of creating another.
+      const creates = voiced.actions.filter((x) => x._ === "CreateAgent").length;
+      const created = await (await req(h, TEST_TOKEN, "/api/sessions", { method: "POST", body: JSON.stringify({ tool: "seed", title: "q" }) })).json() as any;
+      expect(voiced.sessions.get(created.id.slice(5))?.agentId).toBe(harness.agentId);
+      expect(voiced.actions.filter((x) => x._ === "CreateAgent").length).toBe(creates);
+      // A query created before any sync creates the harness agent with the same prompt and pack.
+      const fresh = startNode(voiced.url, "voice-fresh", undefined, undefined, { roots: [root], fleetDir: deck, seed: { memoryDirs: [mem] } });
+      try {
+        await req(fresh, TEST_TOKEN, "/api/voice/setup", { method: "POST", body: JSON.stringify({ adopt: false }) });
+        const q = await (await req(fresh, TEST_TOKEN, "/api/sessions", { method: "POST", body: JSON.stringify({ tool: "seed", title: "first" }) })).json() as any;
+        const agentId = voiced.sessions.get(q.id.slice(5))!.agentId;
+        expect(voiced.agents.get(agentId)!.systemPrompt).toContain("Always run deck sync.");
+        expect(voiced.agents.get(agentId)!.reasoningLevel).toBe("medium");
+        expect(voiced.memory.get(agentId)!.size).toBe(4);
+      } finally { fresh.stop(); fresh.cleanup(); }
+    } finally { h.stop(); h.cleanup(); }
+  });
+  test("keygen gives a node without a vault its own signing identity", async () => {
+    const { dir, cleanup } = tmpHomeDir("voice-key");
+    const saved = process.env.CYBERDECK_SEED_KEY_SEED;
+    try {
+      const bridge = new SeedBridge({ config: seedConfig({ seed: { agentsUrl: voiced.url, keyFile: join(dir, "seed-key") } }), port: 4777, token: TEST_TOKEN, home: dir });
+      delete process.env.CYBERDECK_SEED_KEY_SEED;
+      expect(bridge.keygen()).toMatchObject({ created: true, keyFile: join(dir, "seed-key") });
+      expect(readFileSync(join(dir, "seed-key"), "utf8").trim()).toMatch(/^[0-9a-f]{64}$/);
+      expect(bridge.keygen()).toMatchObject({ created: false });
+      const st = await bridge.status();
+      expect(st.identity.available).toBe(true);
+      expect(st.identity.source).toBe("file");
+      expect(st.identity.principal).toStartWith("z6Mk");
+      expect(st.identity.principal).not.toBe(EXPECTED_PRINCIPAL);
+    } finally { if (saved !== undefined) process.env.CYBERDECK_SEED_KEY_SEED = saved; cleanup(); }
+  });
+  test("login: start, paste the redirect, and the subscription provider is saved under the configured name", async () => {
+    const start = await (await req(a, TEST_TOKEN, "/api/voice/login", { method: "POST", body: "{}" })).json() as any;
+    expect(start.authUrl).toStartWith("https://auth.example/authorize");
+    expect(JSON.parse(readFileSync(join(a.home, "seed.json"), "utf8")).login.loginId).toBe(start.loginId);
+    const pending = await (await req(a, TEST_TOKEN, "/api/voice/login", { method: "POST", body: JSON.stringify({ status: true }) })).json() as any;
+    expect(pending.status).toBe("pending");
+    const done = await (await req(a, TEST_TOKEN, "/api/voice/login", { method: "POST", body: JSON.stringify({ code: "http://localhost:1455/auth/callback?code=good&state=x" }) })).json() as any;
+    expect(done).toMatchObject({ status: "completed", provider: "OpenAI" });
+    expect(voiced.providers.get("OpenAI")).toMatchObject({ type: "openai", authMode: "subscription" });
+    expect(JSON.parse(readFileSync(join(a.home, "seed.json"), "utf8")).login).toBeUndefined();
+    expect((await (await req(a, TEST_TOKEN, "/api/voice/providers")).json() as any).providers).toEqual([{ name: "OpenAI", type: "openai", authMode: "subscription", authStatus: "ok" }]);
+    expect((await req(a, KEY, "/api/voice/login", { method: "POST", body: "{}" })).status).toBe(403);
+    const bad = await (await req(a, TEST_TOKEN, "/api/voice/login", { method: "POST", body: JSON.stringify({ code: "nope", loginId: (await (await req(a, TEST_TOKEN, "/api/voice/login", { method: "POST", body: "{}" })).json() as any).loginId }) })).json() as any;
+    expect(bad.status).toBe("failed");
   });
   test("query API rejects unauthenticated, pairing-key and unrelated voice-session access", async () => {
     const state = JSON.parse(readFileSync(join(a.home, "seed.json"), "utf8"));
