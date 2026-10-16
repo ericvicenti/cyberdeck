@@ -5,7 +5,7 @@ import AVKit
 struct NativePlayer: NSViewRepresentable {
     let player: AVPlayer
     func makeNSView(context: Context) -> AVPlayerView {
-        let view = AVPlayerView(); view.player = player; view.controlsStyle = .floating
+        let view = AVPlayerView(); view.player = player; view.controlsStyle = .none
         view.showsFullScreenToggleButton = false; view.videoGravity = .resizeAspect
         return view
     }
@@ -18,13 +18,14 @@ struct WorkspaceView: View {
         ZStack {
             LinearGradient(colors: [Color(red: 0.07, green: 0.09, blue: 0.11), Color(red: 0.025, green: 0.035, blue: 0.045)], startPoint: .topLeading, endPoint: .bottomTrailing).ignoresSafeArea()
             if let player = model.player {
-                NativePlayer(player: player).ignoresSafeArea()
+                NativePlayer(player: player).ignoresSafeArea().onTapGesture { model.noteInput(.pointer); model.activateTransport(2) }
+                PlayerControls(model: model)
                 VStack {
                     if !model.playbackStatus.isEmpty {
                         Text(model.playbackStatus).font(.title2).padding(20).background(.black.opacity(0.8)).clipShape(RoundedRectangle(cornerRadius: 16)).padding(30)
                     }
                     Spacer()
-                    if !model.caption.isEmpty { Text(model.caption).font(.system(size: 28, weight: .medium)).multilineTextAlignment(.center).padding(12).background(.black.opacity(0.75)).clipShape(RoundedRectangle(cornerRadius: 8)).padding(.bottom, 90) }
+                    if !model.caption.isEmpty { Text(model.caption).font(.system(size: 28, weight: .medium)).multilineTextAlignment(.center).padding(12).background(.black.opacity(0.75)).clipShape(RoundedRectangle(cornerRadius: 8)).padding(.bottom, model.playerControlsVisible ? 195 : 50) }
                     if !model.message.isEmpty { Text(model.message).padding().background(.black.opacity(0.8)) }
                 }
                 if model.playerMenu {
@@ -34,8 +35,8 @@ struct WorkspaceView: View {
                             ForEach(Array(Workspace.playerActions.enumerated()), id: \.offset) { index, title in
                                 Button { model.playerMenuSelection = index; model.input("select") } label: {
                                     Text(title).font(.title3).frame(maxWidth: .infinity, minHeight: 72).padding(10)
-                                        .foregroundStyle(index == model.playerMenuSelection ? .black : .white)
-                                        .background(index == model.playerMenuSelection ? accent : Color.white.opacity(0.12)).clipShape(RoundedRectangle(cornerRadius: 12))
+                                        .foregroundStyle(index == model.playerMenuSelection && model.inputMode != .pointer ? .black : .white)
+                                        .background(index == model.playerMenuSelection && model.inputMode != .pointer ? accent : Color.white.opacity(0.12)).clipShape(RoundedRectangle(cornerRadius: 12))
                                 }.buttonStyle(.plain)
                             }
                         }
@@ -45,11 +46,13 @@ struct WorkspaceView: View {
                 VStack(spacing: 0) {
                     HStack {
                         Button("← Casework") { model.home() }.buttonStyle(.plain)
-                        Spacer(); Text("Compatibility view · D-pad move · A select · B back · Y/Home Casework").foregroundStyle(.secondary)
+                        Spacer(); Text(model.inputMode == .controller ? "D-pad move · A select · B back · Y/Home Casework" : "Compatibility view").foregroundStyle(.secondary)
                     }.padding(14)
                     CompatibilityView(browser: browser)
                     if !model.message.isEmpty { Text(model.message).padding(12) }
                 }
+            } else if model.page.cinema {
+                CinemaView(model: model).id(model.page.id)
             } else {
                 VStack(alignment: .leading, spacing: 24) {
                     HStack(alignment: .top) {
@@ -66,23 +69,28 @@ struct WorkspaceView: View {
                         ScrollView {
                             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 20), count: model.page.columns), spacing: 24) {
                                 ForEach(Array(model.page.tiles.enumerated()), id: \.element.id) { index, tile in
-                                    card(tile, selected: model.selection == index) { model.selection = index; tile.run() }.id(index)
+                                    card(tile, selected: model.selection == index && model.inputMode != .pointer) { model.selection = index; tile.run() }.id(index)
                                 }
                             }.padding(.horizontal, 48).padding(.vertical, 12)
                         }
                         .onChange(of: model.selection) { _, value in withAnimation(.easeOut(duration: 0.13)) { proxy.scrollTo(value, anchor: .center) } }
                         .onChange(of: model.page.title) { _, _ in proxy.scrollTo(0, anchor: .top) }
                     }
+                    .id(model.page.id)
                     VStack(alignment: .leading, spacing: 12) {
                         if !model.message.isEmpty { Text(model.message).font(.system(size: 18)).foregroundStyle(accent).lineLimit(4) }
                         HStack(spacing: 24) {
-                            Text("✚ Move"); Text("A Select"); Text("B Back"); Text("Y / ⌂ Home"); Text("X Search")
+                            if model.inputMode == .controller {
+                                Text("✚ Move"); Text("A Select"); Text("B Back"); Text("Y / ⌂ Home"); Text("X Search")
+                            }
                             Spacer(); Text("CASEWORK").tracking(4)
                         }.font(.system(size: 14, weight: .medium)).foregroundStyle(.white.opacity(0.5))
                     }.padding(.horizontal, 48).padding(.bottom, 26)
                 }
             }
-            if let text = model.keyboardText { keyboard(text) }
+            if let text = model.keyboardText {
+                if model.inputMode == .controller { keyboard(text) } else { TextEntry(model: model) }
+            }
         }.foregroundStyle(.white).preferredColorScheme(.dark)
     }
     private func card(_ tile: Tile, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -141,20 +149,38 @@ struct WorkspaceView: View {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "Casework"; window.minSize = NSSize(width: 960, height: 620)
         window.collectionBehavior = [.fullScreenPrimary]; window.delegate = self
+        window.acceptsMouseMovedEvents = true
         window.contentView = NSHostingView(rootView: WorkspaceView(model: workspace)); window.center()
         workspace.window = window; window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
-        keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        keys = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .mouseMoved, .scrollWheel]) { [weak self] event in
             guard let self else { return event }
+            if event.type != .keyDown {
+                if event.type != .mouseMoved || abs(event.deltaX) + abs(event.deltaY) > 2 { self.workspace.noteInput(.pointer) }
+                return event
+            }
+            let wasController = self.workspace.inputMode == .controller
+            self.workspace.noteInput(.keyboard)
             if event.modifierFlags.contains(.command) { return event }
+            if self.workspace.keyboardText != nil {
+                if event.keyCode == 53 { self.workspace.back(); return nil }
+                // Preserve the first physical key while SwiftUI swaps the virtual keyboard for a TextField.
+                if wasController {
+                    if event.keyCode == 36 { self.workspace.submitText() }
+                    else if event.keyCode == 51 { self.workspace.deleteCharacter() }
+                    else if let chars = event.characters, chars.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) { self.workspace.type(chars) }
+                    return nil
+                }
+                return event
+            }
+            if self.workspace.browser != nil { return event }
             let actions: [UInt16: String] = [123: "left", 124: "right", 125: "down", 126: "up", 36: "select", 76: "select", 53: "back", 115: "home", 116: "previous", 121: "next"]
             if let action = actions[event.keyCode] { self.workspace.input(action); return nil }
-            if self.workspace.keyboardText != nil {
-                if event.keyCode == 51 { self.workspace.deleteCharacter(); return nil }
-                if let chars = event.characters, chars.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) { self.workspace.type(chars); return nil }
+            let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
+            if self.workspace.player != nil {
+                let shortcuts = [" ": "pause", "k": "pause", "j": "previous", "l": "next", "m": "mute", "c": "captions", "f": "fullscreen", "o": "menu"]
+                if let action = shortcuts[key] { if !event.isARepeat || ["j", "l"].contains(key) { self.workspace.input(action) }; return nil }
             }
-            if event.charactersIgnoringModifiers?.lowercased() == "m" { self.workspace.input("menu"); return nil }
-            if event.keyCode == 49 { self.workspace.input("pause"); return nil }
-            if event.charactersIgnoringModifiers?.lowercased() == "f" { self.workspace.input("fullscreen"); return nil }
+            if key == "f" { self.workspace.input("fullscreen"); return nil }
             return event
         }
         workspace.start()

@@ -72,45 +72,65 @@ final class API: NSObject, URLSessionTaskDelegate {
     private var held: Set<String> = []
     private var direction = ""
     private var nextRepeat: TimeInterval = 0
+    private var polls = 0
+    private var delivered = 0
+    private var lastAction = ""
+    private var recent: [String] = []
+    var diagnostics: Object { ["polls": polls, "delivered": delivered, "lastAction": lastAction, "held": held.sorted(), "recent": recent] }
+    private func emit(_ value: String) {
+        delivered += 1; lastAction = value
+        recent.append(value); if recent.count > 20 { recent.removeFirst() }
+        action(value)
+    }
     var names: [String] { GCController.controllers().map { $0.vendorName ?? "Game controller" } }
     func start() {
         GCController.shouldMonitorBackgroundEvents = true
         GCController.startWirelessControllerDiscovery(completionHandler: nil)
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.poll() } }
+        timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.poll() } }
+        RunLoop.main.add(timer!, forMode: .common)
     }
     private func poll() {
+        polls += 1
         var nowHeld = Set<String>()
         for controller in GCController.controllers() {
+            // Ask macOS to deliver menu/Home directly while our UI owns focus.
+            // Other applications retain their normal system gestures in the background.
+            for button in controller.physicalInputProfile.buttons.values where button.isBoundToSystemGesture {
+                let preference: GCControllerElement.SystemGestureState = NSApp.isActive ? .disabled : .enabled
+                if button.preferredSystemGestureState != preference { button.preferredSystemGestureState = preference }
+            }
             guard let pad = controller.extendedGamepad else {
                 if let pad = controller.microGamepad {
-                    if pad.buttonA.isPressed { nowHeld.insert("select") }; if pad.buttonX.isPressed { nowHeld.insert("back") }
+                    if pad.buttonA.isPressed { nowHeld.insert("select") }; if pad.buttonX.isPressed || pad.buttonMenu.isPressed { nowHeld.insert("back") }
                     read(pad.dpad, into: &nowHeld)
                 }
                 continue
             }
             if pad.buttonA.isPressed { nowHeld.insert("select") }; if pad.buttonB.isPressed { nowHeld.insert("back") }
             if pad.buttonX.isPressed { nowHeld.insert("search") }; if pad.buttonY.isPressed { nowHeld.insert("home") }
-            if pad.buttonMenu.isPressed { nowHeld.insert("menu") }
+            if pad.buttonMenu.isPressed || pad.rightThumbstickButton?.isPressed == true { nowHeld.insert("menu") }
+            if pad.buttonOptions?.isPressed == true { nowHeld.insert("back") }
+            if pad.leftThumbstickButton?.isPressed == true { nowHeld.insert("search") }
             if pad.buttonHome?.isPressed == true || (pad.buttonOptions?.isPressed == true && pad.buttonMenu.isPressed) { nowHeld.insert("game-home") }
-            if pad.leftShoulder.isPressed { nowHeld.insert("previous") }; if pad.rightShoulder.isPressed { nowHeld.insert("next") }
+            if pad.leftShoulder.isPressed || pad.leftTrigger.value > 0.55 { nowHeld.insert("previous") }; if pad.rightShoulder.isPressed || pad.rightTrigger.value > 0.55 { nowHeld.insert("next") }
             read(pad.dpad, into: &nowHeld); read(pad.leftThumbstick, into: &nowHeld)
         }
         // While a game owns focus, only its Home/Back+Start return chord belongs to us.
         if !NSApp.isActive {
-            if ownedGameRunning(), nowHeld.contains("game-home"), !held.contains("game-home") { action("home") }
+            if ownedGameRunning(), nowHeld.contains("game-home"), !held.contains("game-home") { emit("home") }
             held = nowHeld; direction = ""; return
         }
         if nowHeld.contains("game-home") && !held.contains("game-home") {
-            action("home"); held = nowHeld; direction = ""; return
+            emit("home"); held = nowHeld; direction = ""; return
         }
         if nowHeld.contains("home") && !held.contains("home") {
-            action("home"); held = nowHeld; direction = ""; return
+            emit("home"); held = nowHeld; direction = ""; return
         }
-        for key in nowHeld.subtracting(held) where !["left", "right", "up", "down"].contains(key) { action(key == "game-home" ? "home" : key) }
+        for key in nowHeld.subtracting(held) where !["left", "right", "up", "down"].contains(key) { emit(key == "game-home" ? "home" : key) }
         let d = ["up", "down", "left", "right"].first(where: { nowHeld.contains($0) }) ?? ""
         let now = ProcessInfo.processInfo.systemUptime
-        if d != direction { direction = d; nextRepeat = now + 0.38; if !d.isEmpty { action(d) } }
-        else if !d.isEmpty && now >= nextRepeat { nextRepeat = now + 0.11; action(d) }
+        if d != direction { direction = d; nextRepeat = now + 0.38; if !d.isEmpty { emit(d) } }
+        else if !d.isEmpty && now >= nextRepeat { nextRepeat = now + 0.11; emit(d) }
         held = nowHeld
     }
     private func read(_ pad: GCControllerDirectionPad, into keys: inout Set<String>) {

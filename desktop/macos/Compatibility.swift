@@ -29,6 +29,10 @@ import SwiftUI
         web.load(URLRequest(url: url))
     }
     func close() { web.stopLoading(); web.loadHTMLString("", baseURL: nil); web.configuration.userContentController.removeScriptMessageHandler(forName: "caseworkInput") }
+    func setInputMode(_ mode: String) {
+        let json = String(data: try! JSONSerialization.data(withJSONObject: [mode]), encoding: .utf8)!
+        web.evaluateJavaScript("window.caseworkRemote?.mode(\(json)[0])", completionHandler: nil)
+    }
     func input(_ key: String) {
         let json = String(data: try! JSONSerialization.data(withJSONObject: [key]), encoding: .utf8)!
         web.evaluateJavaScript("window.caseworkRemote?.input(\(json)[0])", completionHandler: nil)

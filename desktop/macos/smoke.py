@@ -18,7 +18,16 @@ def settle():
 def choose(label):
     state = settle(); assert label in state['tiles'], (label, state)
     target = state['tiles'].index(label)
-    while state['selection'] != target: state = action('right' if state['selection'] < target else 'left')
+    for _ in range(200):
+        if state['selection'] == target: break
+        rows = state.get('shelves', [])
+        if rows:
+            source_row = next(i for i,r in enumerate(rows) if r['start'] <= state['selection'] < r['start']+r['count'])
+            target_row = next(i for i,r in enumerate(rows) if r['start'] <= target < r['start']+r['count'])
+            if source_row != target_row:
+                state = action('down' if source_row < target_row else 'up'); continue
+        state = action('right' if state['selection'] < target else 'left')
+    else: raise AssertionError(('Could not focus',label,state))
     action('select'); return settle()
 def check(name, state):
     assert not state['message'], (name, state['message'])
@@ -26,8 +35,8 @@ def check(name, state):
 if __name__ == '__main__':
     action('home'); state=call(); assert state['fullscreen']; assert state['controlConnected']
     check('home',state)
-    choose('Afterglow'); check('library',choose('Library')); assert call()['tiles']
-    action('back'); check('films',choose('Films')); assert len(call()['tiles']) > 5
+    choose('Afterglow'); assert call()['cinema']; check('library',choose('Library')); assert call()['tiles']
+    action('back'); check('films',choose('Films')); assert len(call()['tiles']) > 6
     action('back'); choose('Search')
     assert call()['keyboard']==''
     action('select'); assert call()['keyboard']=='A'

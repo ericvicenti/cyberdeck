@@ -10,17 +10,40 @@ struct Tile: Identifiable {
     var subtitle = ""
     var symbol = "square.grid.2x2"
     var image: URL? = nil
+    var backdrop: URL? = nil
     var run: () -> Void
 }
+struct Shelf {
+    var title: String
+    var start: Int
+    var count: Int
+}
 struct Page {
+    let id = UUID()
     var title: String
     var subtitle: String
     var tiles: [Tile]
     var columns = 4
     var selection = 0
+    var cinema = false
+    var shelves: [Shelf] = []
+    var feature: Tile? = nil
 }
 
+enum InputMode: String { case controller, keyboard, pointer }
+
 @MainActor final class Workspace: ObservableObject {
+    @Published var inputMode: InputMode = .pointer
+    @Published var playerControlsVisible = true
+    @Published var playerControlSelection = 2
+    @Published var playbackPosition = 0.0
+    @Published var playbackDuration = 0.0
+    @Published var playbackPaused = true
+    @Published var playbackMuted = false
+    @Published var playbackVolume: Float = 1
+    @Published var captionsEnabled = false
+    private var controlsLastUsed = ProcessInfo.processInfo.systemUptime
+    static let transport = ["Back", "Rewind 10 seconds", "Play / pause", "Forward 10 seconds", "Captions", "Mute", "Fullscreen", "More"]
     @Published var page = Page(title: "Casework", subtitle: "Your Cyberdeck", tiles: [])
     @Published var selection = 0
     @Published var busy = false
@@ -78,13 +101,17 @@ struct Page {
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
     func start() {
-        home(); controllers.action = { [weak self] in self?.input($0) }
+        home(); controllers.action = { [weak self] in self?.noteInput(.controller); self?.input($0) }
         controllers.ownedGameRunning = { [weak self] in self?.gameProcess?.isRunning == true || self?.externalGame == true }
         controllers.start(); connectControl()
         let remote = LocalControl(token: token)
         remote.handle = { [weak self] route, body in
             guard let self else { return (Data(), "application/json") }
-            if route == "POST /input" { self.input(string(body["action"])) }
+            if route == "POST /test-key", self.verification, let window = self.window {
+                let key = string(body["key"])
+                if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, characters: key, charactersIgnoringModifiers: key, isARepeat: false, keyCode: UInt16(number(body["code"]))) { NSApp.postEvent(event, atStart: false) }
+            }
+            if route == "POST /input" { self.noteInput(InputMode(rawValue: string(body["source"])) ?? .controller); self.input(string(body["action"])) }
             if route == "GET /video-frame", self.verification { return (self.videoFrame ?? Data(), "image/png") }
             if route == "POST /text", self.keyboardText != nil { self.keyboardText = String(string(body["text"]).prefix(120)) }
             if route == "GET /snapshot", let view = self.window?.contentView,
@@ -100,18 +127,42 @@ struct Page {
         MPRemoteCommandCenter.shared().togglePlayPauseCommand.addTarget { [weak self] _ in Task { @MainActor in self?.input("pause") }; return .success }
     }
     func state() -> Object {
-        var result: Object = ["title": page.title, "tiles": page.tiles.map(\.title), "selection": selection,
+        var result: Object = ["inputMode": inputMode.rawValue, "onscreenKeyboard": keyboardText != nil && inputMode == .controller, "title": page.title, "tiles": page.tiles.map(\.title), "selection": selection,
             "focused": page.tiles.indices.contains(selection) ? page.tiles[selection].title : "", "busy": busy,
             "message": message, "controllers": controllers.names, "fullscreen": window?.styleMask.contains(.fullScreen) ?? false,
-            "controlConnected": controlConnected, "gameRunning": gameProcess?.isRunning == true, "native": true, "verification": verification, "compatibility": browser?.web.url?.absoluteString as Any? ?? NSNull(),
+            "shelves": page.shelves.map { ["start": $0.start, "count": $0.count] }, "cinema": page.cinema, "controllerInput": controllers.diagnostics, "active": NSApp.isActive, "controlConnected": controlConnected, "gameRunning": gameProcess?.isRunning == true, "native": true, "verification": verification, "compatibility": browser?.web.url?.absoluteString as Any? ?? NSNull(),
             "keyboard": keyboardText as Any? ?? NSNull(), "keyboardSelection": keyboardSelection]
         if let player {
             result["player"] = ["title": playbackTitle, "status": player.currentItem?.status.rawValue ?? 0,
                 "rate": player.rate, "time": finite(player.currentTime().seconds), "originalTime": position(),
                 "duration": number(playback["duration"]), "buffer": playbackStatus, "decodedFrames": decodedFrames, "menu": playerMenu, "caption": caption,
-                "error": player.currentItem?.error?.localizedDescription ?? ""] as Object
+                "controlsVisible": playerControlsVisible, "controlSelection": playerControlSelection, "error": player.currentItem?.error?.localizedDescription ?? ""] as Object
         }
         return result
+    }
+    func noteInput(_ mode: InputMode) {
+        if inputMode != mode { inputMode = mode; browser?.setInputMode(mode.rawValue) }
+        if player != nil && mode != .controller { wakePlayerControls() }
+    }
+    func wakePlayerControls() { controlsLastUsed = ProcessInfo.processInfo.systemUptime; playerControlsVisible = true }
+    func submitText() {
+        guard let text = keyboardText else { return }
+        let submit = keyboardSubmit; keyboardText = nil; keyboardSubmit = nil; submit?(text)
+    }
+    func seekTo(_ target: Double) { seek(target - position()); wakePlayerControls() }
+    func setVolume(_ value: Float) { player?.volume = value; playbackVolume = value; wakePlayerControls() }
+    func activateTransport(_ index: Int) {
+        wakePlayerControls()
+        switch index {
+        case 0: cancel(); stopPlayback()
+        case 1: seek(-10)
+        case 2: if player?.rate ?? 0 > 0 { player?.pause() } else { player?.play() }
+        case 3: seek(10)
+        case 4: toggleCaptions()
+        case 5: player?.isMuted.toggle()
+        case 6: window?.toggleFullScreen(nil)
+        default: playerMenu.toggle(); playerMenuSelection = 0
+        }
     }
     private func finite(_ x: Double) -> Double { x.isFinite ? x : 0 }
     func show(_ title: String, _ subtitle: String = "", _ tiles: [Tile], columns: Int = 4, push: Bool = true) {
@@ -180,6 +231,10 @@ struct Page {
         }
         if let browser { browser.input(action); return }
         if let player {
+            let controlsWereVisible = playerControlsVisible
+            wakePlayerControls()
+            if action == "captions" { toggleCaptions(); return }
+            if action == "mute" { player.isMuted.toggle(); return }
             if action == "menu" { playerMenu.toggle(); playerMenuSelection = 0; return }
             if playerMenu {
                 switch action {
@@ -199,6 +254,15 @@ struct Page {
                 default: break
                 }; return
             }
+            if inputMode == .controller {
+                if action == "up" || action == "down" { playerControlSelection = 2; return }
+                if action == "left" || action == "right" {
+                    if controlsWereVisible { playerControlSelection = max(0, min(Self.transport.count - 1, playerControlSelection + (action == "left" ? -1 : 1))) }
+                    else { seek(action == "left" ? -10 : 10) }
+                    return
+                }
+                if action == "select" { if controlsWereVisible { activateTransport(playerControlSelection) } else { activateTransport(2) }; return }
+            }
             switch action {
             case "select", "pause": if player.rate > 0 { player.pause() } else { player.play() }
             case "left", "previous": seek(-10)
@@ -208,6 +272,20 @@ struct Page {
             case "search": player.isMuted.toggle()
             default: break
             }; return
+        }
+        if page.cinema, let rowIndex = page.shelves.firstIndex(where: { selection >= $0.start && selection < $0.start + $0.count }) {
+            let row = page.shelves[rowIndex], column = selection - page.shelves[rowIndex].start
+            switch action {
+            case "left": selection = max(row.start, selection - 1); return
+            case "right": selection = min(row.start + row.count - 1, selection + 1); return
+            case "up", "down":
+                let target = max(0, min(page.shelves.count - 1, rowIndex + (action == "up" ? -1 : 1)))
+                let other = page.shelves[target]; selection = other.start + min(column, other.count - 1); return
+            case "previous": selection = max(row.start, selection - 5); return
+            case "next": selection = min(row.start + row.count - 1, selection + 5); return
+            case "search": enterText { [weak self] in self?.catalog("all", search: $0) }; return
+            default: break
+            }
         }
         switch action {
         case "left": selection = max(0, selection - 1)
@@ -246,20 +324,48 @@ struct Page {
         }
         let api = API(url.absoluteString); afterglow = api; return api
     }
+    private func mediaNavigation() -> [Tile] {
+        [Tile(title: "Library", symbol: "rectangle.stack", run: { [weak self] in self?.library() }),
+         Tile(title: "Films", symbol: "film", run: { [weak self] in self?.catalog("movie") }),
+         Tile(title: "Series", symbol: "tv", run: { [weak self] in self?.catalog("series") }),
+         Tile(title: "Search", symbol: "magnifyingglass", run: { [weak self] in self?.enterText { self?.catalog("all", search: $0) } }),
+         Tile(title: "My list", symbol: "bookmark", run: { [weak self] in self?.saved() }),
+         Tile(title: "Full Afterglow", symbol: "square.on.square", run: { [weak self] in self?.work {
+             guard let self else { return }; let api = try await self.mediaAPI(); self.openCompatibility(api.origin)
+         } })]
+    }
+    private func showCinema(_ title: String, rows: [(String, [Tile])], feature: Tile? = nil, push: Bool = true) {
+        var tiles = mediaNavigation()
+        var shelves = [Shelf(title: "", start: 0, count: tiles.count)]
+        for (name, row) in rows where !row.isEmpty {
+            shelves.append(Shelf(title: name, start: tiles.count, count: row.count)); tiles += row
+        }
+        show(title, "AFTERGLOW", tiles, push: push)
+        page.cinema = true; page.shelves = shelves; page.feature = feature
+        selection = shelves.count > 1 ? shelves[1].start : 0
+    }
     func mediaHome() {
-        show("Afterglow", "YOUR OWN LITTLE CINEMA", [
-            Tile(title: "Library", subtitle: "Continue watching & downloads", symbol: "rectangle.stack.fill", run: { [weak self] in self?.library() }),
-            Tile(title: "Films", subtitle: "Discover something to watch", symbol: "film.fill", run: { [weak self] in self?.catalog("movie") }),
-            Tile(title: "Series", subtitle: "Find your next episode", symbol: "tv.fill", run: { [weak self] in self?.catalog("series") }),
-            Tile(title: "Search", subtitle: "Films & series", symbol: "magnifyingglass", run: { [weak self] in self?.enterText { self?.catalog("all", search: $0) } }),
-            Tile(title: "My list", subtitle: "Saved titles", symbol: "bookmark.fill", run: { [weak self] in self?.saved() }),
-            Tile(title: "Full Afterglow", subtitle: "YouTube, music, playlists & advanced controls", symbol: "square.on.square", run: { [weak self] in self?.work {
-                guard let self else { return }; let api = try await self.mediaAPI(); self.openCompatibility(api.origin)
-            } })
-        ])
+        showCinema("Afterglow", rows: [])
+        work { [self] in
+            let api = try await mediaAPI()
+            async let downloads = api.json("/api/library")
+            async let films = api.json("/api/catalog?type=movie")
+            async let series = api.json("/api/catalog?type=series")
+            let library = try await downloads
+            try Task.checkCancellation()
+            let ready = libraryTiles(objects(library["items"]))
+            showCinema("Afterglow", rows: [("Ready to watch", ready)], push: false)
+            let movies = (try? await films) ?? [:], shows = (try? await series) ?? [:]
+            try Task.checkCancellation()
+            let focused = selection
+            showCinema("Afterglow", rows: [("Ready to watch", ready),
+                ("Discover films", objects(movies["items"]).map(mediaTile)),
+                ("Discover series", objects(shows["items"]).map(mediaTile))], push: false)
+            selection = min(focused, max(0, page.tiles.count - 1))
+        }
     }
     private func mediaTile(_ media: Object) -> Tile {
-        Tile(title: string(media["name"]), subtitle: [string(media["year"]), string(media["runtime"]), string(media["rating"])].filter { !$0.isEmpty }.joined(separator: " · "), symbol: "film", image: URL(string: string(media["poster"])), run: { [weak self] in self?.title(media) })
+        Tile(title: string(media["name"]), subtitle: [string(media["year"]), string(media["runtime"]), string(media["rating"])].filter { !$0.isEmpty }.joined(separator: " · "), symbol: "film", image: URL(string: string(media["poster"])), backdrop: URL(string: string(media["background"])), run: { [weak self] in self?.title(media) })
     }
     func catalog(_ type: String, search: String = "") {
         work { [self] in
@@ -268,13 +374,22 @@ struct Page {
             var items: [Object] = []
             for t in types { items += objects(try await api.json("/api/catalog?" + query(["type": t, "q": search]))["items"]) }
             try Task.checkCancellation()
-            show(search.isEmpty ? (type == "series" ? "Series" : "Films") : "Results for “\(search)”", "AFTERGLOW", items.map(mediaTile))
+            showCinema(search.isEmpty ? (type == "series" ? "Series" : "Films") : "Results for “\(search)”", rows: [(search.isEmpty ? "Choose something to watch" : "Search results", items.map(mediaTile))])
         }
     }
     func saved() {
-        work { [self] in let api = try await mediaAPI(); let result = try await api.json("/api/state"); try Task.checkCancellation(); show("My list", "AFTERGLOW", objects(result["saved"]).map(mediaTile)) }
+        work { [self] in let api = try await mediaAPI(); let result = try await api.json("/api/state"); try Task.checkCancellation(); showCinema("My list", rows: [("Saved for later", objects(result["saved"]).map(mediaTile))]) }
     }
     func title(_ media: Object) {
+        if string(media["type"]) == "series", objects(media["episodes"]).isEmpty {
+            work { [self] in
+                let api = try await mediaAPI()
+                let full = try await api.json("/api/meta/series/" + string(media["id"]))
+                try Task.checkCancellation(); titleDetails(full)
+            }
+        } else { titleDetails(media) }
+    }
+    private func titleDetails(_ media: Object) {
         var tiles: [Tile] = []
         if string(media["type"]) == "series" {
             let episodes = objects(media["episodes"])
@@ -286,54 +401,60 @@ struct Page {
         tiles.append(Tile(title: "Save to my list", symbol: "bookmark", run: { [weak self] in self?.work {
             guard let self else { return }; let api = try await self.mediaAPI(); _ = try await api.json("/api/saved", body: ["type": string(media["type"]), "id": string(media["id"])]); self.message = "Saved to your list."
         } }))
-        show(string(media["name"]), string(media["description"]), tiles)
+        showCinema(string(media["name"]), rows: [("Watch", tiles)], feature: Tile(title: string(media["name"]), subtitle: string(media["description"]), image: URL(string: string(media["poster"])), backdrop: URL(string: string(media["background"])), run: {}))
     }
     func episodes(_ media: Object, season: Int) {
         let episodes = objects(media["episodes"]).filter { Int(number($0["season"])) == season }
-        show(string(media["name"]), "SEASON \(season)", episodes.map { episode in
+        let tiles = episodes.map { episode in
             let code = String(format: "S%02dE%02d", season, Int(number(episode["episode"])))
             return Tile(title: "\(code) · \(string(episode["name"]))", subtitle: string(episode["description"]), symbol: "play.fill", image: URL(string: string(episode["image"])), run: { [weak self] in self?.episodeDetail(media, episode: episode, code: code) })
-        })
+        }
+        showCinema(string(media["name"]), rows: [("Season \(season)", tiles)])
     }
     private func episodeDetail(_ media: Object, episode: Object, code: String) {
-        show("\(code) · \(string(episode["name"]))", string(episode["description"]), [Tile(title: "Watch episode", symbol: "play.fill", run: { [weak self] in self?.watch(media, episode: code) })])
+        showCinema("\(code) · \(string(episode["name"]))", rows: [("Watch episode", [Tile(title: "Watch episode", symbol: "play.fill", run: { [weak self] in self?.watch(media, episode: code) })])], feature: Tile(title: string(episode["name"]), subtitle: string(episode["description"]), image: URL(string: string(media["poster"])), backdrop: URL(string: string(episode["image"])), run: {}))
     }
     func library() {
         work { [self] in
             let api = try await mediaAPI(); let result = try await api.json("/api/library"); try Task.checkCancellation()
             guard result["items"] is [Object] else { throw Failure(message: string(result["error"])) }
-            let items = objects(result["items"])
-            var tiles: [Tile] = []; var seen = Set<String>()
-            for item in items {
-                let media = object(item["media"])
-                if string(media["type"]) == "series" {
-                    let id = string(media["id"])
-                    guard !seen.contains(id) else { continue }; seen.insert(id)
-                    let group = items.filter { string(object($0["media"])["id"]) == id }
-                    tiles.append(Tile(title: string(media["name"]), subtitle: "\(group.count) downloaded episodes", symbol: "tv", image: URL(string: string(media["poster"])), run: { [weak self] in self?.downloadedSeries(media, items: group) }))
-                } else { tiles.append(libraryTile(item)) }
-            }
-            show("Library", "AFTERGLOW · \(items.count) downloads", tiles)
+            showCinema("Library", rows: [("Ready to watch", libraryTiles(objects(result["items"])))])
         }
+    }
+    private func libraryTiles(_ items: [Object]) -> [Tile] {
+        var tiles: [Tile] = []; var seen = Set<String>()
+        for item in items {
+            let media = object(item["media"])
+            if string(media["type"]) == "series" {
+                let id = string(media["id"])
+                guard !seen.contains(id) else { continue }; seen.insert(id)
+                let group = items.filter { string(object($0["media"])["id"]) == id }
+                tiles.append(Tile(title: string(media["name"]), subtitle: "\(group.count) downloaded episodes", symbol: "tv", image: URL(string: string(media["poster"])), backdrop: URL(string: string(media["background"])), run: { [weak self] in self?.downloadedSeries(media, items: group) }))
+            } else { tiles.append(libraryTile(item)) }
+        }
+        return tiles
     }
     private func libraryTile(_ item: Object) -> Tile {
         let media = object(item["media"])
-        return Tile(title: string(item["episode"]).isEmpty ? (string(media["name"]).isEmpty ? string(item["name"]) : string(media["name"])) : string(item["episode"]), subtitle: string(item["name"]), symbol: "play.rectangle", image: URL(string: string(media["poster"])), run: { [weak self] in self?.downloadDetail(item) })
+        return Tile(title: string(item["episode"]).isEmpty ? (string(media["name"]).isEmpty ? string(item["name"]) : string(media["name"])) : string(item["episode"]), subtitle: "Ready to play · A to watch", symbol: "play.rectangle", image: URL(string: string(media["poster"])), backdrop: URL(string: string(media["background"])), run: { [weak self] in self?.downloadDetail(item) })
     }
     private func downloadedSeries(_ media: Object, items: [Object]) {
         var tiles = items.sorted { string($0["episode"]) < string($1["episode"]) }.map(libraryTile)
-        tiles.insert(Tile(title: "All seasons", symbol: "rectangle.stack", run: { [weak self] in self?.title(media) }), at: 0)
-        show(string(media["name"]), "DOWNLOADED EPISODES", tiles)
+        tiles.append(Tile(title: "All seasons", symbol: "rectangle.stack", run: { [weak self] in self?.title(media) }))
+        showCinema(string(media["name"]), rows: [("Downloaded episodes", tiles)])
     }
     private func downloadDetail(_ item: Object) {
         let files = objects(item["files"]).filter { $0["video"] as? Bool == true }
-        show(string(object(item["media"])["name"]).isEmpty ? string(item["name"]) : string(object(item["media"])["name"]), string(item["episode"]), files.map { file in
+        let choices = files.map { file in
             let index = Int(number(file["index"])); let hash = string(item["hash"])
             let progress = object(object(item["progress"])["\(hash):\(index)"])
             let position = number(progress["position"]), duration = number(progress["duration"])
             let resume = duration > 0 && position / duration < 0.95 ? position : 0
-            return Tile(title: resume > 0 ? "Resume · \(Int(resume / 60)) min" : "Play", subtitle: string(file["name"]), symbol: "play.fill", run: { [weak self] in self?.play(hash: hash, file: index, position: resume, title: string(item["name"])) })
-        })
+            return Tile(title: resume > 0 ? "Resume · \(Int(resume / 60)) min" : "Play", subtitle: string(file["name"]), symbol: "play.fill", run: { [weak self] in self?.play(hash: hash, file: index, position: resume, title: string(object(item["media"])["name"]).isEmpty ? string(item["name"]) : string(object(item["media"])["name"])) })
+        }
+        if choices.count == 1 { choices[0].run() }
+        else if choices.isEmpty { message = "No playable video files are available in this download yet." }
+        else { showCinema(string(object(item["media"])["name"]), rows: [("Choose a video", choices)]) }
     }
     private func watch(_ media: Object, episode: String = "") {
         work { [self] in
@@ -362,14 +483,18 @@ struct Page {
     }
     func play(hash: String, file: Int, position: Double, title: String, autoplay: Bool = true) {
         work { [self] in
+            message = "Starting playback… B to cancel"
             let api = try await mediaAPI(); let info = try await api.json("/api/playback", body: ["hash": hash, "file": file, "position": position])
-            try Task.checkCancellation(); try await beginPlayback(info, hash: hash, file: file, title: title, autoplay: autoplay)
+            try Task.checkCancellation(); message = ""; try await beginPlayback(info, hash: hash, file: file, title: title, autoplay: autoplay)
         }
     }
     private func beginPlayback(_ info: Object, hash: String, file: Int, title: String, autoplay: Bool = true) async throws {
         let api = try await mediaAPI(); let url = try api.url(string(info["url"]))
+        let replacing = player != nil && playbackHash == hash && playbackFile == file
+        let controlSelection = playerControlSelection
         let keepCaptions = playbackHash == hash && playbackFile == file && captionsOn
         let priorCaptions = keepCaptions ? captions : []
+        let priorVolume = player?.volume ?? playbackVolume, priorMute = player?.isMuted ?? playbackMuted
         stopPlayback(); captionsOn = keepCaptions; captions = priorCaptions; playback = info; playbackHash = hash; playbackFile = file; playbackTitle = title; playbackStatus = "Preparing playback…"; mediaHasPlayed = false
         let item = AVPlayerItem(url: url)
         decodedFrames = 0; videoFrame = nil
@@ -377,21 +502,26 @@ struct Page {
             let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
             item.add(output); videoOutput = output
         }
-        let newPlayer = AVPlayer(playerItem: item); player = newPlayer
+        let newPlayer = AVPlayer(playerItem: item); newPlayer.volume = priorVolume; newPlayer.isMuted = priorMute; player = newPlayer
+        playbackDuration = number(info["duration"]); playbackPosition = number(info["offset"])
+        playerControlSelection = replacing ? controlSelection : 2; wakePlayerControls()
         playerObservation = item.observe(\.status, options: [.new, .initial]) { [weak self, weak newPlayer] item, _ in
             Task { @MainActor in
                 guard let self, let newPlayer, self.player === newPlayer else { return }
-                if item.status == .failed { self.playbackStatus = item.error?.localizedDescription ?? "Playback failed. Press B to return." }
+                if item.status == .failed { self.playbackStatus = item.error?.localizedDescription ?? "Playback failed. Use Back to return." }
                 if item.status == .readyToPlay {
                     let start = number(info["startPosition"])
                     if start > 0 { await newPlayer.seek(to: CMTime(seconds: start, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) }
-                    if autoplay { newPlayer.play() }; self.playbackStatus = autoplay ? "" : "Paused · A to play"
+                    if autoplay { newPlayer.play() }; self.playbackStatus = autoplay ? "" : "Paused"
                 }
             }
         }
         timeObservation = newPlayer.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self, weak newPlayer] _ in
             MainActor.assumeIsolated {
                 guard let self, let newPlayer, self.player === newPlayer else { return }
+                self.playbackPosition = self.position(); self.playbackPaused = newPlayer.rate == 0
+                self.playbackMuted = newPlayer.isMuted; self.playbackVolume = newPlayer.volume; self.captionsEnabled = self.captionsOn
+                if newPlayer.rate > 0 && !self.playerMenu && ProcessInfo.processInfo.systemUptime - self.controlsLastUsed > 4 { self.playerControlsVisible = false }
                 if newPlayer.rate > 0, newPlayer.currentTime().seconds > 0 { self.mediaHasPlayed = true }
                 if let output = self.videoOutput, output.hasNewPixelBuffer(forItemTime: newPlayer.currentTime()),
                    let buffer = output.copyPixelBuffer(forItemTime: newPlayer.currentTime(), itemTimeForDisplay: nil) {
@@ -408,7 +538,7 @@ struct Page {
                     self.caption = self.captions.filter { $0.start <= time && $0.end > time }.map(\.text).joined(separator: "\n")
                 }
                 if newPlayer.currentItem?.status == .readyToPlay {
-                    self.playbackStatus = newPlayer.timeControlStatus == .waitingToPlayAtSpecifiedRate ? "Buffering…" : (newPlayer.rate == 0 ? "Paused · A to play" : "")
+                    self.playbackStatus = newPlayer.timeControlStatus == .waitingToPlayAtSpecifiedRate ? "Buffering…" : (newPlayer.rate == 0 ? "Paused" : "")
                 }
             }
         }
@@ -628,11 +758,11 @@ struct Page {
                 if app.isActive { timer.invalidate() } else { app.activate(options: [.activateAllWindows]) }
             }
         }
-        message = "Playing locally. Home or Back + Start returns to Casework."
+        message = "Playing locally."
     }
     private func openSteam() {
         guard let url = URL(string: "steam://open/bigpicture") else { return }; externalGame = true; NSWorkspace.shared.open(url)
-        message = "Steam handles controller navigation. Home / Back + Start returns to Casework; Steam keeps running."
+        message = "Steam is running."
     }
 
     // MARK: Cyberdeck API surfaces, all rendered as native controls.
@@ -772,7 +902,7 @@ struct Page {
                     let action = object(message["action"])
                     let name = string(action["name"])
                     let supported = ["casework.input", "casework.status", "device.capabilities"].contains(name)
-                    if name == "casework.input" { input(string(object(action["args"])["action"])) }
+                    if name == "casework.input" { noteInput(.controller); input(string(object(action["args"])["action"])) }
                     let result: Object = supported ? state() : ["error": "Unsupported native action"]
                     let reply: Object = ["type": "result", "id": string(message["id"]), "ok": supported, "result": result]
                     send(reply, to: ws)

@@ -1,7 +1,7 @@
 (() => {
-  let current = null, textTarget = null;
+  let current = null, textTarget = null, mode = 'pointer';
   const style = document.createElement('style');
-  style.textContent = '.casework-selected {outline:4px solid #b8ef80!important;outline-offset:4px!important;box-shadow:0 0 0 7px #0008!important}';
+  style.textContent = 'html[data-input-mode=controller] .casework-selected {outline:4px solid #b8ef80!important;outline-offset:4px!important;box-shadow:0 0 0 7px #0008!important}';
   document.head.append(style);
   const entries = () => [...document.querySelectorAll('button,a[href],input,textarea,select,[role="button"],[tabindex="0"],video,iframe')].filter(el => {
     const r=el.getBoundingClientRect(), s=getComputedStyle(el);
@@ -12,6 +12,13 @@
     if(el){el.classList.add('casework-selected');el.scrollIntoView({block:'nearest',inline:'nearest'});el.focus({preventScroll:true});}
   };
   window.caseworkRemote = {
+    mode(value) {
+      if(!['controller','keyboard','pointer'].includes(value))return;
+      mode=value;document.documentElement.dataset.inputMode=value;
+      if(mode==='controller')current?.classList.add('casework-selected');else current?.classList.remove('casework-selected');
+      window.caseworkInput?.setMode(value);
+      for(const frame of document.querySelectorAll('iframe')) frame.contentWindow?.postMessage({caseworkInputMode:value},'*');
+    },
     text(value) {
       if(!textTarget?.isConnected)return;
       const setter=Object.getOwnPropertyDescriptor(textTarget instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,'value')?.set;
@@ -21,6 +28,7 @@
       textTarget.form?.requestSubmit();textTarget=null;
     },
     input(key) {
+      if(key!=='focus')window.caseworkRemote.mode('controller');
       if(current?.tagName==='IFRAME') {
         if(key==='back'){select(entries().find(el=>el!==current));return;}
         current.contentWindow?.postMessage({caseworkNativeInput:key},'*');return;
@@ -56,6 +64,8 @@
       if(next)select(next);
     }
   };
+  window.addEventListener('keydown',event=>{if(event.isTrusted)window.caseworkRemote.mode('keyboard')},true);
+  window.addEventListener('pointerdown',event=>{if(!event.isTrusted)return;window.caseworkRemote.mode('pointer');const target=event.target.closest?.('button,a[href],input,textarea,select,[role=button],video,iframe');if(target){current?.classList.remove('casework-selected');current=target;}},true);
   for(const delay of [100,500,1500])setTimeout(()=>{if(!current?.isConnected)window.caseworkRemote.input('focus');},delay);
-  window.addEventListener('message',e=>{if(e.source===parent && typeof e.data?.caseworkNativeInput==='string')window.caseworkRemote.input(e.data.caseworkNativeInput);});
+  window.addEventListener('message',e=>{if(e.source!==parent)return;if(typeof e.data?.caseworkNativeInput==='string')window.caseworkRemote.input(e.data.caseworkNativeInput);if(e.data?.caseworkInputMode)window.caseworkRemote.mode(e.data.caseworkInputMode);});
 })();
