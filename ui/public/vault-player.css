@@ -1,0 +1,29 @@
+html,
+body,
+#game {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #080b10;
+  color: white;
+  font: 15px system-ui;
+}
+#player-error {
+  position: absolute;
+  inset: 20px;
+  z-index: 5;
+  background: #161e29;
+  padding: 20px;
+  border-radius: 12px;
+  height: fit-content;
+}
+button:focus-visible {
+  outline: 3px solid #d7fa76 !important;
+  outline-offset: 3px;
+}
+
+/* Cyberdeck owns the pause menu; gameplay has no duplicate emulator toolbar. */
+.ejs_menu_bar, .ejs_context_menu { display: none !important; }
+body { cursor: none; }
+@media (pointer: coarse) { body { cursor: auto; } }

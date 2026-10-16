@@ -1,9 +1,13 @@
-import { useEffect, useState } from "react";
-import { parseHash, navigate, api, activeNode, activeNodeName, setActiveNode, type Route } from "./lib/api";
-import { ShieldIcon, ServerIcon, FolderIcon, TerminalIcon, GitIcon, LayersIcon, BotIcon, PulseIcon, GridIcon, CloudIcon, MicIcon, MusicIcon } from "./lib/icons";
+import { Desktop } from "./views/Desktop";
+import { lazy, Suspense } from "react";
+import { refreshRouteTitle, routeHash } from "./lib/navigation";
+import { useEffect, useLayoutEffect, useState } from "react";
+import { parseHash, navigate, api, activeNode, activeNodeName, setActiveNode, rememberNodeNames, type Route } from "./lib/api";
+import { ShieldIcon, ServerIcon, FolderIcon, TerminalIcon, GitIcon, LayersIcon, BotIcon, PulseIcon, GridIcon, CloudIcon, MicIcon, MusicIcon, SeedIcon } from "./lib/icons";
 import { Spotify } from "./views/Spotify";
 import { Cloud } from "./views/Cloud";
 import { Applications } from "./views/Applications";
+import { Controls } from "./views/Controls";
 import { ScreenRemote } from "./views/ScreenRemote";
 import { Home } from "./views/Home";
 import { Desk } from "./views/Desk";
@@ -20,12 +24,18 @@ import { TokenGate } from "./views/TokenGate";
 import { PromptBar } from "./components/PromptBar";
 import { applyInstallTarget } from "./lib/pwa";
 
+// Seed's agents UI is a large bundle of its own; load it when the view opens.
+const SeedAgents = lazy(() => import("./views/SeedAgents"));
+
 const NAV = [
   { view: "fleet", label: "Home", icon: ServerIcon },
+  { view: "controls", label: "Controls", icon: GridIcon },
+  { view: "desktop", label: "Desktop", icon: GridIcon },
   { view: "applications", label: "Applications", icon: GridIcon },
   { view: "spotify", label: "Spotify", icon: MusicIcon },
   { view: "desk", label: "Desk", icon: MicIcon },
   { view: "projects", label: "Projects", icon: LayersIcon },
+  { view: "seed", label: "Seed", icon: SeedIcon },
   { view: "agents", label: "Agents", icon: BotIcon },
   { view: "services", label: "Services", icon: PulseIcon },
   { view: "data", label: "Data", icon: GitIcon },
@@ -43,29 +53,29 @@ export function App() {
   useEffect(() => { if (route.view === "spotify") setSpotifyOpened(true); }, [route.view]);
   const [locked, setLocked] = useState(false);
   const [fleet, setFleet] = useState<FleetSummary | null>(null);
-  const [nodeGen, setNodeGen] = useState(0); // bump to remount views on node switch
+  const knownRoute = NAV.some(item => item.view === route.view) || ["edit", "remote"].includes(route.view);
+  const nodeId = route.params.get("node") ?? "";
+  const nodeGen = nodeId; // only a node change remounts node-scoped views
   const [hud, setHud] = useState<{ tasks: number; running: number; down: number | null; handoff: number } | null>(null);
   const [cmuxCount, setCmuxCount] = useState<number | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const onHash = () => setRoute(parseHash());
-    const onNode = () => setNodeGen((g) => g + 1);
     window.addEventListener("hashchange", onHash);
-    window.addEventListener("cyberdeck-node-changed", onNode);
     return () => {
       window.removeEventListener("hashchange", onHash);
-      window.removeEventListener("cyberdeck-node-changed", onNode);
     };
   }, []);
 
   useEffect(() => applyInstallTarget(route.view), [route.view]);
+  useEffect(() => refreshRouteTitle(locked, !knownRoute), [route, locked, knownRoute]);
 
   useEffect(() => {
     let alive = true;
     const poll = async () => {
       try {
         const f = await api<FleetSummary>("/api/fleet/nodes");
-        if (alive) setFleet(f);
+        if (alive) { rememberNodeNames(f.nodes); setFleet(f); }
       } catch {}
       try {
         const o = await api<Overview>("/api/control/overview");
@@ -86,9 +96,8 @@ export function App() {
 
   if (route.view === "remote") return <ScreenRemote />;
   if (locked) return <TokenGate />;
-  const lock = () => setLocked(true);
+  const lock = () => { if (location.hash === routeHash(route.view, route.params)) setLocked(true); };
   const isActive = (v: string) => route.view === v || (v === "files" && route.view === "edit");
-  const nodeId = activeNode();
   const onlineCount = fleet ? fleet.nodes.filter((n) => n.online).length : 0;
 
   const switchNode = (value: string) => {
@@ -101,17 +110,21 @@ export function App() {
 
   const view = (
     <>
+      {!knownRoute && <section className="p-6"><h1 className="text-xl">Page not found</h1><p className="my-3">No Cyberdeck view named “{route.view}”.</p><button onClick={() => navigate("fleet")}>Go home</button></section>}
+      {route.view === "controls" && <Controls />}
+      {route.view === "desktop" && <Desktop key={`desktop-${nodeGen}-${nodeId}`} />}
       {route.view === "fleet" && <Home onLocked={lock} key={`fleet-${nodeGen}`} />}
       {route.view === "applications" && <Applications params={route.params} onLocked={lock} />}
       {route.view === "desk" && <Desk onLocked={lock} key={`desk-${nodeGen}-${nodeId}`} />}
       {route.view === "projects" && <Projects params={route.params} onLocked={lock} key={`projects-${nodeGen}-${nodeId}`} />}
+      {route.view === "seed" && <Suspense fallback={<div className="p-6 text-xs text-zinc-500">Loading Seed agents…</div>}><SeedAgents params={route.params} /></Suspense>}
       {route.view === "agents" && <Agents params={route.params} onLocked={lock} key={`agents-${nodeGen}-${nodeId}`} />}
       {route.view === "services" && <Services params={route.params} onLocked={lock} key={`services-${nodeGen}-${nodeId}`} />}
-      {route.view === "data" && <Data onLocked={lock} key={`data-${nodeGen}-${nodeId}`} />}
+      {route.view === "data" && <Data params={route.params} onLocked={lock} key={`data-${nodeGen}-${nodeId}`} />}
       {route.view === "files" && <Files params={route.params} onLocked={lock} key={`files-${nodeGen}-${nodeId}`} />}
       {route.view === "edit" && <Editor params={route.params} onLocked={lock} key={`edit-${nodeGen}-${nodeId}`} />}
-      {route.view === "term" && <Term params={route.params} key={`term-${nodeGen}-${nodeId}`} />}
-      {route.view === "cmux" && <Cmux onLocked={lock} key={`cmux-${nodeGen}-${nodeId}`} />}
+      {route.view === "term" && <Term params={route.params} onLocked={lock} key={`term-${nodeGen}-${nodeId}`} />}
+      {route.view === "cmux" && <Cmux params={route.params} onLocked={lock} key={`cmux-${nodeGen}-${nodeId}`} />}
       {route.view === "cloud" && <Cloud params={route.params} onLocked={lock} key={`cloud-${nodeGen}-${nodeId}`} />}
     </>
   );
@@ -139,6 +152,7 @@ export function App() {
           title="Which machine you are operating on"
         >
           <option value="">{fleet?.self.name ?? "this machine"} (local)</option>
+          {nodeId && !fleet?.nodes.some(n => n.id === nodeId) && <option value={nodeId}>{nodeId} (unavailable)</option>}
           {fleet?.nodes.map((n) => (
             <option key={n.id} value={n.id} disabled={!n.online}>
               {n.name} {n.online ? "" : "(offline)"}
@@ -166,7 +180,7 @@ export function App() {
           ))}
         </aside>
 
-        <main className="min-w-0 flex-1 overflow-hidden">{view}{spotifyOpened && <Spotify visible={route.view === "spotify"} />}</main>
+        <main className="min-w-0 flex-1 overflow-hidden">{view}{spotifyOpened && <Spotify visible={route.view === "spotify"} params={route.params} />}</main>
       </div>
 
       {/* sticky prompt bar: start sessions from anywhere; live sessions strip */}

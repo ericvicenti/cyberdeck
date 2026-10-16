@@ -1,0 +1,35 @@
+/* Seed's agents UI in Cyberdeck colours. Seed styles everything through these tokens (its
+   theme.css), so retuning them restyles its pages, dialogs, menus and toasts without touching its
+   markup. <html> carries .dark; html.dark outranks Seed's own .dark block. */
+html.dark {
+  --background: #07080c;
+  --panel-background: #07080c;
+  --panel: #0b0d14;
+  --card: #0b0d14;
+  --card-foreground: #d9e0ef;
+  --popover: #0e1119;
+  --popover-foreground: #d9e0ef;
+  --foreground: #d9e0ef;
+  --muted: #0e1119;
+  --muted-foreground: #76819c;
+  --icon: #9aa5bf;
+  --accent: #1a1f2e;
+  --accent-foreground: #eef2fb;
+  --secondary: #1a1f2e;
+  --secondary-foreground: #eef2fb;
+  --border: #1a1f2e;
+  --input: #283046;
+  --ring: #22d3ee;
+  --primary: #22d3ee;
+  --primary-foreground: #07080c;
+  --brand: #22d3ee;
+  --link: #67e8f9;
+  --link-hover: #a5f3fc;
+  --highlight: rgba(34, 211, 238, 0.18);
+  --selection: rgba(34, 211, 238, 0.25);
+  --sidebar: #0b0d14;
+  --sidebar-foreground: #d9e0ef;
+  --sidebar-border: #1a1f2e;
+  --sidebar-accent: #1a1f2e;
+  --sidebar-accent-foreground: #eef2fb;
+}

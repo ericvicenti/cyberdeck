@@ -20,7 +20,7 @@ StartLimitIntervalSec=0
 WorkingDirectory=%h/.cyberdeck/src
 Environment=CYBERDECK_KIOSK_URL=$CYBERDECK_KIOSK_URL
 ExecStart=%h/.bun/bin/bun run %h/.cyberdeck/src/desktop/kiosk.ts
-Restart=on-failure
+Restart=always
 RestartSec=5
 UNIT
 cat > "$HOME/.config/autostart/cyberdeck.desktop" <<'DESKTOP'

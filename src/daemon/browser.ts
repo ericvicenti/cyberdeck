@@ -25,10 +25,10 @@ export type InputMsg =
   | { t: "mouse"; type: "mousePressed" | "mouseReleased" | "mouseMoved"; x: number; y: number; button?: "left" | "right" | "middle" | "none"; clickCount?: number; modifiers?: number }
   | { t: "key"; type: "keyDown" | "keyUp" | "char" | "rawKeyDown"; key?: string; code?: string; text?: string; modifiers?: number; windowsVirtualKeyCode?: number }
   | { t: "wheel"; x: number; y: number; deltaX: number; deltaY: number }
-  | { t: "nav"; url: string }
-  | { t: "back" }
-  | { t: "forward" }
-  | { t: "reload" }
+  | { t: "nav"; url: string; navigationId?: number }
+  | { t: "back"; navigationId?: number }
+  | { t: "forward"; navigationId?: number }
+  | { t: "reload"; navigationId?: number }
   | { t: "resize"; w: number; h: number };
 
 const num = (v: unknown, lo: number, hi: number) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi;
@@ -64,11 +64,15 @@ export function validateInput(raw: unknown): InputMsg | null {
     case "nav": {
       if (typeof m.url !== "string" || m.url.length > 2048) return null;
       const url = normalizeUrl(m.url);
-      return url ? { t: "nav", url } : null;
+      const navigationId = m.navigationId === undefined ? undefined : num(m.navigationId, 1, 0x7fffffff) ? (m.navigationId as number) : null;
+      return url && navigationId !== null ? { t: "nav", url, navigationId } : null;
     }
-    case "back": return { t: "back" };
-    case "forward": return { t: "forward" };
-    case "reload": return { t: "reload" };
+    case "back":
+    case "forward":
+    case "reload": {
+      const navigationId = m.navigationId === undefined ? undefined : num(m.navigationId, 1, 0x7fffffff) ? (m.navigationId as number) : null;
+      return navigationId === null ? null : { t: m.t, navigationId };
+    }
     case "resize":
       if (!num(m.w, 320, 1920) || !num(m.h, 240, 1400)) return null;
       return { t: "resize", w: Math.round(m.w as number), h: Math.round(m.h as number) };
@@ -189,8 +193,9 @@ export function createBrowserStreamHandlers(mgr: Pick<BrowserManager, "get">, pr
   let send: (s: string) => void = () => {};
   let close: () => void = () => {};
   const push = (o: unknown) => { if (!closed) try { send(JSON.stringify(o)); } catch {} };
-  const pushState = async () => { if (!page) return; let title = ""; try { title = await page.title(); } catch {} push({ t: "state", url: page.url(), title }); };
-  const onNav = () => { pushState(); };
+  const pushState = async (navigationId?: number) => { if (!page) return; let title = ""; try { title = await page.title(); } catch {} push({ t: "state", navigationProtocol: 1, url: page.url(), title, ...(navigationId === undefined ? {} : { navigationId }) }); };
+  const onNav = (frame: import("playwright").Frame) => { if (frame === page?.mainFrame()) void pushState(); };
+  const onLoad = () => { void pushState(); };
 
   return {
     async onOpen(_ev: unknown, ws: { send: (s: string) => void; close: () => void }) {
@@ -208,7 +213,7 @@ export function createBrowserStreamHandlers(mgr: Pick<BrowserManager, "get">, pr
         const vp = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
         await cdp.send("Page.startScreencast", { format: "jpeg", quality: 60, maxWidth: options.fixedViewport ? Math.min(1280, vp.width) : vp.width, maxHeight: options.fixedViewport ? Math.min(800, vp.height) : vp.height, everyNthFrame: options.fixedViewport ? 6 : 1 });
         page.on("framenavigated", onNav);
-        page.on("load", onNav);
+        page.on("load", onLoad);
         await pushState();
       } catch (e) {
         push({ t: "error", message: e instanceof Error ? e.message : String(e) });
@@ -226,10 +231,10 @@ export function createBrowserStreamHandlers(mgr: Pick<BrowserManager, "get">, pr
           case "mouse": await cdp.send("Input.dispatchMouseEvent", { type: m.type, x: m.x, y: m.y, button: m.button ?? (m.type === "mouseMoved" ? "none" : "left"), buttons: m.type === "mouseReleased" || (m.type === "mouseMoved" && (!m.button || m.button === "none")) ? 0 : m.button === "right" ? 2 : m.button === "middle" ? 4 : 1, clickCount: m.clickCount ?? (m.type === "mouseMoved" ? 0 : 1), modifiers: m.modifiers ?? 0 }); break;
           case "key": await cdp.send("Input.dispatchKeyEvent", { type: m.type, key: m.key, code: m.code, text: m.text, unmodifiedText: m.text, modifiers: m.modifiers ?? 0, windowsVirtualKeyCode: m.windowsVirtualKeyCode, nativeVirtualKeyCode: m.windowsVirtualKeyCode }); break;
           case "wheel": await cdp.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: m.x, y: m.y, deltaX: m.deltaX, deltaY: m.deltaY }); break;
-          case "nav": page.goto(m.url, { waitUntil: "domcontentloaded", timeout: 45_000 }).catch(() => {}); break;
-          case "back": page.goBack({ timeout: 20_000 }).catch(() => {}); break;
-          case "forward": page.goForward({ timeout: 20_000 }).catch(() => {}); break;
-          case "reload": page.reload({ timeout: 45_000 }).catch(() => {}); break;
+          case "nav": await page.goto(m.url, { waitUntil: "domcontentloaded", timeout: 45_000 }).catch(() => {}); await pushState(m.navigationId); break;
+          case "back": await page.goBack({ timeout: 20_000 }).catch(() => {}); await pushState(m.navigationId); break;
+          case "forward": await page.goForward({ timeout: 20_000 }).catch(() => {}); await pushState(m.navigationId); break;
+          case "reload": await page.reload({ timeout: 45_000 }).catch(() => {}); await pushState(m.navigationId); break;
           case "resize":
             if (options.fixedViewport) break;
             await page.setViewportSize({ width: m.w, height: m.h });
@@ -241,7 +246,7 @@ export function createBrowserStreamHandlers(mgr: Pick<BrowserManager, "get">, pr
     },
     async onClose() {
       closed = true;
-      try { page?.off("framenavigated", onNav); page?.off("load", onNav); } catch {}
+      try { page?.off("framenavigated", onNav); page?.off("load", onLoad); } catch {}
       try { await cdp?.send("Page.stopScreencast"); } catch {}
       try { await cdp?.detach(); } catch {}
       cdp = null; page = null;

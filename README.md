@@ -171,3 +171,69 @@ allowed this route, not other browser profiles. Chromium debugging stays at loop
 `127.0.0.1:9223`. The Afterglow tunnel stays at loopback `127.0.0.1:13031`; its server allows
 framing only by the configured exact Cyberdeck origin. Original Firefox profile and launcher
 remain as a fallback; the old Afterglow GNOME autostart is renamed `.desktop.disabled`.
+
+
+### TV and controller input
+
+The fullscreen Linux kiosk supports spatial focus with **arrow keys**, **Enter/Space**
+to select, and **Escape/Back** to close or return. A lime outline marks the selected
+control. Selecting a text field opens an on-screen keyboard; selecting a slider
+enters adjustment mode (Left/Right adjusts, Select/Back finishes). Lists and
+confirmation dialogs remain inside the page, so gamepads can operate them.
+
+Open **Controls** in the sidebar (also linked from Applications) for the controller
+diagram, live button/axis display, remapping, stick calibration, and reset. Default
+standard gamepads use D-pad for focus, A for Select, B for Back, X for the keyboard,
+Y for Play/Pause, Back/Select for Home, Start for Controls, and LB/RB for page
+scrolling. The left stick scrolls continuously with an adjustable dead zone and
+speed. Other layouts can map both buttons and directional axes; duplicate button
+assignments swap. Inputs must return to neutral after connecting or remapping.
+
+The kiosk injects the input layer into embedded apps, including Afterglow, and
+routes the controller to the focused frame (it follows `document.activeElement` down
+through iframes on every press). Opening an app puts focus inside it; Down from its
+title bar re-enters it; Up past its top edge or Back at its home leaves it. Every
+connected controller works at once (wireless receivers often expose a second idle
+pad). Back returns out of an app to the deck;
+Home and Controls are always fixed Cyberdeck destinations. The kiosk starts at
+`http://127.0.0.1:4777` (a secure browser context for Gamepad API), authenticates from
+its existing local Cyberdeck token without a token URL, and saves mappings per
+controller ID in `~/.cyberdeck/input.json` (mode 600). Pairing QR codes still use the
+trusted fleet address from `CYBERDECK_KIOSK_URL`, so an iPad never pairs to its own
+loopback address. Its service restarts after a
+browser exit. App frame policies must allow that exact loopback origin as well as
+any existing fleet origin. CDP stays on loopback; Casework's existing authenticated
+remote-screen connection continues controlling this same browser.
+
+Outside the kiosk, keyboard navigation and Controls also work in the web UI;
+controller settings are local to that browser. Embedded cross-origin app control
+requires the kiosk injection. Gamepad detection requires a compatible browser,
+a secure origin, and usually a first button press. The diagram describes the
+standard mapping, not a promise about an untested controller's printed labels.
+
+### Retro games
+
+Applications shows **Retro games** on nodes with RetroArch (`apt install retroarch
+libretro-snes9x`; N64 uses `mupen64plus_next_libretro.so` from the libretro buildbot
+in `~/.config/retroarch/cores`). ROMs go in `~/Games/snes` and `~/Games/n64` (one
+subfolder level is scanned; config `games.dir` moves it). Selecting a game runs
+RetroArch fullscreen on the node's screen; the deck ignores the controller until the
+game exits. Cyberdeck layers `~/.cyberdeck/retroarch/cyberdeck.cfg` over the user's
+RetroArch config (Xbox-pad autoconfig, auto save/load state so games resume, hotkeys
+**Back + X** menu, **Back + RB/LB** save/load state). The way out does not depend on
+RetroArch: while a game runs the daemon reads every controller's evdev device itself and
+ends the game on **Home/Guide** or **Back + Start**, and RetroArch shows that hint on
+screen a few seconds after starting (stdin `SHOW_MSG`). The kiosk polls
+`/api/games/status` and ignores the controller while any game runs. **Add games**
+(Applications, in any browser other than the TV itself) uploads ROMs or zips to the right
+folder; nothing is overwritten. Each ROM is identified by CRC32 against the No-Intro DATs
+from libretro-database (cached in `~/.cyberdeck/games-db`, refreshed monthly; N64 dumps are
+normalised to .z64 byte order, SNES copier headers skipped), so `mk64.z64` shows as Mario
+Kart 64 with libretro-thumbnails box art (cached in `~/.cyberdeck/games-art`). Audio goes
+to PipeWire's default sink like every other app. API: `GET /api/games`, `GET
+/api/games/status`, `POST /api/games/upload?name=`, `POST /api/games/:id/launch`,
+`POST /api/games/stop`.
+
+Validation: `bun test tests/tv-input.test.ts tests/tv-browser.test.ts tests/kiosk.test.ts tests/games.test.ts`
+(browser tests launch an isolated headless Chromium with fixture pages and a virtual
+controller; they do not start media downloads or operate fleet services).

@@ -1,10 +1,12 @@
+import { pairingOrigin } from "../lib/pairing";
+import { confirmAction } from '../lib/tv/confirm';
 // Home: the dashboard. Usage limits for Claude Code and Codex, backup and
 // redundancy status, storage across the fleet, agent activity, the Deck control
 // summary, services, handoff, and the machine cards with pairing at the bottom.
 import { NetworkMap } from "../components/NetworkMap";
 import { useEffect, useState } from "react";
 import { api, post, navigate, setActiveNode, fmtBytes, fmtAgo, ApiError } from "../lib/api";
-import { ServerIcon, FolderIcon, TerminalIcon, GitIcon } from "../lib/icons";
+import { ServerIcon, FolderIcon, TerminalIcon, GitIcon, GridIcon } from "../lib/icons";
 import type { Overview } from "../lib/control";
 import type { Dashboard, UsageSummary } from "../../src/daemon/api/dashboard";
 import type { CodexResets } from "../../src/daemon/codexrpc";
@@ -155,7 +157,7 @@ function UsageWidget({ title, usage, testId, node, nodeName, isSelf, onRefresh }
 
 // ---------------------------------------------------------------- node card ----
 
-function NodeCard(props: { name: string; subtitle: string; online: boolean; status: NodeStatus | null; isSelf?: boolean; onBrowse?: () => void; onTerminal?: () => void; onRepos?: () => void; onUnpair?: () => void; testId?: string }) {
+function NodeCard(props: { name: string; subtitle: string; online: boolean; status: NodeStatus | null; isSelf?: boolean; onBrowse?: () => void; onTerminal?: () => void; onDesktop?: () => void; onRepos?: () => void; onUnpair?: () => void; testId?: string }) {
   const s = props.status;
   return (
     <div className="hud-card p-4" data-testid={props.testId}>
@@ -217,6 +219,11 @@ function NodeCard(props: { name: string; subtitle: string; online: boolean; stat
             <TerminalIcon size={13} /> Shell
           </button>
         )}
+        {props.onDesktop && (
+          <button onClick={props.onDesktop} disabled={!props.online} title={`Open ${props.name}'s desktop`} className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-[11px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-40">
+            <GridIcon size={13} /> Desktop
+          </button>
+        )}
         {props.onUnpair && (
           <button onClick={props.onUnpair} className="ml-auto rounded-lg px-2.5 py-1.5 text-[11px] text-zinc-600 hover:bg-red-950/40 hover:text-red-400">
             Unpair
@@ -247,7 +254,7 @@ function CaseworkCard() {
   const [err, setErr] = useState("");
   const [copied, setCopied] = useState("");
   const load = async () => {
-    try { setPairing(await api<CaseworkPairing>(`/api/casework/pairing?url=${encodeURIComponent(location.origin)}`, { local: true })); setErr(""); }
+    try { setPairing(await api<CaseworkPairing>(`/api/casework/pairing?url=${encodeURIComponent(await pairingOrigin())}`, { local: true })); setErr(""); }
     catch (e) { setErr(e instanceof ApiError && e.status === 403 ? "sign in with the token or over the tailnet to see the pairing key" : String(e)); }
   };
   useEffect(() => { void load(); const t = setInterval(() => void load(), 15_000); return () => clearInterval(t); }, []);
@@ -267,7 +274,7 @@ function CaseworkCard() {
               <div className="flex items-center gap-2"><span className="w-12 text-zinc-500">url</span><span className="truncate text-zinc-200">{pairing.url}</span><button onClick={() => copy("url", pairing.url)} className="hud-chip">{copied === "url" ? "copied" : "copy"}</button></div>
               <div className="flex items-center gap-2"><span className="w-12 text-zinc-500">key</span><span className="truncate text-zinc-200">{pairing.key}</span><button onClick={() => copy("key", pairing.key)} className="hud-chip">{copied === "key" ? "copied" : "copy"}</button></div>
               <div className="flex items-center gap-2"><span className="w-12 text-zinc-500">link</span><button onClick={() => copy("link", pairing.link)} className="hud-chip">{copied === "link" ? "copied" : "copy pairing link"}</button>
-                <button onClick={async () => { if (!confirm("Rotate the Casework key? Paired devices must re-pair.")) return; await post("/api/casework/rotate", {}); await load(); }} className="hud-chip text-red-300">rotate key</button></div>
+                <button onClick={async () => { if (!await confirmAction("Rotate the Casework key? Paired devices must re-pair.")) return; await post("/api/casework/rotate", {}); await load(); }} className="hud-chip text-red-300">rotate key</button></div>
               <div className="mt-1 text-zinc-500">devices: {pairing.devices.length ? pairing.devices.map((d) => d.info?.name ?? d.info?.model ?? d.id.slice(0, 8)).join(", ") : "none connected"}</div>
             </div>
           ) : null}
@@ -352,8 +359,7 @@ export function Home({ onLocked }: { onLocked: () => void }) {
   }, []);
 
   const goto = (id: string, name: string, view: string) => {
-    setActiveNode(id, name);
-    navigate(view);
+    navigate(view, { node: id });
   };
 
   const pair = async () => {
@@ -615,6 +621,7 @@ export function Home({ onLocked }: { onLocked: () => void }) {
             onRepos={() => goto("", "", "data")}
             onBrowse={() => goto("", "", "files")}
             onTerminal={() => goto("", "", "term")}
+            onDesktop={() => goto("", "", "desktop")}
           />
           {info?.nodes.map((n) => (
             <NodeCard
@@ -626,6 +633,7 @@ export function Home({ onLocked }: { onLocked: () => void }) {
               onRepos={() => goto(n.id, n.name, "data")}
               onBrowse={() => goto(n.id, n.name, "files")}
               onTerminal={() => goto(n.id, n.name, "term")}
+              onDesktop={() => goto(n.id, n.name, "desktop")}
               onUnpair={async () => {
                 await api(`/api/fleet/nodes/${n.id}`, { method: "DELETE" });
                 load();

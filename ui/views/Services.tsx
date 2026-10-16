@@ -1,3 +1,4 @@
+import { confirmAction } from '../lib/tv/confirm';
 import { useEffect, useMemo, useState } from "react";
 import { api, post, wsUrl, navigate, activeNode, activeNodeName, fmtAgo, ApiError } from "../lib/api";
 import { type Overview, type ServiceProbe, isoAgo, projectsForService, projectsOnHost, serviceLogCmd, serviceRestartCmd, pill } from "../lib/control";
@@ -116,7 +117,7 @@ export function Services({ params, onLocked }: { params: URLSearchParams; onLock
                       active={focusSvc === r.service && focusHost.toLowerCase() === r.host.toLowerCase()}
                       projects={projectsForService(r, projects)}
                       onLogs={() => { const c = serviceLogCmd(r); if (c) onHost(r.host, c, `${r.service} @ ${r.host}`); }}
-                      onRestart={serviceRestartCmd(r) ? () => { if (confirm(`Restart ${r.service} on ${r.host}?`)) onHost(r.host, serviceRestartCmd(r)!, `restart ${r.service}`); } : undefined}
+                      onRestart={serviceRestartCmd(r) ? async () => { if (await confirmAction(`Restart ${r.service} on ${r.host}?`)) onHost(r.host, serviceRestartCmd(r)!, `restart ${r.service}`); } : undefined}
                     />
                   ))}
                 </Panel>
