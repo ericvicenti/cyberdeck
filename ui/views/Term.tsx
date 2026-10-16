@@ -1,13 +1,15 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+
+import { lazy, Suspense } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { activeNode, activeNodeName, navigate, api, wsUrl } from "../lib/api";
 import { recentCwds, rememberCwd, shortCwd } from "../lib/terms";
-import { messageRequestId, apiOn, attachUrl, createSession, getCaps, removeSession, renameSession, type LiveSession } from "../lib/sessions";
+import { apiOn, attachUrl, createSession, getCaps, removeSession, renameSession, type LiveSession } from "../lib/sessions";
 import type { Overview } from "../lib/control";
 import "@xterm/xterm/css/xterm.css";
 
-// Seed sessions on this node render with Seed's own agents UI (see SeedAgents.tsx); loaded on first use.
+// Local and paired-node Seed sessions render Seed's own UI, loaded on first use.
 const SeedAgentsEmbed = lazy(() => import("./SeedAgents").then((m) => ({ default: m.SeedAgentsEmbed })));
 
 type Status = "connecting" | "live" | "exited" | "closed";
@@ -91,9 +93,7 @@ function TermPane({ session, onStatus, onRemove }: { session: LiveSession; onSta
     </div>
   );
 }
-
-
-/** A Seed session on this node, in Seed's agents UI: tool calls, runs, plan, sub-sessions, model and stop/retry. */
+/** A Seed session in Seed's UI: tool calls, runs, plan, sub-sessions, model and stop/retry. */
 function NativeSeedSession({ id, node }: { id: string; node: string }) {
   const sessionId = id.replace(/^seed-/, "");
   return (
@@ -110,7 +110,6 @@ function NativeSeedSession({ id, node }: { id: string; node: string }) {
     </Suspense>
   );
 }
-
 
 export function Term({ params }: { params: URLSearchParams }) {
   const node = activeNode();

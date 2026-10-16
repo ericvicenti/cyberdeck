@@ -87,7 +87,7 @@ Starting a `cc` session pre-accepts Claude Code's folder-trust and external-CLAU
 into `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`; an explicit earlier "no" to imports is kept), so the agent
 starts straight into the prompt. Tests: `tests/sessions.test.ts`, `tests/harness.test.ts`, e2e "prompt bar"/"sessions survive".
 
-Seed agents UI: the Seed view and local Seed sessions render Seed's own agents UI from the published, exactly pinned
+Seed agents UI: the Seed view and local/paired-node Seed sessions render Seed's own agents UI from the published, exactly pinned
 `@seed-hypermedia/agents-ui` package. Fix shared UI behavior in Seed and upgrade the package here. Host side:
 `ui/lib/seed-agents.ts`, `ui/views/SeedAgents.tsx`, `src/daemon/api/seed-agents.ts`
 (remote signing restricted to AgentsAction envelopes, cookie-gated same-origin proxies). Tests: `tests/seed-agents.test.ts`, e2e in `tests/voice.test.ts`.

@@ -38,6 +38,7 @@ function fakeAgents(opts: { voice: boolean }) {
   const mcp = new Map<string, Record<string, any>>();
   const triggers = new Map<string, Record<string, any>[]>();
   const runtimeCalls: { auth: string | null; body: any }[] = [];
+  const sockets = new Set<any>();
   let heldMessage: { entered: () => void; wait: Promise<void> } | null = null;
   let n = 0;
   const err = (status: number, message: string) => new Response(cbor.encode({ _: "Error", message }) as unknown as BodyInit, { status, headers: { "content-type": "application/cbor" } });
@@ -45,8 +46,9 @@ function fakeAgents(opts: { voice: boolean }) {
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
-    async fetch(req) {
+    async fetch(req, server) {
       const url = new URL(req.url);
+      if (url.pathname === "/agents/ws") return server.upgrade(req, { data: { keys: new Set<string>() } }) ? undefined : new Response("upgrade failed", { status: 400 });
       if (url.pathname === "/api/health") return Response.json({ status: "ok", version: "fake", protocol: 3, voice: opts.voice });
       // The internal voice runtime route (bearer = SEED_AGENTS_VOICE_INTERNAL_TOKEN), validated like the real one.
       if (url.pathname === "/api/voice/runtime" && req.method === "POST") {
@@ -74,7 +76,7 @@ function fakeAgents(opts: { voice: boolean }) {
         case "GetAgent": { const d = agents.get(a.agentId); return d ? ok({ _: "GetAgentResponse", agent: { id: a.agentId, definition: d }, sessionCount: 0 }) : err(404, "Agent not found"); }
         case "UpdateAgent": if (!agents.has(a.agentId)) return err(404, "Agent not found"); agents.set(a.agentId, a.definition); return ok({ _: "UpdateAgentResponse", agent: { id: a.agentId, definition: a.definition } });
         case "CreateAgent": { const id = `agent-${++n}`; agents.set(id, a.definition); return ok({ _: "CreateAgentResponse", agentId: id }); }
-        case "CreateSession": { if (!agents.has(a.agentId)) return err(404, "Agent not found"); const id = `session-${++n}`; sessions.set(id, { agentId: a.agentId, title: a.title }); return ok({ _: "CreateSessionResponse", sessionId: id }); }
+        case "CreateSession": { if (!agents.has(a.agentId)) return err(404, "Agent not found"); const id = `session-${++n}`; sessions.set(id, { agentId: a.agentId, title: a.title }); if (a.agentId !== COMPANION_ID) queryEvents.set(id, []); return ok({ _: "CreateSessionResponse", sessionId: id }); }
         case "ListSessions": return ok({ _: "ListSessionsResponse", sessions: [...sessions].filter(([, s]) => s.agentId === a.agentId).map(([id, s]) => ({ id, ...s, status: "idle", createdAt: 1, updatedAt: 2 })) });
         case "MessageSession": {
           if (!sessions.has(a.sessionId)) return err(404, "No session");
@@ -83,8 +85,15 @@ function fakeAgents(opts: { voice: boolean }) {
           if (hold) await hold.wait;
           const rows = queryEvents.get(a.sessionId) ?? [];
           const text = a.content.find((p: any) => p.type === "text")?.text;
-          rows.push({ seq: rows.length + 1, event: { type: "message", role: "user", content: text } }, { seq: rows.length + 2, event: { type: "message", role: "assistant", content: `Seed reply: ${text}` } });
+          for (const [role, content] of [["user", text], ["assistant", `Seed reply: ${text}`]]) {
+            const seq = rows.length + 1;
+            rows.push({ id: `${a.sessionId}-${seq}`, sessionId: a.sessionId, seq, createdAt: seq, event: { type: "message", role, content } });
+          }
           queryEvents.set(a.sessionId, rows);
+          for (const ws of sockets) {
+            if (!ws.data.keys.has(`sessions/${a.sessionId}`)) continue;
+            for (const row of rows.slice(-2)) ws.send(JSON.stringify({ _: "append", key: `sessions/${a.sessionId}`, event: { ...row, id: `${a.sessionId}-${row.seq}`, sessionId: a.sessionId, createdAt: row.seq } }));
+          }
           return ok({ _: "MessageSessionResponse" });
         }
         case "StopSession": return ok({ _: "StopSessionResponse" });
@@ -117,6 +126,21 @@ function fakeAgents(opts: { voice: boolean }) {
         }
         default: return err(400, `Unsupported action ${a._}`);
       }
+    },
+    websocket: {
+      open(ws: any) { sockets.add(ws); ws.send(JSON.stringify({ _: "connected", connectedAt: Date.now() })); },
+      async message(ws: any, message: any) {
+        const env: any = cbor.decode(new Uint8Array(message));
+        await blobs.nativeCryptoReady;
+        if (!blobs.verify(env) || env.action._ !== "Subscribe") { ws.close(1008); return; }
+        const key = env.action.key;
+        ws.data.keys.add(key);
+        ws.send(JSON.stringify({ _: "subscribed", key, accountId: EXPECTED_PRINCIPAL }));
+        // Replay closes the fetch/subscribe race, just as Seed's real transport does.
+        const sessionId = key.startsWith("sessions/") ? key.slice("sessions/".length) : null;
+        for (const row of queryEvents.get(sessionId) ?? []) ws.send(JSON.stringify({ _: "append", key, event: { ...row, id: `${sessionId}-${row.seq}`, sessionId, createdAt: row.seq } }));
+      },
+      close(ws: any) { sockets.delete(ws); },
     },
   });
   return {

@@ -1,5 +1,6 @@
-import { Desktop } from "./views/Desktop";
-import { lazy, Suspense, useEffect, useState } from "react";
+
+import { lazy, Suspense } from "react";
+import { useEffect, useState } from "react";
 import { parseHash, navigate, api, activeNode, activeNodeName, setActiveNode, type Route } from "./lib/api";
 import { ShieldIcon, ServerIcon, FolderIcon, TerminalIcon, GitIcon, LayersIcon, BotIcon, PulseIcon, GridIcon, CloudIcon, MicIcon, MusicIcon, SeedIcon } from "./lib/icons";
 import { Spotify } from "./views/Spotify";
@@ -22,6 +23,7 @@ import { PromptBar } from "./components/PromptBar";
 import { applyInstallTarget } from "./lib/pwa";
 
 // Seed's agents UI is a large bundle of its own; load it when the view opens.
+const Desktop = lazy(() => import("./views/Desktop").then((m) => ({ default: m.Desktop })));
 const SeedAgents = lazy(() => import("./views/SeedAgents"));
 
 const NAV = [
@@ -107,7 +109,7 @@ export function App() {
 
   const view = (
     <>
-      {route.view === "desktop" && <Desktop key={`desktop-${nodeGen}-${nodeId}`} />}
+      {route.view === "desktop" && <Suspense fallback={<div className="p-6">Loading desktop…</div>}><Desktop key={`desktop-${nodeGen}-${nodeId}`} /></Suspense>}
       {route.view === "fleet" && <Home onLocked={lock} key={`fleet-${nodeGen}`} />}
       {route.view === "applications" && <Applications params={route.params} onLocked={lock} />}
       {route.view === "desk" && <Desk onLocked={lock} key={`desk-${nodeGen}-${nodeId}`} />}
