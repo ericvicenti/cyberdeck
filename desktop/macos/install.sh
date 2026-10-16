@@ -4,7 +4,7 @@ cd "$(dirname "$0")"
 app="${CASEWORK_APP_PATH:-$HOME/Applications/Casework.app}"
 build=$(mktemp -d)
 trap 'rm -rf "$build"' EXIT
-swiftc -O -whole-module-optimization -parse-as-library Support.swift Captions.swift Compatibility.swift Casework.swift Cinema.swift Music.swift MusicVisuals.swift PlayerControls.swift Main.swift -o "$build/Casework" -framework Cocoa -framework SwiftUI -framework AVKit -framework GameController -framework Network -framework MediaPlayer -framework WebKit
+swiftc -O -whole-module-optimization -parse-as-library Support.swift Captions.swift Compatibility.swift Casework.swift Cinema.swift Music.swift AudioBands.swift SystemAudio.swift MusicVisuals.swift PlayerControls.swift Main.swift -o "$build/Casework" -framework Cocoa -framework SwiftUI -framework AVKit -framework GameController -framework Network -framework MediaPlayer -framework WebKit -framework ScreenCaptureKit -framework Accelerate
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 if [ -e "$app/Contents/MacOS/Casework" ]; then
   backup="$HOME/Library/Application Support/Casework/backups/$(date +%Y%m%d-%H%M%S)"
@@ -24,6 +24,7 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 <key>CFBundleVersion</key><string>1</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>
+<key>NSScreenCaptureDescription</key><string>Casework listens to this Mac’s system audio to display a live visualizer. Video is not stored.</string>
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
 </dict></plist>

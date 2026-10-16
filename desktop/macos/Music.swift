@@ -256,8 +256,10 @@ struct MusicView: View {
     }
     var body: some View {
         ZStack {
-            ElectricStorm(playing: music.playing).ignoresSafeArea()
-            if model.musicVisualizer { immersive } else { library }
+            if model.musicVisualizer {
+                ElectricStorm().ignoresSafeArea()
+                immersive
+            } else { library }
         }.foregroundStyle(.white)
     }
     private var transport: some View {
@@ -273,7 +275,7 @@ struct MusicView: View {
     private var immersive: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
-                Text("AFTERGLOW / ELECTRIC SKY").font(.system(size: 13, weight: .bold)).tracking(3).foregroundStyle(.white.opacity(0.65))
+                Text("AFTERGLOW / SYSTEM AUDIO").font(.system(size: 13, weight: .bold)).tracking(3).foregroundStyle(.white.opacity(0.65))
                 Spacer()
                 Button { model.musicVisualizer = false } label: { Label("Back to music", systemImage: "arrow.down.right.and.arrow.up.left").padding(12).background(.black.opacity(0.35)).clipShape(Capsule()) }.buttonStyle(.plain)
             }.padding(40)

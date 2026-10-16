@@ -10,6 +10,10 @@ open ~/Applications/Casework.app
 
 The native SwiftUI/AppKit launcher, Afterglow poster shelves/library/series pages, remote keyboard and AVKit player have no web renderer. Afterglow opens directly into Ready to watch, film and series shelves; selecting a downloaded film or episode starts playback without a second Play screen. Native Games uses ARM64 RetroArch and checksum-pinned Libretro cores. N64 uses ParaLLEl with the Ari64 dynamic recompiler and Glide64; the Mupen64Plus-Next/OpenGL-core path produced black frames on Clipper and is not selected. Web-only applications, full Cyberdeck and Afterglow's YouTube/music/playlists/advanced functions use an explicitly labelled, on-demand WebKit compatibility view. This is not a full native port of every app or the Expo server-delivered React Native modules. Compatibility navigation covers ordinary HTML controls; arbitrary canvas games still need their own gamepad implementation.
 
+## System-audio visualizer
+
+The **Visualizer** tile on Casework's home screen works without Spotify: it analyzes audio playing on this Mac from any app. Afterglow → Music → Visualizer (or V) uses the same capture; Spotify metadata is only used for the transport/title, never for audio samples. The fullscreen spectrum/tunnel uses ScreenCaptureKit system-audio capture and Accelerate FFT, decays to stillness in silence, and honors Reduce Motion. Capture starts on entry and stops on exit. On first use macOS asks for Screen Recording permission; if denied, grant Casework access in System Settings → Privacy & Security → Screen & System Audio Recording, restart Casework, then press Retry. Streaming from a different computer is not captured: playback must actually reach Clipper's audio output. Do not run `install.sh` over a running Clipper app; build/test in a separate app path first.
+
 ## Controller
 
 - D-pad/left stick moves; A selects; B returns; Y or Home goes to Casework; X opens search.

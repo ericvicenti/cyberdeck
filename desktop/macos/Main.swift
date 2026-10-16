@@ -51,6 +51,8 @@ struct WorkspaceView: View {
                     CompatibilityView(browser: browser)
                     if !model.message.isEmpty { Text(model.message).padding(12) }
                 }
+            } else if model.standaloneVisualizer {
+                StandaloneVisualizer(model: model)
             } else if model.page.music {
                 MusicView(model: model, music: model.music, page: model.page).id(model.page.id)
             } else if model.page.cinema {
