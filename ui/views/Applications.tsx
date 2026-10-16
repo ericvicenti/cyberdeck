@@ -3,7 +3,6 @@ import { AfterglowFrame } from "./AfterglowFrame";
 import { useEffect, useState } from "react";
 import { api, ApiError, navigate } from "../lib/api";
 import { CaseworkConsole, inCasework, openNative, type CaseworkApp } from "./CaseworkConsole";
-import { AfterglowFrame } from "./AfterglowFrame";
 type Application = { id: string; name: string; description: string; url: string };
 /** `casework.apps` are the example apps that run natively in the Casework Desk app (the kitchen sink). */
 type Listing = { applications: Application[]; casework?: { apps: CaseworkApp[]; devices: { id: string }[]; kiosk: boolean } };

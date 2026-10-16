@@ -116,11 +116,11 @@ export function App() {
       {route.view === "seed" && <Suspense fallback={<div className="p-6 text-xs text-zinc-500">Loading Seed agents…</div>}><SeedAgents params={route.params} /></Suspense>}
       {route.view === "agents" && <Agents params={route.params} onLocked={lock} key={`agents-${nodeGen}-${nodeId}`} />}
       {route.view === "services" && <Services params={route.params} onLocked={lock} key={`services-${nodeGen}-${nodeId}`} />}
-      {route.view === "data" && <Data onLocked={lock} key={`data-${nodeGen}-${nodeId}`} />}
+      {route.view === "data" && <Data params={route.params} onLocked={lock} key={`data-${nodeGen}-${nodeId}`} />}
       {route.view === "files" && <Files params={route.params} onLocked={lock} key={`files-${nodeGen}-${nodeId}`} />}
       {route.view === "edit" && <Editor params={route.params} onLocked={lock} key={`edit-${nodeGen}-${nodeId}`} />}
       {route.view === "term" && <Term params={route.params} key={`term-${nodeGen}-${nodeId}`} />}
-      {route.view === "cmux" && <Cmux onLocked={lock} key={`cmux-${nodeGen}-${nodeId}`} />}
+      {route.view === "cmux" && <Cmux params={route.params} onLocked={lock} key={`cmux-${nodeGen}-${nodeId}`} />}
       {route.view === "cloud" && <Cloud params={route.params} onLocked={lock} key={`cloud-${nodeGen}-${nodeId}`} />}
     </>
   );
