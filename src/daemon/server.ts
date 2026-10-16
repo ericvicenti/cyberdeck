@@ -1,3 +1,4 @@
+import { registerDesktopRoutes } from "./api/desktop";
 import { registerKioskRoutes } from "./api/kiosk";
 import { registerAudioRoutes, audioBackend, type AudioBackend } from "./api/audio";
 import { Hono } from "hono";
@@ -220,6 +221,7 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   // Seed agents bridge: voice calls from the Casework app / web Desk go to a Seed agent (docs/VOICE.md).
   const seed = new SeedBridge({ config: seedConfig(cfg), port: cfg.port, token, home: opts.seed?.home, companionFile: opts.seed?.companionFile, runtimeFile: opts.seed?.runtimeFile });
   casework = registerCaseworkRoutes(app, { token, nodeName: cfg.nodeName, kiosk: cfg.kiosk?.enabled, upgradeWebSocket, isFullAuth, experiencesDir: opts.caseworkExperiencesDir, key: opts.caseworkKey, voice: () => seed.voiceSummary(), secureOrigin: () => ts.serveOrigin(cfg.port), seedBridge: cfg.casework });
+  registerDesktopRoutes(app, cfg, upgradeWebSocket, isFullAuth);
   registerVoiceRoutes(app, seed, { isFullAuth, serveOrigin: (port) => ts.serveOrigin(port) });
   // Seed's own agents UI in the browser: signing stays here, requests reach the agents server through us.
   registerSeedAgentsRoutes(app, seed, { token, upgradeWebSocket, isFullAuth, getNode: (id) => db.query("SELECT * FROM nodes WHERE id = ?").get(id) as import("./api/fleet").NodeRow | null });
