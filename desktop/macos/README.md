@@ -68,3 +68,13 @@ navigation and transport commands without changing Spotify or Afterglow account 
 Restore `spotify-device`/`spotify-device-name` preferences after fixture runs. The browser
 bridge also has an isolated real-Chromium test for authentication, command delivery,
 plain-text Spotify mutation replies, rejected routes and credential non-disclosure.
+
+## Electric Sky visualizer
+
+Music includes an ambient native Canvas visualizer: cyan electric arcs, violet plasma
+rings and drifting sparks. Choose **Visualizer** with the controller or mouse, or press
+**V**, for the immersive view; **B/Escape** returns to the library without stopping music.
+D-pad/A still select the transport controls, Start pauses, and shoulders change tracks.
+Search leaves the immersive view and opens the normal input-aware search field.
+Animation is capped at30fps, freezes while paused/inactive, and respects Reduce Motion.
+It follows playback state, not audio frequencies: Spotify Connect does not supply PCM.

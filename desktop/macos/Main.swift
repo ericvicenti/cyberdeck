@@ -188,6 +188,7 @@ struct WorkspaceView: View {
             let actions: [UInt16: String] = [123: "left", 124: "right", 125: "down", 126: "up", 36: "select", 76: "select", 53: "back", 115: "home", 116: "previous", 121: "next"]
             if let action = actions[event.keyCode] { self.workspace.input(action); return nil }
             let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
+            if self.workspace.page.music && key == "v" { if !event.isARepeat { self.workspace.input("visualizer") }; return nil }
             if self.workspace.page.music && [" ", "k", "j", "l"].contains(key) {
                 if !event.isARepeat { self.workspace.input(["j": "previous", "l": "next"][key] ?? "pause") }; return nil
             }

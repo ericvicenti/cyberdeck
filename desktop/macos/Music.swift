@@ -114,6 +114,10 @@ import AppKit
 }
 
 extension Workspace {
+    func toggleMusicVisualizer() {
+        musicVisualizer.toggle()
+        if musicVisualizer, page.shelves.count > 1 { selection = page.shelves[1].start }
+    }
     func showMusic(_ title: String, rows: [(String, [Tile])], push: Bool = true) {
         let navigation = [
             Tile(title: "Your music", symbol: "music.note.house", run: { [weak self] in self?.musicHome() }),
@@ -121,9 +125,10 @@ extension Workspace {
             Tile(title: "Devices", symbol: "hifispeaker", run: { [weak self] in self?.musicDevices() }),
             Tile(title: "Refresh", symbol: "arrow.clockwise", run: { [weak self] in self?.musicHome() }),
             Tile(title: "Films & series", symbol: "film", run: { [weak self] in self?.mediaHome() })]
-        let transport = [("Play / pause", "playpause.fill", "toggle"), ("Previous", "backward.end.fill", "previous"), ("Next", "forward.end.fill", "next"), ("Shuffle", "shuffle", "shuffle"), ("Repeat", "repeat", "repeat"), ("Volume −", "speaker.fill", "quieter"), ("Volume +", "speaker.wave.3.fill", "louder")].map { name, symbol, action in
+        var transport = [("Play / pause", "playpause.fill", "toggle"), ("Previous", "backward.end.fill", "previous"), ("Next", "forward.end.fill", "next"), ("Shuffle", "shuffle", "shuffle"), ("Repeat", "repeat", "repeat"), ("Volume −", "speaker.fill", "quieter"), ("Volume +", "speaker.wave.3.fill", "louder")].map { name, symbol, action in
             Tile(title: name, symbol: symbol, run: { [weak self] in self?.musicControl(action) })
         }
+        transport.append(Tile(title: "Visualizer", symbol: "sparkles", run: { [weak self] in self?.toggleMusicVisualizer() }))
         var tiles = navigation + transport
         var shelves = [Shelf(title: "", start: 0, count: navigation.count), Shelf(title: "Player", start: navigation.count, count: transport.count)]
         for (name, row) in rows where !row.isEmpty { shelves.append(Shelf(title: name, start: tiles.count, count: row.count)); tiles += row }
@@ -250,6 +255,39 @@ struct MusicView: View {
         }.buttonStyle(.plain).id(index)
     }
     var body: some View {
+        ZStack {
+            ElectricStorm(playing: music.playing).ignoresSafeArea()
+            if model.musicVisualizer { immersive } else { library }
+        }.foregroundStyle(.white)
+    }
+    private var transport: some View {
+        let row = page.shelves[1]
+        return ScrollViewReader { scroll in
+            ScrollView(.horizontal) {
+                HStack(spacing: 12) { ForEach(row.start..<(row.start + row.count), id: \.self) { button($0, compact: true) } }.padding(.horizontal, 40).padding(.vertical, 5)
+            }.scrollIndicators(.hidden).onChange(of: model.selection) { _, value in
+                if value >= row.start && value < row.start + row.count { withAnimation { scroll.scrollTo(value, anchor: .center) } }
+            }
+        }
+    }
+    private var immersive: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Text("AFTERGLOW / ELECTRIC SKY").font(.system(size: 13, weight: .bold)).tracking(3).foregroundStyle(.white.opacity(0.65))
+                Spacer()
+                Button { model.musicVisualizer = false } label: { Label("Back to music", systemImage: "arrow.down.right.and.arrow.up.left").padding(12).background(.black.opacity(0.35)).clipShape(Capsule()) }.buttonStyle(.plain)
+            }.padding(40)
+            Spacer()
+            VStack(alignment: .leading, spacing: 12) {
+                Text(music.title.isEmpty ? "Electric sky" : music.title).font(.system(size: 38, weight: .bold)).lineLimit(2)
+                Text(music.artist.isEmpty ? "A little room to drift." : music.artist).font(.title3).foregroundStyle(.white.opacity(0.7))
+            }.padding(.horizontal, 48)
+            transport
+            if model.inputMode == .controller { Text("✚ Controls   A Select   B Back   Start Pause   LB / RB Track").font(.system(size: 13)).foregroundStyle(.white.opacity(0.55)).padding(.horizontal, 48) }
+            if !model.message.isEmpty { Text(model.message).font(.callout).padding(.horizontal, 48) }
+        }.padding(.bottom, 30).background(LinearGradient(stops: [.init(color: .black.opacity(0.25), location: 0), .init(color: .clear, location: 0.35), .init(color: .black.opacity(0.85), location: 1)], startPoint: .top, endPoint: .bottom))
+    }
+    private var library: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("AFTERGLOW").font(.system(size: 23, weight: .black, design: .rounded)).tracking(4).foregroundStyle(green)
@@ -266,8 +304,7 @@ struct MusicView: View {
                     HStack { Text(music.playing ? "Playing" : "Paused"); Spacer(); Text("Shuffle \(music.playback["shuffle_state"] as? Bool == true ? "on" : "off") · Repeat \(string(music.playback["repeat_state"]).isEmpty ? "off" : string(music.playback["repeat_state"]))") }.font(.caption).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }.padding(.horizontal, 48).padding(.bottom, 24)
-            let controls = page.shelves[1]
-            HStack(spacing: 12) { ForEach(controls.start..<(controls.start + controls.count), id: \.self) { button($0, compact: true) } }.padding(.horizontal, 40).padding(.bottom, 22)
+            transport.padding(.bottom, 22)
             ScrollViewReader { vertical in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
@@ -289,6 +326,6 @@ struct MusicView: View {
                 Spacer(); if model.busy { ProgressView().controlSize(.small) }
             }.font(.system(size: 13)).foregroundStyle(.secondary).padding(.horizontal, 48).padding(.top, 12)
             Text(model.message.isEmpty ? music.error : model.message).font(.system(size: 15)).lineLimit(3).padding(.horizontal, 48).padding(.vertical, 14)
-        }.background(LinearGradient(colors: [Color(red: 0.035, green: 0.11, blue: 0.09), .black], startPoint: .topLeading, endPoint: .bottomTrailing)).foregroundStyle(.white)
+        }.background(LinearGradient(colors: [Color.black.opacity(0.72), Color.black.opacity(0.92)], startPoint: .topLeading, endPoint: .bottomTrailing)).foregroundStyle(.white)
     }
 }

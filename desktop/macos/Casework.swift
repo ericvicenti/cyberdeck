@@ -65,6 +65,7 @@ enum InputMode: String { case controller, keyboard, pointer }
     var window: NSWindow?
     let deck: API
     lazy var music = SpotifyConnection(deck: deck)
+    @Published var musicVisualizer = false
     let controllers = ControllerInput()
     let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Casework")
     private var afterglow: API?
@@ -132,7 +133,7 @@ enum InputMode: String { case controller, keyboard, pointer }
         var result: Object = ["inputMode": inputMode.rawValue, "onscreenKeyboard": keyboardText != nil && inputMode == .controller, "title": page.title, "tiles": page.tiles.map(\.title), "selection": selection,
             "focused": page.tiles.indices.contains(selection) ? page.tiles[selection].title : "", "busy": busy,
             "message": message, "controllers": controllers.names, "fullscreen": window?.styleMask.contains(.fullScreen) ?? false,
-            "shelves": page.shelves.map { ["start": $0.start, "count": $0.count] }, "cinema": page.cinema, "music": page.music, "spotify": music.playback, "spotifyError": music.error, "spotifyDevice": music.deviceName, "controllerInput": controllers.diagnostics, "active": NSApp.isActive, "controlConnected": controlConnected, "gameRunning": gameProcess?.isRunning == true, "native": true, "verification": verification, "compatibility": browser?.web.url?.absoluteString as Any? ?? NSNull(),
+            "shelves": page.shelves.map { ["start": $0.start, "count": $0.count] }, "cinema": page.cinema, "music": page.music, "musicVisualizer": musicVisualizer, "spotify": music.playback, "spotifyError": music.error, "spotifyDevice": music.deviceName, "controllerInput": controllers.diagnostics, "active": NSApp.isActive, "controlConnected": controlConnected, "gameRunning": gameProcess?.isRunning == true, "native": true, "verification": verification, "compatibility": browser?.web.url?.absoluteString as Any? ?? NSNull(),
             "keyboard": keyboardText as Any? ?? NSNull(), "keyboardSelection": keyboardSelection]
         if let player {
             result["player"] = ["title": playbackTitle, "status": player.currentItem?.status.rawValue ?? 0,
@@ -183,7 +184,7 @@ enum InputMode: String { case controller, keyboard, pointer }
     }
     private func cancel() { task?.cancel(); generation = UUID(); busy = false }
     func home() {
-        cancel(); keyboardText = nil; stopPlayback(); browser?.close(); browser = nil
+        cancel(); musicVisualizer = false; keyboardText = nil; stopPlayback(); browser?.close(); browser = nil
         if let process = gameProcess, process.isRunning {
             try? gameInput?.fileHandleForWriting.write(contentsOf: Data("QUIT\n".utf8))
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { if process.isRunning { process.interrupt() } }
@@ -201,6 +202,7 @@ enum InputMode: String { case controller, keyboard, pointer }
     }
     func back() {
         if keyboardText != nil { keyboardText = nil; keyboardSubmit = nil; return }
+        if page.music && musicVisualizer { musicVisualizer = false; return }
         if player != nil { if playerMenu { playerMenu = false } else { cancel(); stopPlayback() }; return }
         if let browser {
             if browser.web.canGoBack { browser.web.goBack() } else { browser.close(); self.browser = nil; message = "" }; return
@@ -276,9 +278,14 @@ enum InputMode: String { case controller, keyboard, pointer }
             }; return
         }
         if page.music {
+            if action == "visualizer" { toggleMusicVisualizer(); return }
+            if musicVisualizer && ["left", "right", "up", "down"].contains(action), page.shelves.count > 1 {
+                let controls = page.shelves[1]
+                selection = max(controls.start, min(controls.start + controls.count - 1, selection + (["left", "up"].contains(action) ? -1 : 1))); return
+            }
             if ["pause", "menu"].contains(action) { musicControl("toggle"); return }
             if ["previous", "next"].contains(action) { musicControl(action); return }
-            if action == "search" { enterText { [weak self] in self?.musicSearch($0) }; return }
+            if action == "search" { musicVisualizer = false; enterText { [weak self] in self?.musicSearch($0) }; return }
         }
         if page.cinema, let rowIndex = page.shelves.firstIndex(where: { selection >= $0.start && selection < $0.start + $0.count }) {
             let row = page.shelves[rowIndex], column = selection - page.shelves[rowIndex].start
