@@ -78,7 +78,7 @@ function fakeAgents(opts: { voice: boolean }) {
         case "SetMcpServer": mcp.set(a.name, a.config); return ok({ _: "SetMcpServerResponse", server: { name: a.name, status: { state: "ok", checkedAt: Date.now() }, tools: [{ name: "status" }, { name: "todo" }] } });
         case "GetAgent": { const d = agents.get(a.agentId); return d ? ok({ _: "GetAgentResponse", agent: { id: a.agentId, definition: d }, sessionCount: 0 }) : err(404, "Agent not found"); }
         case "UpdateAgent": if (!agents.has(a.agentId)) return err(404, "Agent not found"); agents.set(a.agentId, a.definition); return ok({ _: "UpdateAgentResponse", agent: { id: a.agentId, definition: a.definition } });
-        case "CreateAgent": { const id = `agent-${++n}`; agents.set(id, a.definition); return ok({ _: "CreateAgentResponse", agentId: id }); }
+        case "CreateAgent": { if (a.definition?.modelProvider === "Missing") return err(404, "Model provider not found"); const id = `agent-${++n}`; agents.set(id, a.definition); return ok({ _: "CreateAgentResponse", agentId: id }); }
         case "CreateSession": { if (!agents.has(a.agentId)) return err(404, "Agent not found"); const id = `session-${++n}`; sessions.set(id, { agentId: a.agentId, title: a.title }); if (a.agentId !== COMPANION_ID) queryEvents.set(id, []); return ok({ _: "CreateSessionResponse", sessionId: id }); }
         case "ListSessions": return ok({ _: "ListSessionsResponse", sessions: [...sessions].filter(([, s]) => s.agentId === a.agentId).map(([id, s]) => ({ id, ...s, status: "idle", createdAt: 1, updatedAt: 2 })) });
         case "MessageSession": {
@@ -602,6 +602,20 @@ describe("Seed text queries", () => {
         expect(voiced.memory.get(agentId)!.size).toBe(4);
       } finally { fresh.stop(); fresh.cleanup(); }
     } finally { h.stop(); h.cleanup(); }
+  });
+  test("setup on an identity without a model provider keeps the MCP registration and says to log in", async () => {
+    const n = startNode(voiced.url, "voice-noprov", undefined, undefined, { seed: { modelProvider: "Missing" } });
+    try {
+      const r = await req(n, TEST_TOKEN, "/api/voice/setup", { method: "POST", body: JSON.stringify({ adopt: false }) });
+      expect(r.status).toBe(502);
+      const body = await r.json() as any;
+      expect(body.error).toContain("cyberdeck seed login");
+      expect(body.error).toContain('"Missing"');
+      const state = JSON.parse(readFileSync(join(n.home, "seed.json"), "utf8"));
+      expect(state.mcpRegisteredAt).toBeGreaterThan(0);
+      expect(state.agentId).toBeUndefined();
+      expect(voiced.mcp.has("cyberdeck")).toBe(true);
+    } finally { n.stop(); n.cleanup(); }
   });
   test("keygen gives a node without a vault its own signing identity", async () => {
     const { dir, cleanup } = tmpHomeDir("voice-key");

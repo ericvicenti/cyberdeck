@@ -456,6 +456,8 @@ export class SeedBridge {
     const mcp: SetupResult["mcp"] = { name: MCP_SERVER_NAME, url: this.mcpUrl, state: mcpRes?.server?.status?.state, error: mcpRes?.server?.status?.error, tools: Array.isArray(mcpRes?.server?.tools) ? mcpRes!.server!.tools!.length : undefined };
     this.#state.mcpRegisteredAt = Date.now();
     this.#state.mcpTools = (await this.#ownTools().catch(() => [])).join(",") || undefined;
+    // Persist now: the agent step below can fail (no model provider yet on a fresh identity) and the MCP record is already on the server.
+    this.#save();
     if (mcp.state === "error") warnings.push(`MCP discovery failed: ${mcp.error ?? "unknown"} (the server record is saved; it retries on the next connect)`);
 
     // 2. The agent: keep, adopt the Casework Companion, or create.
@@ -483,6 +485,9 @@ export class SeedBridge {
       const created = await this.action<{ agentId: string }>({
         _: "CreateAgent",
         definition: { name, systemPrompt: fleetPrompt(name), modelProvider: this.config.modelProvider, model: this.config.model, mcpServers: [MCP_SERVER_NAME] },
+      }).catch((e: unknown) => {
+        if (e instanceof SeedError && /provider not found/i.test(e.message)) throw new SeedError(`${e.message}: this identity has no model provider named "${this.config.modelProvider}" on ${this.config.agentsUrl}. Run \`cyberdeck seed login\` (Sign in with ChatGPT), then \`cyberdeck seed setup\` again; the MCP server is already registered.`, e.status, e.code);
+        throw e;
       });
       this.#state.agentId = created.agentId;
       this.#state.sessionId = undefined;
