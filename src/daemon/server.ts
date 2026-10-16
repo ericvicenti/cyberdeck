@@ -14,13 +14,13 @@ import { runDataScan, isDataScanRunning } from "./indexer/data";
 import type { RepoRow } from "./db";
 import { registerFsRoutes } from "./api/fs";
 import { createTermHandlers } from "./api/term";
-import { registerFleetRoutes } from "./api/fleet";
+import { registerFleetRoutes, type NodeRow } from "./api/fleet";
 import { registerMediaRoutes, cleanupHlsCache } from "./api/media";
 import { registerControlRoutes } from "./api/control";
 import { registerCmuxRoutes } from "./api/cmux";
 import { registerMcpRoutes } from "./api/mcp";
 import { registerCaseworkRoutes } from "./api/casework";
-import { registerVoiceRoutes } from "./api/voice";
+import { createVoiceRelay, registerVoiceRoutes, voiceSummary } from "./api/voice";
 import { SeedBridge, SeedError } from "./seed";
 import { nodeStatus } from "./status";
 import { registerSessionRoutes } from "./api/sessions";
@@ -216,8 +216,10 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   const isFullAuth = (c: { req: { raw: Request } }) => { const m = authByReq.get(c.req.raw)?.method; return m === "token" || m === "tailscale"; };
   // Seed agents bridge: voice calls from the Casework app / web Desk go to a Seed agent (docs/VOICE.md).
   const seed = new SeedBridge({ config: seedConfig(cfg), port: cfg.port, token, home: opts.seed?.home, companionFile: opts.seed?.companionFile, runtimeFile: opts.seed?.runtimeFile });
-  casework = registerCaseworkRoutes(app, { token, nodeName: cfg.nodeName, kiosk: cfg.kiosk?.enabled, upgradeWebSocket, isFullAuth, experiencesDir: opts.caseworkExperiencesDir, key: opts.caseworkKey, voice: () => seed.voiceSummary(), secureOrigin: () => ts.serveOrigin(cfg.port), seedBridge: cfg.casework });
-  registerVoiceRoutes(app, seed, { isFullAuth, serveOrigin: (port) => ts.serveOrigin(port) });
+  // A node without a bridge relays its voice routes to the first paired node that has one.
+  const voiceRelay = createVoiceRelay(() => db.query("SELECT id, name, url, token, added_at, last_seen FROM nodes ORDER BY last_seen DESC").all() as NodeRow[]);
+  casework = registerCaseworkRoutes(app, { token, nodeName: cfg.nodeName, kiosk: cfg.kiosk?.enabled, upgradeWebSocket, isFullAuth, experiencesDir: opts.caseworkExperiencesDir, key: opts.caseworkKey, voice: () => voiceSummary(seed, voiceRelay), secureOrigin: () => ts.serveOrigin(cfg.port), seedBridge: cfg.casework });
+  registerVoiceRoutes(app, seed, { isFullAuth, serveOrigin: (port) => ts.serveOrigin(port), relay: voiceRelay });
   registerDashboardRoutes(app, db, cfg);
   const network = registerNetworkRoutes(app, db, cfg);
   registerMcpRoutes(app, db, cfg, control, { status, version: VERSION });

@@ -114,12 +114,12 @@ the node token (`~/.cyberdeck/token`) requires a re-run so the secret on the age
 
 | Route | Key | Returns |
 |---|---|---|
-| `GET /api/voice/config` | pairing | `{configured, provider: 'livekit' \| 'none', engine: 'seed', reason?, agentId?, sessionId?}` |
+| `GET /api/voice/config` | pairing | `{configured, provider: 'livekit' \| 'none', engine: 'seed', reason?, agentId?, sessionId?, via?}` |
 | `POST /api/voice/livekit` | pairing | `{sessionId, url, token, room, identity, expiresAt, profile?}` from `CreateVoiceSession`; `secureUrl?` is the `wss://` twin of a local plain `ws://` url when tailscale serve publishes it; `profile: {voice, speed, applied, error?}` says whether the voice profile below reached the room; `503 {error: 'voice not configured', reason}` when unconfigured; `502 {error}` on a server failure |
 | `GET /api/voice/status` | pairing | `{configured, reason?, agentsUrl, identity: {name, available, principal?, error?}, agent?: {id, name?}, sessionId?, health: {ok, voice, protocol, version, error?, checkedAt}, mcpRegisteredAt?, lastCallAt?, profile?: {voice, speed, runtimeToken, source}}` |
 | `POST /api/voice/session/reset` | pairing | `{sessionId, previous?, room?}`: a new session for the next call; body `{room?}` names a live call's LiveKit room, which the voice runtime is then switched to the new session (`room: {name, switched, error?}`), so the caller keeps talking |
 | `GET /api/voice/transcript?limit=` | pairing | `{supported: true, sessionId?, messages: [{seq, role, text, at}], hasMoreBefore}`: user/assistant text of the current session (`GetSession`'s tail, cheap) |
-| `POST /api/voice/dogfood` | node token | `{triggerId, name, enabled, lastFiredAt?, lastError?, nextSummary?, created}`: the daily fleet check-in trigger (below); body `{timezone?, timeOfDay?}` |
+| `POST /api/voice/dogfood` | node token | `{triggerId, name, enabled, lastFiredAt?, lastError?, nextSummary?, created, updated}`: the daily fleet check-in trigger (below); body `{timezone?, timeOfDay?}` |
 | `GET /api/voice/prompt` | node token | `{agentId, name?, current, desired, changed, applied: false}`: the agent's system prompt next to the fleet persona Cyberdeck ships (`fleetPrompt` in `src/daemon/seed.ts`) |
 | `POST /api/voice/prompt` | node token | the same, after writing the persona to the agent when it differs (`applied: true`); the next session uses it |
 | `POST /api/voice/setup` | node token | the setup result above (`{agent: {id, name?, origin: kept\|adopted\|created}, sessionId, mcp: {name, url, state, tools?, error?}, warnings}`); body `{new?, adopt?, name?}` |
@@ -129,7 +129,10 @@ once the check-in trigger exists (read back from `ListAgentTriggers`, cached 10 
 
 `configured` is true when the identity loads, the agents server answers `/api/health` with
 `voice: true` (probed with a 3 s timeout, cached 10 s), and an agent is set up. The same summary
-rides on `GET /api/state` and the Casework `welcome` frame as `voice`.
+rides on `GET /api/state` and the Casework `welcome` frame as `voice`. On a node without a bridge
+the pairing-key routes are relayed to a paired node that has one and every answer carries
+`via: {node, name}` (see "Nodes without voice"); `status` then returns the voice node's status with
+this node's own under `local`.
 
 Each call follows `continue_session` successors (a session the agent continued into) before minting
 the room, and recreates the session if the server no longer has it.
@@ -142,7 +145,7 @@ cyberdeck seed setup [--new]   # see above
 cyberdeck seed reset-session   # next call starts a fresh session
 cyberdeck seed call            # smoke test: mint a room and print it (token withheld, profile result included); nothing joins it
 cyberdeck seed transcript [n]  # last n user/assistant messages
-cyberdeck seed dogfood [--tz Europe/Madrid] [--at 07:00]   # daily fleet check-in trigger (idempotent)
+cyberdeck seed dogfood [--tz Europe/Madrid] [--at 07:00]   # daily fleet check-in trigger (idempotent; rewrites a stale prompt)
 cyberdeck seed prompt [--apply]  # the agent's system prompt vs the fleet persona; --apply writes the persona
 ```
 
@@ -173,20 +176,36 @@ than the one running the experiments server have neither file and carry no profi
 agent (`ListAgentTriggers` by name, else `CreateAgentTrigger`; the id is kept in `seed.json`). It is
 weekly on all seven days at 07:00 Europe/Madrid by default (`{kind: 'weekly', daysOfWeek: [0..6],
 timeOfDay, timezone}`, Sunday = 0), continuation `newThread`, and its prompt tells the agent to use
-only the cyberdeck tools (`fleet_status`, `services` with a probe, `repos`, `todo`) and leave one
-note under 400 characters in the Deck inbox via `cyberdeck__note`. Options only apply when the
-trigger is created; edit it in the agent's Triggers tab afterwards.
+only the cyberdeck tools (`fleet_status`, `services` with a probe, `repos` with `kind: unpushed`,
+`todo`, all `brief: true`) and leave one note under 400 characters in the Deck inbox via
+`cyberdeck__note`. The prompt is `DOGFOOD_PROMPT` in `src/daemon/seed.ts`: when the trigger's prompt
+differs from it (a trigger made by an older build), `dogfood` rewrites it with `UpdateAgentTrigger`
+and answers `updated: true`, so a deploy plus `cyberdeck seed dogfood` moves the check-in to the
+current wording. The 2026-10-15 run ended with a text answer and no note at all, which is why the
+prompt now says the note is the run's only output. Schedule options only apply when the trigger is
+created; edit the time in the agent's Triggers tab afterwards.
 
 All of these go through the local daemon's HTTP API with the node token, like the other commands.
 
 ## Nodes without voice
 
-The agents server runs on one machine (today Yacht), so every other node's `/api/voice/config` says
-`configured: false`. The web Desk does not stop there: when the node in view has no voice,
-`ui/lib/voice.ts` (`findVoiceNode`) asks the other nodes of the fleet (`/api/fleet/nodes`, online
-ones, plus this daemon when a remote node is in view) for their voice config through the proxy and
-sends the call, status, transcript and session reset to the first one that is configured. The
-bridge strip then reads `node Starlight → Yacht`. "Run setup" still targets the node in view, and the
+The agents server runs on one machine (today Yacht), so only that node has a bridge of its own.
+Every other node's daemon relays the pairing-key voice routes (`config`, `livekit`, `status`,
+`transcript`, `session/reset`) to the first paired node whose `/api/voice/config` says configured
+(`createVoiceRelay` in `src/daemon/api/voice.ts`: the peers of the fleet `nodes` table are probed
+at once with a 4 s bound, the winner is kept 60 s, a miss 15 s, and the node that answered last is
+asked first). Relayed answers carry `via: {node, name}`, `/api/state` and the Casework `welcome`
+say `configured: true` with the same `via`, and `cyberdeck seed status` prints a `relayed:` line.
+This is what lets the iPad app, which only ever talks to the node it is paired with, place calls
+from any node. Probes and relayed requests set the `x-cyberdeck-voice-direct` header, which makes
+the peer answer for itself only, so two voice-less nodes never bounce a request between them.
+"Run setup" still targets the node itself.
+
+The web Desk keeps its own fallback for the case the daemon cannot resolve (a node whose pairing is
+one-sided): when the node in view says `configured: false`, `ui/lib/voice.ts` (`findVoiceNode`)
+asks the other nodes of the fleet (`/api/fleet/nodes`, online ones, plus this daemon when a remote
+node is in view) through the proxy and sends the call, status, transcript and session reset to the
+first one that is configured. The bridge strip reads `node Starlight → Yacht` in both cases. The
 not-configured card only shows when no reachable node has voice (a stopped Tailscale looks like
 that: every paired node is offline).
 

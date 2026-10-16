@@ -96,7 +96,9 @@ is `livekit`, `POST /api/voice/livekit` → join the returned LiveKit room with 
 `call.mute` on press-in / press-out), and the screen's tab row shows the call state on the Talk tab from any tab
 (docs/VOICE.md, "Hands-free and push-to-talk"). There is no separate web build of the app: the browser client is
 the Cyberdeck Desk (`#/desk`, docs/VOICE.md, "The web Casework client is this Desk"). Both routes, plus `/api/voice/status`, `/api/voice/transcript` and
-`/api/voice/session/reset`, are open to the pairing key; `/api/voice/setup` needs the node token.
+`/api/voice/session/reset`, are open to the pairing key; `/api/voice/setup` needs the node token. A
+node without a Seed bridge relays these routes to the paired node that has one (docs/VOICE.md,
+"Nodes without voice"), so the app places calls whichever node it is paired with.
 `voice.configured` on `/api/state` and in the `welcome` frame reports whether calls work (identity
 loaded, agents server up with voice, agent set up by `cyberdeck seed setup`); when it is false the
 `reason` says what is missing. Device-to-console WebRTC calls are answered by the Kitchen sink console (above).

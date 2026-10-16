@@ -14,7 +14,8 @@ export type VoicePhase = "idle" | "connecting" | "live" | "ending" | "error";
 export type AgentState = "initializing" | "listening" | "thinking" | "speaking" | "idle";
 export type TranscriptLine = { id: string; who: "me" | "agent"; text: string; final: boolean; at: number };
 
-export type VoiceConfig = { configured: boolean; provider: "livekit" | "none"; reason?: string; agentId?: string; sessionId?: string };
+/** `via`: the paired node that answers for this one because it has no voice bridge (the daemon relays). */
+export type VoiceConfig = { configured: boolean; provider: "livekit" | "none"; reason?: string; agentId?: string; sessionId?: string; via?: { node: string; name: string } };
 /** `secureUrl`: the wss:// twin of `url` an https page must use (see secureCallUrl in api/voice.ts). */
 type LivekitGrant = { url: string; secureUrl?: string; token: string; room: string; identity: string; expiresAt?: number };
 
