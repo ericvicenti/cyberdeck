@@ -4,7 +4,7 @@ cd "$(dirname "$0")"
 app="${CASEWORK_APP_PATH:-$HOME/Applications/Casework.app}"
 build=$(mktemp -d)
 trap 'rm -rf "$build"' EXIT
-swiftc -O -whole-module-optimization -parse-as-library Support.swift Captions.swift Compatibility.swift Casework.swift Cinema.swift Music.swift AudioBands.swift SystemAudio.swift MusicVisuals.swift PlayerControls.swift Main.swift -o "$build/Casework" -framework Cocoa -framework SwiftUI -framework AVKit -framework GameController -framework Network -framework MediaPlayer -framework WebKit -framework ScreenCaptureKit -framework Accelerate
+swiftc -O -whole-module-optimization -parse-as-library Support.swift Captions.swift Compatibility.swift Casework.swift Cinema.swift SpotifyAuth.swift Music.swift AudioBands.swift SystemAudio.swift MusicVisuals.swift PlayerControls.swift Main.swift -o "$build/Casework" -framework Cocoa -framework SwiftUI -framework AVKit -framework GameController -framework Network -framework MediaPlayer -framework WebKit -framework ScreenCaptureKit -framework Accelerate -framework Security -framework CryptoKit
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 if [ -e "$app/Contents/MacOS/Casework" ]; then
   backup="$HOME/Library/Application Support/Casework/backups/$(date +%Y%m%d-%H%M%S)"

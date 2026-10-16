@@ -1,14 +1,15 @@
 import SwiftUI
 import AppKit
 
-// Catalog and Connect commands reuse a signed-in Cyberdeck tab. The native client
-// never receives Spotify OAuth tokens and renders no Spotify webview.
+// Native Keychain login with the existing Cyberdeck browser bridge as a fallback.
 @MainActor final class SpotifyConnection: ObservableObject {
     @Published var playback: Object = [:]
     @Published var error = ""
     @Published var deviceID = UserDefaults.standard.string(forKey: "spotify-device") ?? ""
     @Published var deviceName = UserDefaults.standard.string(forKey: "spotify-device-name") ?? ""
     private let deck: API
+    let auth = SpotifyAuth()
+    private var fixture: Bool { deck.origin.port == 4779 }
     private var endpoint: (String, String)?
     private var polling = false
     private var timer: Timer?
@@ -32,9 +33,11 @@ import AppKit
                 let result = (prefix, string(device["id"])); endpoint = result; return result
             }
         }
-        throw Failure(message: "Open Spotify in Cyberdeck on Enuc or another paired machine, connect your existing account, and reload that tab. Then choose Refresh here.")
+        throw Failure(message: "Choose Connect Spotify to sign in once. Your music will stay connected when you close the browser.")
     }
     func request(_ path: String, method: String = "GET", body: Object? = nil) async throws -> Object {
+        if !fixture, try auth.connected() { return try await auth.request(path, method: method, body: body) }
+        if !fixture, UserDefaults.standard.bool(forKey: "spotify-native-only") { throw Failure(message: "Choose Connect Spotify to sign in.") }
         let (prefix, device) = try await discover()
         var args: Object = ["path": path, "method": method]; if let body { args["body"] = body }
         let command: Object
@@ -135,6 +138,15 @@ extension Workspace {
         show(title, "SPOTIFY IN AFTERGLOW", tiles, push: push); page.cinema = true; page.music = true; page.shelves = shelves
         selection = shelves.count > 2 ? shelves[2].start : navigation.count
     }
+    func connectMusic() {
+        work { [self] in
+            message = "Complete Spotify sign-in in your browser. Return here when finished."
+            try await music.auth.connect(deck: deck)
+            UserDefaults.standard.set(true, forKey: "spotify-native-only")
+            message = "Spotify connected"
+            musicHome()
+        }
+    }
     func musicHome() {
         showMusic("Your listening room", rows: [])
         work { [self] in
@@ -152,12 +164,15 @@ extension Workspace {
                 let queue = Tile(title: "Up next", subtitle: "Your Spotify queue", symbol: "list.bullet", run: { [weak self] in self?.musicQueue() })
                 let save = Tile(title: "Save this song", subtitle: "Pin the current song in Afterglow", symbol: "bookmark", run: { [weak self] in self?.musicSave() })
                 rows.insert(("Made for your evenings", [liked, queue, save]), at: 0)
+                rows.append(("Account", [Tile(title: "Connect Spotify", subtitle: "Connect or change your account", symbol: "person.crop.circle", run: { [weak self] in self?.connectMusic() }), Tile(title: "Disconnect", subtitle: "Remove this Mac’s saved Spotify login", symbol: "person.crop.circle.badge.minus", run: { [weak self] in self?.work { [weak self] in
+                    guard let self else { return }; try self.music.auth.disconnect(); UserDefaults.standard.set(true, forKey: "spotify-native-only"); self.music.playback = [:]; self.music.ownsPlayback = false; self.musicHome()
+                } })]))
                 try Task.checkCancellation(); showMusic("Your listening room", rows: rows, push: false)
                 await music.refresh(); music.startPolling()
             } catch {
                 try Task.checkCancellation()
                 rows.append(("Connect your music", [
-                    Tile(title: "Connect Spotify", subtitle: "Use your existing Cyberdeck Spotify sign-in", symbol: "person.crop.circle", run: { NSWorkspace.shared.open(URL(string: "http://127.0.0.1:4777/?afterglowSpotify=connect#/spotify")!) }),
+                    Tile(title: "Connect Spotify", subtitle: "Sign in once · saved securely on this Mac", symbol: "person.crop.circle", run: { [weak self] in self?.connectMusic() }),
                     Tile(title: "Open Spotify app", subtitle: "Sign in once for playback on Clipper", symbol: "hifispeaker", run: { NSWorkspace.shared.open(URL(string: "spotify:")!) })]))
                 showMusic("Your listening room", rows: rows, push: false); message = error.localizedDescription
             }

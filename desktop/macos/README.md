@@ -51,13 +51,18 @@ D-pad/A/B navigate every action; Start pauses, shoulders change tracks, X search
 Space/K and J/L control playback; pointer and physical typing hide controller hints.
 Starting a film pauses music started through Casework. Music can continue while browsing.
 
-The existing Cyberdeck Spotify sign-in remains in its browser tab. A small authenticated
-Casework device (`Afterglow · Spotify`) executes catalog reads and explicit playback
-commands through the existing Spotify API helper; credentials are never returned or
-written into Casework event history. `desktop/install-spotify-bridge.py` installs it
-additively, preserving richer host listening rooms. Reload an already-open Cyberdeck tab
-once. Keep that signed-in tab open on any paired online machine (Enuc is preferred).
-If disconnected, Music explains how to reconnect and exposes Connect Spotify.
+**Connect Spotify** opens the existing Spotify OAuth application in the system browser.
+Casework uses PKCE and saves its own renewable login in macOS Keychain. Closing the
+browser does not disconnect the player. Account → Disconnect removes this Mac's saved
+login; Connect Spotify can reconnect or change accounts. First-time login still requires
+Spotify's browser consent. The existing signed-in Cyberdeck browser bridge remains a
+fallback until you establish a native login; no browser credentials are copied.
+
+The authenticated daemon hands off a one-time authorization code through
+`/api/spotify/native/*`, using the existing `http://127.0.0.1:4777/` redirect. Codes expire
+in ten minutes, are claimed once, and never enter persistent state or Casework events.
+The PKCE verifier and access/refresh tokens stay in the native process/Keychain. Native
+requests refresh automatically, coalesce simultaneous renewals, and honor rate limits.
 
 Playback uses the chosen Spotify Connect device. Clipper is selected automatically only
 when its Spotify app is available; other speakers require an explicit device selection.
@@ -81,4 +86,15 @@ rings and drifting sparks. Choose **Visualizer** with the controller or mouse, o
 D-pad/A still select the transport controls, Start pauses, and shoulders change tracks.
 Search leaves the immersive view and opens the normal input-aware search field.
 Animation is capped at30fps, freezes while paused/inactive, and respects Reduce Motion.
-It follows playback state, not audio frequencies: Spotify Connect does not supply PCM.
+Its spectrum follows local system audio through ScreenCaptureKit and Accelerate FFT;
+Spotify Connect provides track/transport metadata, not PCM. See the capture permission
+and standalone Visualizer instructions above.
+
+Native authorization checks (use a temporary executable; no real account needed):
+
+```sh
+swiftc -parse-as-library Support.swift SpotifyAuth.swift spotify-auth-test.swift -o /tmp/casework-spotify-auth-test -framework AppKit -framework GameController -framework Network -framework Security -framework CryptoKit
+/tmp/casework-spotify-auth-test
+# From repository root:
+bun test tests/spotify-native.test.ts
+```

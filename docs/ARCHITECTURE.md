@@ -896,3 +896,16 @@ artifact for machine convergence ("facets" will later template this file).
 Mac authentication for each connection. `ui/views/Desktop.tsx` uses noVNC/Guacamole and
 releases the connection on host switch or unmount. `/api/nodes/:id/desktop/stream` relays
 binary or text frames to the selected paired host. See README for host setup.
+
+### Native Spotify sign-in
+
+Casework's macOS client reuses the existing public Spotify application with PKCE and
+the loopback redirect `http://127.0.0.1:4777/`. Owner-authenticated
+`POST /api/spotify/native/start` creates a ten-minute, in-memory callback state and a
+separate claim ID; `GET /api/spotify/native/:id` claims the result once, and
+`POST /api/spotify/native/:id/cancel` removes it. Root callbacks with the reserved
+`casework-spotify-` state prefix are intercepted before the UI; other browser OAuth
+callbacks continue normally. The callback redirects to a static completion page with
+no referrer or caching. The daemon receives only the authorization code; PKCE verifiers
+and renewable Spotify tokens remain in the native client and macOS Keychain. Scoped
+Casework pairing keys cannot create or claim these handoffs.
