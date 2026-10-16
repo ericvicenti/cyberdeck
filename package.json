@@ -27,9 +27,7 @@
     "hono": "^4.6.0",
     "playwright": "^1.62.1",
     "video.js": "^8.24.0",
-    "zod": "3.25.76",
-    "@novnc/novnc": "1.5.0",
-    "guacamole-common-js": "1.5.0"
+    "zod": "3.25.76"
   },
   "devDependencies": {
     "@codemirror/commands": "^6.11.0",
@@ -53,8 +51,6 @@
     "react-dom": "^19.0.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.0",
-    "vite": "^6.0.0",
-    "@types/novnc__novnc": "^1.6.0",
-    "@types/guacamole-common-js": "^1.5.5"
+    "vite": "^6.0.0"
   }
 }
