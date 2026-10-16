@@ -1,7 +1,7 @@
 // Spotify stays on this browser, independent of Cyberdeck's selected fleet node.
 // PKCE needs only a public client ID. Tokens are tab-scoped and never sent to Cyberdeck.
 const PREFIX = "cyberdeck-spotify-";
-const SCOPES = "streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state playlist-read-private playlist-read-collaborative";
+const SCOPES = "streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state playlist-read-private playlist-read-collaborative user-library-read user-follow-read";
 export type SpotifyTrack = { id: string; uri: string; name: string; duration_ms: number; artists: { name: string }[]; album: { images: { url: string }[] }; external_urls?: { spotify: string } };
 export type SpotifyPlaylist = { id: string; uri: string; name: string; images: { url: string }[]; external_urls?: { spotify: string } };
 export type SpotifyDevice = { id: string | null; name: string; is_active: boolean; is_restricted: boolean; supports_volume?: boolean; volume_percent: number | null };
@@ -10,7 +10,7 @@ type Credentials = { access_token: string; refresh_token: string; expires: numbe
 type Pending = { state: string; verifier: string; clientId: string; redirect: string; created: number };
 const read = <T,>(key: string): T | null => { try { return JSON.parse(sessionStorage.getItem(PREFIX + key) || "null"); } catch { return null; } };
 export const spotifyConnected = () => !!read<Credentials>("tokens");
-export const spotifyClientId = () => localStorage.getItem(PREFIX + "client-id") || "";
+export const spotifyClientId = () => localStorage.getItem(PREFIX + "client-id") || "6dc6300fa4364a81acb8a5f5e920f809";
 export function spotifyRedirect(origin = location.origin): string {
   const url = new URL(origin);
   if (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "[::1]"].includes(url.hostname))) {
@@ -91,7 +91,10 @@ export async function spotifyApi<T>(path: string, method = "GET", body?: unknown
     if (res.status === 404) throw new Error("No active Spotify device. Choose This browser or open Spotify on your phone/computer, then refresh devices.");
     throw new Error(`Spotify request failed (${res.status}). Try again.`);
   }
-  return res.status === 204 ? null as T : res.json();
+  if (res.status === 204) return null as T;
+  const text = await res.text();
+  if (!text || text === "OK") return null as T;
+  return JSON.parse(text) as T;
 }
 export function spotifyUri(input: string): string | null {
   if (/^spotify:(track|album|playlist):[a-zA-Z0-9]+$/.test(input)) return input;
