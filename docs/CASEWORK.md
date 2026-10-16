@@ -1,5 +1,9 @@
 # Casework Desk as a Cyberdeck client
 
+A standalone macOS client is in [`desktop/macos`](../desktop/macos/README.md): fullscreen native
+launcher, controller navigation, native Afterglow playback and local ARM64 retro games. Web-only
+apps use an explicit compatibility view. The sections below describe the separate iOS client.
+
 Casework Desk is Eric's server-driven Expo app for iPad and iPhone (source: `~/Code/remote-control`,
 TestFlight 1.0.0 (2)). It trusts one "workflow server" that supplies screens (TSX experiences),
 receives device events and uploads, and can invoke native actions. Every Cyberdeck node is such a
