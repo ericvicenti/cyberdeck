@@ -3,15 +3,23 @@
 // and the web Desk. Every call is a signed DAG-CBOR `AgentsAction` envelope to POST /api/message
 // (hypermedia/agent/signed-api.md in the Seed repo). See docs/VOICE.md.
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
-import { homedir } from "os";
+import { randomBytes } from "crypto";
+import { homedir, hostname } from "os";
 import { join } from "path";
+import { harnessPrompt, knowledgeSection, memoryPack, readHarnessSources, sha256, PACK_DIR, type HarnessSources } from "./harness";
 import * as blobs from "@seed-hypermedia/client/blobs";
 import * as cbor from "@seed-hypermedia/client/cbor";
 import type { SessionInfo } from "./sessions";
 import { CYBERDECK_HOME, type SeedConfig } from "./config";
 
 /** Persisted in `${CYBERDECK_HOME}/seed.json`. */
-export type SeedState = { queryAgentId?: string; agentId?: string; sessionId?: string; mcpRegisteredAt?: number; mcpTools?: string; lastCallAt?: number; dogfoodTriggerId?: string };
+export type SeedState = {
+  queryAgentId?: string; agentId?: string; sessionId?: string; mcpRegisteredAt?: number; mcpTools?: string; lastCallAt?: number; dogfoodTriggerId?: string;
+  /** Memory-pack manifests per agent (path → sha256 of what was written), so a sync writes only what changed. */
+  memoryPacks?: Record<string, Record<string, string>>;
+  /** A pending "Sign in with ChatGPT" login (`cyberdeck seed login`). */
+  login?: { loginId: string; providerType: string; startedAt: number };
+};
 
 export type SeedHealth = { ok: boolean; voice?: boolean; protocol?: number; version?: string; error?: string; checkedAt: number };
 
@@ -20,7 +28,7 @@ export type SeedStatus = {
   configured: boolean;
   reason?: string;
   agentsUrl: string;
-  identity: { name: string; available: boolean; principal?: string; error?: string };
+  identity: { name: string; available: boolean; principal?: string; error?: string; /** Where the key came from: the Seed vault account `name`, the node key file, or the env seed. */ source?: "vault" | "file" | "env" };
   agent?: { id: string; name?: string };
   sessionId?: string;
   health?: SeedHealth;
@@ -34,7 +42,7 @@ export type SeedStatus = {
 
 export type DogfoodStatus = { triggerId: string; name: string; enabled: boolean; lastFiredAt?: number; lastError?: string; nextSummary?: string };
 export type DogfoodOptions = { timezone?: string; timeOfDay?: string };
-type TriggerInfo = { id: string; name: string; enabled: boolean; source: any; lastFiredAt?: number; lastError?: string; createdAt?: number };
+type TriggerInfo = { id: string; name: string; enabled: boolean; source: any; prompt?: string | unknown[]; lastFiredAt?: number; lastError?: string; createdAt?: number };
 
 /** Cartesia voice id + speaking rate, as the Casework host keeps it in companion.json (`profile`). */
 export type VoiceProfile = { voice: string; speed: number };
@@ -76,7 +84,7 @@ const VOICE_ID_RE = /^[a-zA-Z0-9-]{1,100}$/;
 const MCP_SERVER_NAME = "cyberdeck";
 export const DOGFOOD_TRIGGER_NAME = "cyberdeck-fleet-checkin";
 export const DOGFOOD_PROMPT =
-  "Daily fleet check-in. Use your cyberdeck tools only (no guessing): call cyberdeck__fleet_status and cyberdeck__services (probe: true) for every host, then cyberdeck__repos and cyberdeck__todo. Write ONE note with cyberdeck__note, under 400 characters, in this shape: 'fleet check-in: <hosts up/down>, <services down or all up>, <repos with unpushed work>, <oldest TODO item worth attention>'. If a tool fails, say which in the note. Do not start any other work.";
+  "Daily fleet check-in. Use your cyberdeck tools only (no guessing), always with brief: true: call cyberdeck__fleet_status, cyberdeck__services (probe: true), cyberdeck__repos (kind: 'unpushed') and cyberdeck__todo. Then call cyberdeck__note exactly once with ONE line under 400 characters in this shape: 'fleet check-in: <hosts up/down>, <services down or all up>, <repos with unpushed work>, <oldest TODO item worth attention>'. Nobody reads your final answer: the note is the only output of this run, and the run has failed if cyberdeck__note was not called. If a tool fails, say which in the note. Do not start any other work.";
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /** Human summary of a schedule source, like the agents server's own trigger pages. */
@@ -111,6 +119,10 @@ export type SeedBridgeOptions = {
   runtimeFile?: string;
   /** Injected fetch (tests). */
   fetch?: typeof fetch;
+  /** Harness sources: scan roots (the first holds AGENTS.md), the Deck checkout, and whether node tools are on. */
+  roots?: string[];
+  fleetDir?: string | null;
+  nodeTools?: boolean;
 };
 
 type Signer = { principal: Uint8Array; sign(data: Uint8Array): Promise<Uint8Array> };
@@ -126,10 +138,58 @@ function omitUndefined<T>(value: T): T {
   return value;
 }
 
-const systemPrompt = (name: string) =>
-  `You are ${name}, Eric's fleet companion. People reach you by voice through Cyberdeck (the fleet-and-data daemon on Eric's machines) from the Casework iPad app or the web Desk, so your replies are spoken aloud: answer in one or two short sentences, lead with the answer, and skip markdown, lists and code.
+/**
+ * The companion's system prompt: a fleet persona for a voice channel. Applied to the agent
+ * Cyberdeck creates, and to an adopted companion with `cyberdeck seed prompt --apply`
+ * (never silently: the owner may have tuned the agent by hand on the server).
+ */
+export const fleetPrompt = (name: string) =>
+  `You are ${name}, Eric's fleet companion: the voice of Cyberdeck, the daemon on each of Eric's machines (the laptops yacht and starlight, the servers enuc, sentinel, iris and botical, the phone). Eric reaches you by voice from the Casework app on the iPad or the web Desk, so everything you say is read aloud: lead with the answer, one or two short sentences, plain words, no markdown, lists, code or URLs unless he asks for them.
 
-You have the cyberdeck tools: status of this node and its paired nodes, the fleet manifest (hosts, services), the project tree, the handoff TODO, the cross-host coding-agent session index, repo risk, service probes, the collab queue (queue a task for a laptop agent, start a queued task, read a run's log), notes to the inbox, and a rescan. Reach for them before guessing; say when something is not known. Confirm before queueing or starting work.`;
+Work from facts, not memory: call your cyberdeck tools before answering and never guess at the state of a machine, a service or a repo. Pass brief true on every call and read the sentence it returns; ask for the full data only when Eric wants details. Say in a few words what you checked ("I probed the services and read the log on enuc") and name the host and the service when something is down. Keep numbers few and sayable.
+
+Before anything that changes a machine or the shared handoff (restarting a service, queueing or starting a collab task, removing a handoff entry) say what you are about to do and wait for a yes. Reading status, logs, notes, repos and sessions needs no confirmation. Leave a trace: handoff_note for what you did on a host, note for something Eric should see later, todo_add for work someone has to pick up.
+
+When a tool fails, say which one and what it said, retry at most once, and offer the next step. When you do not know, say so plainly.`;
+
+export type PromptResult = { agentId: string; name?: string; current: string; desired: string; changed: boolean; applied: boolean };
+
+/** What `syncHarness` did to one agent. */
+export type AgentSync = {
+  agentId: string;
+  name?: string;
+  role: "harness" | "voice";
+  created: boolean;
+  /** The definition fields the sync rewrote (systemPrompt, model, reasoningLevel, mcpServers), or none. */
+  definition: string[];
+  /** Why the definition was left alone. */
+  skipped?: string;
+  memory: { written: number; deleted: number; unchanged: number; files: number; error?: string };
+};
+export type HarnessSyncResult = {
+  sources: { rules?: string; deck?: string; notes: number };
+  promptBytes: number;
+  agents: AgentSync[];
+  warnings: string[];
+};
+export type HarnessStatus = {
+  nodeTools: boolean;
+  model: string; reasoningLevel: string;
+  sources: { rules?: string; deck?: string; notes: number; memoryDirs: string[] };
+  queryAgent?: { id: string; name?: string; model?: string; reasoningLevel?: string; promptHash?: string; promptCurrent: boolean; memoryFiles: number };
+  voiceAgent?: { id: string; name?: string; managed: boolean; promptCurrent: boolean; memoryFiles: number };
+};
+export type LoginStart = { loginId: string; authUrl: string; expiresAt: number; providerType: string };
+export type LoginStatus = { loginId: string; status: "pending" | "completed" | "failed"; secretName?: string; error?: string; provider?: string };
+
+/** Marker kept in an agent's `metadata` so a later sync knows which prompt it wrote. */
+const META_KEY = "cyberdeck";
+type CyberdeckMeta = { promptHash?: string; node?: string; role?: "harness" | "voice"; syncedAt?: number };
+const metaOf = (definition: Record<string, unknown>): CyberdeckMeta => {
+  const m = definition.metadata;
+  const c = m && typeof m === "object" ? (m as Record<string, unknown>)[META_KEY] : undefined;
+  return c && typeof c === "object" ? (c as CyberdeckMeta) : {};
+};
 
 export class SeedBridge {
   readonly config: SeedConfig;
@@ -141,6 +201,7 @@ export class SeedBridge {
   #fetch: typeof fetch;
   #state: SeedState;
   #signer: Signer | null = null;
+  #signerSource: "env" | "file" | "vault" = "vault";
   #signerError: string | null = null;
   #signerLoading: Promise<Signer | null> | null = null;
   #health: SeedHealth | null = null;
@@ -149,6 +210,10 @@ export class SeedBridge {
   #agentName: string | undefined;
   #agentNameTriedAt = 0;
   #querySetup: Promise<string> | null = null;
+  #roots: string[];
+  #fleetDir: string | null;
+  #nodeTools: boolean;
+  #syncing: Promise<HarnessSyncResult> | null = null;
 
   constructor(opts: SeedBridgeOptions) {
     this.config = opts.config;
@@ -159,6 +224,9 @@ export class SeedBridge {
     this.stateFile = join(home, "seed.json");
     this.companionFile = opts.companionFile ?? COMPANION_FILE;
     this.runtimeFile = opts.runtimeFile ?? RUNTIME_FILE;
+    this.#roots = opts.roots ?? [join(homedir(), "Code")];
+    this.#fleetDir = opts.fleetDir ?? null;
+    this.#nodeTools = opts.nodeTools !== false;
     this.#state = this.#load();
     // Agent/session from config.json seed a fresh state file (setup overwrites them in seed.json).
     if (!this.#state.agentId && opts.config.agentId) this.#state.agentId = opts.config.agentId;
@@ -187,10 +255,14 @@ export class SeedBridge {
     this.#signerLoading = (async () => {
       try {
         const hex = process.env.CYBERDECK_SEED_KEY_SEED;
-        if (hex) {
-          if (!/^[0-9a-fA-F]{64}$/.test(hex)) throw new Error("CYBERDECK_SEED_KEY_SEED must be 32 bytes of hex");
-          this.#signer = blobs.nobleKeyPairFromSeed(Uint8Array.from(Buffer.from(hex, "hex")));
+        const fileHex = !hex && existsSync(this.config.keyFile) ? readFileSync(this.config.keyFile, "utf8").trim() : null;
+        if (hex || fileHex) {
+          const seed = hex || fileHex!;
+          if (!/^[0-9a-fA-F]{64}$/.test(seed)) throw new Error(hex ? "CYBERDECK_SEED_KEY_SEED must be 32 bytes of hex" : `${this.config.keyFile} must hold 32 bytes of hex`);
+          this.#signer = blobs.nobleKeyPairFromSeed(Uint8Array.from(Buffer.from(seed, "hex")));
+          this.#signerSource = hex ? "env" : "file";
         } else {
+          this.#signerSource = "vault";
           if (typeof DecompressionStream === "undefined") {
             throw new Error(`Bun ${Bun.version} cannot read the Seed vault; Bun 1.3.3 or newer is required. Run bun upgrade, then cyberdeck restart.`);
           }
@@ -284,7 +356,7 @@ export class SeedBridge {
       configured: false,
       agentsUrl: this.config.agentsUrl,
       identity: signer
-        ? { name: this.config.identity, available: true, principal: blobs.principalToString(signer.principal) }
+        ? { name: this.config.identity, source: this.#signerSource, available: true, principal: blobs.principalToString(signer.principal) }
         : { name: this.config.identity, available: false, error: this.#signerError ?? undefined },
       health,
       ...(this.#state.agentId ? { agent: { id: this.#state.agentId, ...(this.#agentName ? { name: this.#agentName } : {}) } } : {}),
@@ -331,9 +403,10 @@ export class SeedBridge {
 
   /**
    * Make sure the daily fleet check-in schedule trigger exists on the agent (idempotent: reused by
-   * name). The agent runs it with the cyberdeck MCP tools and leaves one note in the Deck inbox.
+   * name, and its prompt is rewritten when it differs from DOGFOOD_PROMPT). The agent runs it with the
+   * cyberdeck MCP tools and leaves one note in the Deck inbox.
    */
-  async dogfood(opts: DogfoodOptions = {}): Promise<DogfoodStatus & { created: boolean }> {
+  async dogfood(opts: DogfoodOptions = {}): Promise<DogfoodStatus & { created: boolean; updated: boolean }> {
     const agentId = this.#state.agentId;
     if (!agentId) throw new SeedError("no agent set up: run `cyberdeck seed setup`");
     const timeOfDay = opts.timeOfDay?.trim() || "07:00";
@@ -342,6 +415,13 @@ export class SeedBridge {
     const existing = await this.#findDogfoodTrigger(agentId);
     let trigger = existing;
     let created = false;
+    let updated = false;
+    if (trigger && typeof trigger.prompt === "string" && trigger.prompt !== DOGFOOD_PROMPT) {
+      // The prompt ships with Cyberdeck: a trigger made by an older build gets the current wording.
+      const res = await this.action<{ trigger?: TriggerInfo }>({ _: "UpdateAgentTrigger", triggerId: trigger.id, patch: { prompt: DOGFOOD_PROMPT } });
+      trigger = { ...trigger, ...(res.trigger ?? {}), prompt: DOGFOOD_PROMPT };
+      updated = true;
+    }
     if (!trigger) {
       const res = await this.action<{ trigger: TriggerInfo }>({
         _: "CreateAgentTrigger",
@@ -360,7 +440,7 @@ export class SeedBridge {
     if (this.#state.dogfoodTriggerId !== trigger.id) { this.#state.dogfoodTriggerId = trigger.id; this.#save(); }
     const value = this.#toDogfood(trigger);
     this.#dogfood = { value, checkedAt: Date.now(), agentId };
-    return { ...value, created };
+    return { ...value, created, updated };
   }
 
   /** The shape the Casework app and `/api/state` expect. */
@@ -384,6 +464,8 @@ export class SeedBridge {
     const mcp: SetupResult["mcp"] = { name: MCP_SERVER_NAME, url: this.mcpUrl, state: mcpRes?.server?.status?.state, error: mcpRes?.server?.status?.error, tools: Array.isArray(mcpRes?.server?.tools) ? mcpRes!.server!.tools!.length : undefined };
     this.#state.mcpRegisteredAt = Date.now();
     this.#state.mcpTools = (await this.#ownTools().catch(() => [])).join(",") || undefined;
+    // Persist now: the agent step below can fail (no model provider yet on a fresh identity) and the MCP record is already on the server.
+    this.#save();
     if (mcp.state === "error") warnings.push(`MCP discovery failed: ${mcp.error ?? "unknown"} (the server record is saved; it retries on the next connect)`);
 
     // 2. The agent: keep, adopt the Casework Companion, or create.
@@ -410,7 +492,10 @@ export class SeedBridge {
     if (!agent) {
       const created = await this.action<{ agentId: string }>({
         _: "CreateAgent",
-        definition: { name, systemPrompt: systemPrompt(name), modelProvider: this.config.modelProvider, model: this.config.model, mcpServers: [MCP_SERVER_NAME] },
+        definition: { name, systemPrompt: fleetPrompt(name), modelProvider: this.config.modelProvider, model: this.config.model, mcpServers: [MCP_SERVER_NAME] },
+      }).catch((e: unknown) => {
+        if (e instanceof SeedError && /provider not found/i.test(e.message)) throw new SeedError(`${e.message}: this identity has no model provider named "${this.config.modelProvider}" on ${this.config.agentsUrl}. Run \`cyberdeck seed login\` (Sign in with ChatGPT), then \`cyberdeck seed setup\` again; the MCP server is already registered.`, e.status, e.code);
+        throw e;
       });
       this.#state.agentId = created.agentId;
       this.#state.sessionId = undefined;
@@ -438,6 +523,25 @@ export class SeedBridge {
 
   /** The agents server keeps the tool list it discovered at registration, so a deploy that adds or
    *  changes tools re-registers the MCP server (same config, fresh discovery) once the list differs. */
+  /** The companion's system prompt next to the fleet persona; with `apply`, the persona is written to the agent. */
+  async prompt(apply = false): Promise<PromptResult> {
+    if (!this.#state.agentId) throw new SeedError("no agent set up yet: run `cyberdeck seed setup`", 409);
+    const agentId = this.#state.agentId;
+    const res = await this.action<{ agent: { definition: Record<string, unknown> & { name?: string; systemPrompt?: string } } }>({ _: "GetAgent", agentId });
+    const definition = res.agent.definition;
+    const name = typeof definition.name === "string" ? definition.name : undefined;
+    if (name) this.#agentName = name;
+    const current = typeof definition.systemPrompt === "string" ? definition.systemPrompt : "";
+    const desired = fleetPrompt(name ?? "Cyberdeck");
+    const changed = current !== desired;
+    let applied = false;
+    if (apply && changed) {
+      await this.action({ _: "UpdateAgent", agentId, definition: { ...definition, systemPrompt: desired } });
+      applied = true;
+    }
+    return { agentId, name, current, desired, changed, applied };
+  }
+
   async refreshMcp(names?: string[]): Promise<"skipped" | "unchanged" | "refreshed"> {
     if (!this.#state.mcpRegisteredAt) return "skipped";
     const fp = (names ?? (await this.#ownTools())).slice().sort().join(",");
@@ -477,16 +581,228 @@ export class SeedBridge {
     if (this.#querySetup) return this.#querySetup;
     this.#querySetup = (async () => {
       if (!await this.queryReady()) throw new SeedError("Seed queries are not configured on this node; run cyberdeck seed setup");
-      const created = await this.action<{ agentId: string }>({ _: "CreateAgent", definition: {
-        name: "Cyberdeck Queries", modelProvider: this.config.modelProvider, model: this.config.model,
-        mcpServers: [MCP_SERVER_NAME],
-        systemPrompt: "You are Eric's Seed agent in Cyberdeck. Handle the user's query using the Cyberdeck fleet tools. Check hosts, projects, services, sessions and handoffs before guessing. The supplied working directory is context on the selected fleet machine, not a local path in your sandbox. Organizational work belongs in Seed Hypermedia. Use clear written replies with useful detail and links. Only queue or start coding work when the user requests it. Preserve existing work and services.",
-      } });
-      this.#state.queryAgentId = created.agentId;
-      this.#save();
-      return created.agentId;
+      const id = await this.#createHarnessAgent();
+      // Best effort: the pack can be synced again later; the agent is usable without it.
+      await this.#syncMemory(id, this.#pack()).catch((e) => console.error(`seed: memory pack for ${id}: ${e instanceof Error ? e.message : e}`));
+      return id;
     })();
     try { return await this.#querySetup; } finally { this.#querySetup = null; }
+  }
+
+  // ---- harness: prompt, memory pack, definition --------------------------------------------------
+
+  #sources(): HarnessSources { return readHarnessSources({ roots: this.#roots, fleetDir: this.#fleetDir, memoryDirs: this.config.memoryDirs }); }
+  #ctx() { return { nodeName: this.#nodeName(), hostname: hostname(), mcpName: MCP_SERVER_NAME, nodeTools: this.#nodeTools, packDir: PACK_DIR }; }
+  #nodeName(): string { return process.env.CYBERDECK_NODE_NAME ?? hostname().replace(/\.local$/, ""); }
+  /** The harness agent's system prompt, from this node's files right now. */
+  harnessPromptText(src = this.#sources()): string { return harnessPrompt(src, this.#ctx()); }
+  #pack(src = this.#sources()): Map<string, string> { return memoryPack(src, this.#ctx()); }
+  #meta(definition: Record<string, unknown>, patch: CyberdeckMeta): Record<string, unknown> {
+    const m = definition.metadata && typeof definition.metadata === "object" ? (definition.metadata as Record<string, unknown>) : {};
+    return { ...m, [META_KEY]: { ...metaOf(definition), ...patch, node: this.#nodeName(), syncedAt: Date.now() } };
+  }
+
+  async #createHarnessAgent(): Promise<string> {
+    const prompt = this.harnessPromptText();
+    const created = await this.action<{ agentId: string }>({ _: "CreateAgent", definition: {
+      name: "Cyberdeck", modelProvider: this.config.modelProvider, model: this.config.model,
+      ...(this.config.reasoningLevel ? { reasoningLevel: this.config.reasoningLevel } : {}),
+      mcpServers: [MCP_SERVER_NAME],
+      systemPrompt: prompt,
+      metadata: { [META_KEY]: { promptHash: sha256(prompt), role: "harness", node: this.#nodeName(), syncedAt: Date.now() } },
+    } });
+    this.#state.queryAgentId = created.agentId;
+    this.#save();
+    return created.agentId;
+  }
+
+  /** Write the pack files that changed since the last sync and delete pack files no longer in it. */
+  async #syncMemory(agentId: string, pack: Map<string, string>): Promise<AgentSync["memory"]> {
+    const before = this.#state.memoryPacks?.[agentId] ?? {};
+    const after: Record<string, string> = {};
+    let written = 0, deleted = 0, unchanged = 0;
+    // The server is the truth for what exists: a file the manifest claims but the agent lost is rewritten.
+    let present: Set<string> | null = null;
+    try {
+      const r = await this.action<{ entries?: { path: string; type?: string }[] }>({ _: "ListAgentMemoryDir", agentId, path: PACK_DIR });
+      present = new Set((r.entries ?? []).map((e) => e.path));
+      for (const sub of ["notes"]) {
+        const n = await this.action<{ entries?: { path: string }[] }>({ _: "ListAgentMemoryDir", agentId, path: `${PACK_DIR}/${sub}` }).catch(() => null);
+        for (const e of n?.entries ?? []) present.add(e.path);
+      }
+    } catch { present = null; }
+    for (const [path, content] of pack) {
+      const h = sha256(content);
+      after[path] = h;
+      if (before[path] === h && (present === null || present.has(path))) { unchanged++; continue; }
+      await this.action({ _: "WriteAgentMemoryFile", agentId, path, content });
+      written++;
+    }
+    for (const path of Object.keys(before)) {
+      if (after[path]) continue;
+      await this.action({ _: "DeleteAgentMemoryFile", agentId, path }).catch(() => {});
+      deleted++;
+    }
+    this.#state.memoryPacks = { ...(this.#state.memoryPacks ?? {}), [agentId]: after };
+    this.#save();
+    return { written, deleted, unchanged, files: pack.size };
+  }
+
+  /**
+   * Bring the agents on the server in line with this node: the harness agent gets the prompt built
+   * from this node's AGENTS.md files, the configured model and reasoning level, and the cyberdeck
+   * MCP grant; both agents get the memory pack. The voice companion's prompt is only touched when
+   * Cyberdeck already owns it (metadata marker) or `voice: true` adopts it; its model is never changed.
+   * Idempotent: the prompt hash and the pack manifest make a second run a no-op.
+   */
+  async syncHarness(opts: { voice?: boolean; force?: boolean } = {}): Promise<HarnessSyncResult> {
+    if (this.#syncing) return this.#syncing;
+    this.#syncing = this.#syncHarness(opts).finally(() => { this.#syncing = null; });
+    return this.#syncing;
+  }
+
+  async #syncHarness(opts: { voice?: boolean; force?: boolean }): Promise<HarnessSyncResult> {
+    if (!await this.queryReady()) throw new SeedError("Seed is not configured on this node; run cyberdeck seed setup");
+    const src = this.#sources();
+    const pack = this.#pack(src);
+    const prompt = harnessPrompt(src, this.#ctx());
+    const warnings: string[] = [];
+    const agents: AgentSync[] = [];
+    const result: HarnessSyncResult = { sources: { rules: src.rules?.path, deck: src.deck?.path, notes: src.notes.length }, promptBytes: prompt.length, agents, warnings };
+    if (!src.rules) warnings.push(`no AGENTS.md / CLAUDE.md at ${this.#roots[0] ?? "the scan root"}: the prompt carries no fleet rules`);
+    if (!src.deck) warnings.push("no Deck checkout (fleetDir) here: the prompt carries no Deck protocol");
+
+    // 1. The harness agent.
+    let created = false;
+    let harnessId = this.#state.queryAgentId;
+    let def: Record<string, unknown> & { name?: string } | null = null;
+    if (harnessId) {
+      try { def = (await this.action<{ agent: { definition: Record<string, unknown> } }>({ _: "GetAgent", agentId: harnessId })).agent.definition; }
+      catch (e) {
+        if (!(e instanceof SeedError && (e.status === 404 || e.status === 403))) throw e;
+        warnings.push(`harness agent ${harnessId} is gone from the server; creating a new one`);
+        harnessId = undefined;
+      }
+    }
+    if (!harnessId) { harnessId = await this.#createHarnessAgent(); created = true; def = null; }
+    const changed: string[] = [];
+    if (def) {
+      const want: Record<string, unknown> = {};
+      const h = sha256(prompt);
+      if (opts.force || metaOf(def).promptHash !== h) { want.systemPrompt = prompt; changed.push("systemPrompt"); }
+      if (def.model !== this.config.model) { want.model = this.config.model; changed.push("model"); }
+      if (def.modelProvider !== this.config.modelProvider) { want.modelProvider = this.config.modelProvider; changed.push("modelProvider"); }
+      const level = this.config.reasoningLevel || undefined;
+      if ((def.reasoningLevel ?? undefined) !== level) { want.reasoningLevel = level; changed.push("reasoningLevel"); }
+      const servers = Array.isArray(def.mcpServers) ? (def.mcpServers as string[]) : [];
+      if (!servers.includes(MCP_SERVER_NAME)) { want.mcpServers = [...servers, MCP_SERVER_NAME]; changed.push("mcpServers"); }
+      if (changed.length) {
+        const next = omitUndefined({ ...def, ...want, metadata: this.#meta(def, { promptHash: h, role: "harness" }) });
+        if (want.reasoningLevel === undefined && "reasoningLevel" in want) delete (next as Record<string, unknown>).reasoningLevel;
+        await this.action({ _: "UpdateAgent", agentId: harnessId, definition: next });
+      }
+    }
+    const memory = await this.#syncMemory(harnessId, pack).catch((e): AgentSync["memory"] => ({ written: 0, deleted: 0, unchanged: 0, files: pack.size, error: e instanceof Error ? e.message : String(e) }));
+    agents.push({ agentId: harnessId, name: typeof def?.name === "string" ? def.name : "Cyberdeck", role: "harness", created, definition: created ? ["created"] : changed, memory });
+
+    // 2. The voice companion: same knowledge appended to its spoken persona, same pack.
+    const voiceId = this.#state.agentId;
+    if (voiceId && voiceId !== harnessId) {
+      let vdef: Record<string, unknown> & { name?: string } | null = null;
+      try { vdef = (await this.action<{ agent: { definition: Record<string, unknown> } }>({ _: "GetAgent", agentId: voiceId })).agent.definition; }
+      catch (e) { warnings.push(`voice agent ${voiceId}: ${e instanceof Error ? e.message : e}`); }
+      if (vdef) {
+        const name = typeof vdef.name === "string" ? vdef.name : "Cyberdeck";
+        const persona = `${fleetPrompt(name)}\n\n${knowledgeSection(src, this.#ctx())}`;
+        const h = sha256(persona);
+        const meta = metaOf(vdef);
+        const owned = meta.role === "voice" && !!meta.promptHash;
+        const vchanged: string[] = [];
+        let skipped: string | undefined;
+        if (!owned && !opts.voice) skipped = "the companion's prompt is not managed by Cyberdeck; `cyberdeck seed sync --voice` adopts it";
+        else if (opts.force || meta.promptHash !== h) {
+          await this.action({ _: "UpdateAgent", agentId: voiceId, definition: omitUndefined({ ...vdef, systemPrompt: persona, metadata: this.#meta(vdef, { promptHash: h, role: "voice" }) }) });
+          vchanged.push("systemPrompt");
+        }
+        const vmem = await this.#syncMemory(voiceId, pack).catch((e): AgentSync["memory"] => ({ written: 0, deleted: 0, unchanged: 0, files: pack.size, error: e instanceof Error ? e.message : String(e) }));
+        agents.push({ agentId: voiceId, name, role: "voice", created: false, definition: vchanged, ...(skipped ? { skipped } : {}), memory: vmem });
+      }
+    }
+    return result;
+  }
+
+  /** What the harness looks like right now (for `cyberdeck seed status` and the API). */
+  async harnessStatus(): Promise<HarnessStatus> {
+    const src = this.#sources();
+    const out: HarnessStatus = {
+      nodeTools: this.#nodeTools, model: this.config.model, reasoningLevel: this.config.reasoningLevel,
+      sources: { rules: src.rules?.path, deck: src.deck?.path, notes: src.notes.length, memoryDirs: this.config.memoryDirs },
+    };
+    const prompt = harnessPrompt(src, this.#ctx());
+    const files = (id: string) => Object.keys(this.#state.memoryPacks?.[id] ?? {}).length;
+    const qid = this.#state.queryAgentId;
+    if (qid) {
+      const d = await this.action<{ agent: { definition: Record<string, unknown> } }>({ _: "GetAgent", agentId: qid }).then((r) => r.agent.definition).catch(() => null);
+      const meta = d ? metaOf(d) : {};
+      out.queryAgent = { id: qid, name: typeof d?.name === "string" ? d.name : undefined, model: typeof d?.model === "string" ? d.model : undefined, reasoningLevel: typeof d?.reasoningLevel === "string" ? d.reasoningLevel : undefined, promptHash: meta.promptHash, promptCurrent: meta.promptHash === sha256(prompt), memoryFiles: files(qid) };
+    }
+    const vid = this.#state.agentId;
+    if (vid && vid !== qid) {
+      const d = await this.action<{ agent: { definition: Record<string, unknown> } }>({ _: "GetAgent", agentId: vid }).then((r) => r.agent.definition).catch(() => null);
+      const meta = d ? metaOf(d) : {};
+      const name = typeof d?.name === "string" ? d.name : undefined;
+      const persona = `${fleetPrompt(name ?? "Cyberdeck")}\n\n${knowledgeSection(src, this.#ctx())}`;
+      out.voiceAgent = { id: vid, name, managed: meta.role === "voice" && !!meta.promptHash, promptCurrent: meta.promptHash === sha256(persona), memoryFiles: files(vid) };
+    }
+    return out;
+  }
+
+  // ---- node identity and provider sign-in ------------------------------------------------------------
+
+  /** Create the node's own Seed signing key (for machines without a vault). Refuses to overwrite unless `force`. */
+  keygen(opts: { force?: boolean } = {}): { keyFile: string; created: boolean } {
+    const keyFile = this.config.keyFile;
+    if (existsSync(keyFile) && !opts.force) return { keyFile, created: false };
+    mkdirSync(join(keyFile, ".."), { recursive: true });
+    writeFileSync(`${keyFile}.tmp`, randomBytes(32).toString("hex") + "\n", { mode: 0o600 });
+    renameSync(`${keyFile}.tmp`, keyFile);
+    this.#signer = null; this.#signerError = null;
+    return { keyFile, created: true };
+  }
+
+  /** Begin "Sign in with ChatGPT" on the agents server for this identity; the owner opens `authUrl` and pastes the redirect back. */
+  async loginStart(providerType = "openai"): Promise<LoginStart> {
+    const r = await this.action<{ loginId: string; authUrl: string; expiresAt: number }>({ _: "StartProviderOAuth", providerType });
+    this.#state.login = { loginId: r.loginId, providerType, startedAt: Date.now() };
+    this.#save();
+    return { loginId: r.loginId, authUrl: r.authUrl, expiresAt: r.expiresAt, providerType };
+  }
+
+  /** Hand the pasted code (or full redirect URL) to the server, then save the provider record that uses the credentials. */
+  async loginSubmit(code: string, loginId = this.#state.login?.loginId): Promise<LoginStatus> {
+    if (!loginId) throw new SeedError("no login in progress: run `cyberdeck seed login` first", 409);
+    await this.action({ _: "SubmitProviderOAuthCode", loginId, code: code.trim() });
+    return this.loginStatus(loginId);
+  }
+
+  async loginStatus(loginId = this.#state.login?.loginId): Promise<LoginStatus> {
+    if (!loginId) throw new SeedError("no login in progress", 409);
+    const r = await this.action<{ loginId: string; status: "pending" | "completed" | "failed"; secretName?: string; error?: string }>({ _: "GetProviderOAuthStatus", loginId });
+    const out: LoginStatus = { loginId: r.loginId, status: r.status, ...(r.secretName ? { secretName: r.secretName } : {}), ...(r.error ? { error: r.error } : {}) };
+    if (r.status === "completed" && r.secretName) {
+      const type = this.#state.login?.providerType ?? "openai";
+      await this.action({ _: "SetModelProvider", name: this.config.modelProvider, provider: { name: this.config.modelProvider, type, authMode: "subscription", secretRefs: { oauth: r.secretName } } });
+      out.provider = this.config.modelProvider;
+      this.#state.login = undefined;
+      this.#save();
+    } else if (r.status === "failed") { this.#state.login = undefined; this.#save(); }
+    return out;
+  }
+
+  /** The account's model providers, as the server redacts them. */
+  async providers(): Promise<{ name: string; type: string; authMode?: string; authStatus?: string }[]> {
+    const r = await this.action<{ providers?: { name: string; type: string; authMode?: string; authStatus?: string }[] }>({ _: "ListModelProviders" });
+    return (r.providers ?? []).map((p) => ({ name: p.name, type: p.type, ...(p.authMode ? { authMode: p.authMode } : {}), ...(p.authStatus ? { authStatus: p.authStatus } : {}) }));
   }
 
   /** Convert server sessions to the shared session-strip shape without inventing a terminal. */

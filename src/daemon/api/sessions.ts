@@ -2,6 +2,7 @@
 // over a WebSocket (same wire format as /api/term: {t:"data"|"input"|"resize"|"exit"},
 // plus {t:"hello", session} first and `replay:true` on the buffered backlog).
 import { SeedBridge } from "../seed";
+import { hostname, platform } from "os";
 import type { Hono } from "hono";
 import { SessionManager, detectCaps, type CreateOpts } from "../sessions";
 import type { Runner, Tool } from "../../shared/harness";
@@ -10,7 +11,52 @@ const TOOLS = new Set<Tool>(["seed", "cc", "cx", "shell"]);
 const RUNNERS = new Set<Runner>(["agent", "tmux", "pty"]);
 const ID = /^[0-9a-f]{8}$/;
 
-export function registerSessionRoutes(app: Hono, mgr: SessionManager, upgradeWebSocket: any, isAuthed: (c: any) => boolean, seed: SeedBridge) {
+/** The last JSON value a CLI printed (it may log lines before it), or null. */
+export function parseLastJson(out: string): any {
+  const lines = out.trim().split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) { try { return JSON.parse(lines[i]); } catch {} }
+  try { return JSON.parse(out); } catch { return null; }
+}
+
+export type SessionContextDeps = {
+  nodeName?: string;
+  /** The Deck project owning a directory (`deck projects --for`), or null. */
+  project?: (dir: string) => Promise<{ slug?: string; name?: string; status?: string } | null>;
+};
+
+const expandHome = (p: string) => (p === "~" ? process.env.HOME ?? p : p.startsWith("~/") ? `${process.env.HOME ?? "~"}${p.slice(1)}` : p);
+async function gitLine(dir: string): Promise<string | null> {
+  try {
+    const p = Bun.spawn(["git", "-C", expandHome(dir), "status", "--porcelain=v2", "--branch"], { stdout: "pipe", stderr: "pipe" });
+    const timer = setTimeout(() => p.kill(), 3000);
+    const out = await new Response(p.stdout).text();
+    clearTimeout(timer);
+    if ((await p.exited) !== 0) return null;
+    const head = out.match(/^# branch\.head (.+)$/m)?.[1];
+    const ab = out.match(/^# branch\.ab \+(\d+) -(\d+)$/m);
+    const dirty = out.split("\n").filter((l) => /^[12u?] /.test(l)).length;
+    return `Git: ${head ?? "detached"}${dirty ? `, ${dirty} uncommitted` : ", clean"}${ab ? `${Number(ab[1]) ? `, ${ab[1]} ahead` : ""}${Number(ab[2]) ? `, ${ab[2]} behind` : ""}` : ", no upstream"}`;
+  } catch { return null; }
+}
+
+/**
+ * The context lines a prompt-bar turn carries to the Seed agent (api/sessions message): the machine
+ * the user chose, the directory, its project and git state, and the time. Cheap (one git status).
+ */
+export async function turnContext(cwd: string, nodeName: string | undefined, deps: SessionContextDeps): Promise<string[]> {
+  const here = deps.nodeName ?? hostname();
+  const local = !nodeName || nodeName === "local" || nodeName.toLowerCase() === here.toLowerCase();
+  const lines = [`Fleet machine: ${local ? `${here} (this node; hostname ${hostname()}, ${platform()})` : `${nodeName} (another fleet host: use the shell tool with host "${nodeName}")`}`, `Working directory: ${cwd.slice(0, 1024)}`];
+  if (local) {
+    const [project, git] = await Promise.all([deps.project?.(expandHome(cwd)).catch(() => null) ?? null, gitLine(cwd)]);
+    if (project?.slug || project?.name) lines.push(`Project: ${project.name ?? project.slug}${project.slug ? ` (${project.slug})` : ""}${project.status ? `, ${project.status}` : ""}`);
+    if (git) lines.push(git);
+  }
+  lines.push(`Time: ${new Date().toISOString()}`);
+  return lines;
+}
+
+export function registerSessionRoutes(app: Hono, mgr: SessionManager, upgradeWebSocket: any, isAuthed: (c: any) => boolean, seed: SeedBridge, ctx: SessionContextDeps = {}) {
   app.get("/api/harness/caps", async (c) => {
     const [caps, ready] = await Promise.all([detectCaps(Boolean(c.req.query("refresh"))), seed.queryReady()]);
     return c.json({ ...caps, seed: ready, seedUrl: seed.config.agentsUrl });
@@ -33,7 +79,7 @@ export function registerSessionRoutes(app: Hono, mgr: SessionManager, upgradeWeb
     const id = c.req.param("id");
     const b = await c.req.json().catch(() => ({}));
     if (!id.startsWith("seed-") || typeof b.text !== "string" || !b.text.trim() || b.text.length > 8000) return c.json({ error: "Seed query and text (1–8000 characters) required" }, 400);
-    const context = typeof b.cwd === "string" ? [`Fleet machine: ${b.nodeName || "local"}`, `Working directory: ${b.cwd.slice(0, 1024)}`] : undefined;
+    const context = typeof b.cwd === "string" ? await turnContext(b.cwd, typeof b.nodeName === "string" ? b.nodeName : undefined, ctx) : undefined;
     await seed.messageQuery(id.slice(5), b.text.trim(), context, typeof b.clientMessageId === "string" ? b.clientMessageId : undefined);
     return c.json({ ok: true });
   });

@@ -1,11 +1,13 @@
 // The MCP server at /api/mcp, driven by the same client library Seed Agents uses.
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { join } from "path";
-import { mkdtempSync, readFileSync, existsSync } from "fs";
+import { mkdtempSync, readFileSync, existsSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { homedir } from "os";
 import { startTestServer, testConfig, TEST_TOKEN, type TestServer } from "./helpers";
+import { expandPath } from "../src/daemon/api/mcp-node";
 
 const FLEET_STUB = join(import.meta.dir, "fixtures", "fleet");
 const SCRATCH = mkdtempSync(join(tmpdir(), "cd-servicectl-"));
@@ -33,15 +35,26 @@ async function call(client: Client, name: string, args: Record<string, unknown> 
 }
 const parsed = (r: ToolResult) => JSON.parse(r.content[0]?.text ?? "null");
 
+const LIVE_REPO = join(SCRATCH, "Livedemo");
 beforeAll(() => {
+  const git = (...a: string[]) => {
+    const r = Bun.spawnSync(["git", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd: SCRATCH });
+    if (r.exitCode !== 0) throw new Error(`git ${a.join(" ")}: ${r.stderr}`);
+  };
+  git("init", "-q", "-b", "main", LIVE_REPO);
+  writeFileSync(join(LIVE_REPO, "a.txt"), "1\n");
+  git("-C", LIVE_REPO, "add", ".");
+  git("-C", LIVE_REPO, "commit", "-qm", "first");
+  writeFileSync(join(LIVE_REPO, "b.txt"), "x\n");
   srv = startTestServer(testConfig({ fleetDir: FLEET_STUB, nodeName: "test-node" }));
   srv.db.query(
-    `INSERT INTO repos (path, name, head_branch, dirty_files, remotes, risk, risk_reasons, scanned_at)
-     VALUES ('/home/x/Code/lonely', 'lonely', 'main', 2, '[]', 'at-risk', '["no remote"]', 1),
-            ('/home/x/Code/fine', 'fine', 'main', 0, '["origin"]', 'safe', '[]', 1)`
+    `INSERT INTO repos (path, name, head_branch, dirty_files, ahead, remotes, risk, risk_reasons, scanned_at)
+     VALUES ('/home/x/Code/lonely', 'lonely', 'main', 2, 0, '[]', 'at-risk', '["no remote"]', 1),
+            ('/home/x/Code/fine', 'fine', 'main', 0, 0, '["origin"]', 'safe', '[]', 1),
+            ('${LIVE_REPO}', 'Livedemo', 'main', 1, 3, '[]', 'at-risk', '["no remote"]', 1)`
   ).run();
   bare = startTestServer(testConfig({ fleetDir: null, nodeName: "bare" }));
-});
+}, 60_000);
 afterAll(() => {
   srv.stop();
   bare.stop();
@@ -81,7 +94,7 @@ describe("mcp tools", () => {
     const client = await connect(srv.base);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["collab_add", "collab_run", "collab_tasks", "fleet_status", "handoff", "handoff_note", "hosts", "note", "projects", "repos", "run_log", "scan", "service_logs", "services", "services_restart", "sessions", "status", "todo", "todo_add", "todo_done"]);
+    expect(names).toEqual(["collab_add", "collab_run", "collab_tasks", "deck_context", "edit_file", "fleet_status", "grep", "handoff", "handoff_note", "hosts", "list_dir", "note", "projects", "read_file", "repos", "repos_detail", "run_log", "scan", "service_logs", "services", "services_restart", "sessions", "sessions_search", "shell", "status", "todo", "todo_add", "todo_done", "write_file"]);
     for (const t of tools) {
       expect(t.name).toMatch(/^[a-z0-9_]{1,40}$/);
       expect(t.description?.length ?? 0).toBeGreaterThan(20);
@@ -93,8 +106,8 @@ describe("mcp tools", () => {
     const client = await connect(srv.base);
     const r = parsed(await call(client, "status"));
     expect(r.node.nodeName).toBe("test-node");
-    expect(r.node.repos).toBe(2);
-    expect(r.node.atRisk).toBe(1);
+    expect(r.node.repos).toBe(3);
+    expect(r.node.atRisk).toBe(2);
     expect(r.peers).toEqual([]);
     await client.close();
   });
@@ -102,14 +115,20 @@ describe("mcp tools", () => {
   test("repos defaults to at-risk, filters and limits, and carries structured content", async () => {
     const client = await connect(srv.base);
     const atRisk = await call(client, "repos");
-    expect(parsed(atRisk).items.map((r: any) => r.name)).toEqual(["lonely"]);
-    expect(parsed(atRisk).items[0].risk_reasons).toEqual(["no remote"]);
-    expect((atRisk.structuredContent as any).total).toBe(1);
+    expect(parsed(atRisk).items.map((r: any) => r.name).sort()).toEqual(["Livedemo", "lonely"]);
+    expect(parsed(atRisk).items.find((r: any) => r.name === "lonely").risk_reasons).toEqual(["no remote"]);
+    expect((atRisk.structuredContent as any).total).toBe(2);
     const all = parsed(await call(client, "repos", { risk: "all", limit: 1 }));
-    expect(all.total).toBe(2);
+    expect(all.total).toBe(3);
     expect(all.items.length).toBe(1);
     const byQuery = parsed(await call(client, "repos", { risk: "all", query: "FINE" }));
     expect(byQuery.items.map((r: any) => r.name)).toEqual(["fine"]);
+    // kind narrows to what the owner asks by voice: "which repos have unpushed commits?"
+    expect(parsed(await call(client, "repos", { kind: "unpushed" })).items.map((r: any) => r.name)).toEqual(["Livedemo"]);
+    expect(parsed(await call(client, "repos", { kind: "remote-less" })).items.map((r: any) => r.name).sort()).toEqual(["Livedemo", "lonely"]);
+    expect(parsed(await call(client, "repos", { risk: "all", kind: "dirty" })).items.map((r: any) => r.name).sort()).toEqual(["Livedemo", "lonely"]);
+    expect(parsed(await call(client, "repos", { risk: "safe", kind: "dirty" })).total).toBe(0);
+    expect(parsed(await call(client, "repos"))).toMatchObject({ unpushed: 1, remoteless: 2 });
     const unknown = await call(client, "repos", { node: "nowhere" });
     expect(unknown.isError).toBe(true);
     expect(unknown.content[0].text).toContain("No paired node");
@@ -130,6 +149,42 @@ describe("mcp tools", () => {
     expect(collab.runs).toEqual([]);
     const added = parsed(await call(client, "collab_add", { title: "Do a thing", project: "demo", worker: "cx" }));
     expect(added.id).toBe("t2");
+    await client.close();
+  });
+
+  test("repos_detail reads an indexed repo live, by folder name; refuses unknown ones", async () => {
+    const client = await connect(srv.base);
+    const r = await call(client, "repos_detail", { repo: "livedemo" });
+    const d = parsed(r);
+    expect(d.node).toBe("test-node");
+    expect(d.brief).toBe("Livedemo is on main with 1 uncommitted file, no remote at all.");
+    expect(d.dirty.files).toEqual([{ status: "untracked", path: "b.txt" }]);
+    expect(d.lastCommit.subject).toBe("first");
+    const missing = await call(client, "repos_detail", { repo: "/etc" });
+    expect(missing.isError).toBe(true);
+    expect(missing.content[0].text).toContain("No indexed repo");
+    const ghost = await call(client, "repos_detail", { repo: "lonely" });
+    expect(ghost.isError).toBe(true); // indexed, but the directory is gone
+    expect((await call(client, "repos_detail", { repo: "x", node: "nowhere" })).content[0].text).toContain("No paired node");
+    await client.close();
+  }, 30_000);
+
+  test("GET /api/repos/detail serves a peer's repos_detail and only for indexed repos", async () => {
+    const ok = await srv.api(`/api/repos/detail?repo=${encodeURIComponent(LIVE_REPO)}`);
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).branch).toBe("main");
+    const no = await srv.api("/api/repos/detail?repo=/no/such-repo-zz");
+    expect(no.status).toBe(404);
+    expect((await no.json()).error).toContain("No indexed repo");
+  }, 30_000);
+
+  test("sessions_search returns resume hints and a brief", async () => {
+    const client = await connect(srv.base);
+    const r = parsed(await call(client, "sessions_search", { query: "abc" }));
+    expect(r.total).toBe(1);
+    expect(r.items[0].resume).toEqual({ host: "test-node", command: "cd /tmp && claude --resume abc" });
+    expect(r.brief).toStartWith("One session matches; the newest is Claude Code on test-node");
+    expect(parsed(await call(client, "sessions_search", { tool: "cx" })).total).toBe(0);
     await client.close();
   });
 
@@ -209,7 +264,7 @@ describe("mcp tools", () => {
   test("run_log refuses unknown files and reports empty logs", async () => {
     const client = await connect(srv.base);
     const r = parsed(await call(client, "run_log", { id: "nope" }));
-    expect(r).toEqual({ id: "nope", file: "result.md", text: "", size: 0 });
+    expect(r).toEqual({ brief: "result.md of run nope is empty so far.", id: "nope", file: "result.md", text: "", size: 0 });
     const bad = await call(client, "run_log", { id: "../etc", file: "result.md" });
     expect(bad.isError).toBe(true);
     await client.close();
@@ -223,5 +278,218 @@ describe("mcp tools", () => {
     expect(r.isError).toBe(true);
     expect(r.content[0].text).toContain("no Deck checkout");
     await client.close();
+  });
+});
+
+describe("mcp brief mode", () => {
+  const sentence = (r: ToolResult) => {
+    const t = r.content[0]?.text ?? "";
+    expect(r.isError).toBeFalsy();
+    expect(t).not.toContain("\n");
+    expect(t.startsWith("{")).toBe(false);
+    expect(t.length).toBeGreaterThan(10);
+    expect(t.length).toBeLessThan(400);
+    expect((r.structuredContent as any).brief).toBe(t);
+    return t;
+  };
+
+  test("every tool accepts brief", async () => {
+    const client = await connect(srv.base);
+    const { tools } = await client.listTools();
+    for (const t of tools) expect((t.inputSchema as any).properties?.brief?.type, t.name).toBe("boolean");
+    await client.close();
+  });
+
+  test("read tools answer with one spoken sentence and the key numbers", async () => {
+    const client = await connect(srv.base);
+    expect(sentence(await call(client, "status", { brief: true }))).toContain("test-node runs Cyberdeck");
+    const fleet = await call(client, "fleet_status", { brief: true });
+    expect(sentence(fleet)).toContain("2 of 2 hosts online");
+    expect((fleet.structuredContent as any).hostsOnline).toBe(2);
+    expect(sentence(await call(client, "hosts", { brief: true }))).toBe("The fleet manifest lists 3 hosts: test-node (laptop), other (server), phone (phone).");
+    expect(sentence(await call(client, "projects", { brief: true }))).toBe("1 project, 1 active: Demo.");
+    const todo = await call(client, "todo", { brief: true });
+    expect(sentence(todo)).toBe("2 handoff entries in 2 sections; the newest, from 2026-10-07, says: Demo thing; the oldest, from 2026-09-15, says: Old thing nobody did");
+    expect(todo.structuredContent).toMatchObject({ entries: 2, sections: 2, newest: "2026-10-07", oldest: "2026-09-15" });
+    expect(sentence(await call(client, "todo", { brief: true, query: "demo" }))).toBe("1 handoff entry mention \"demo\" in 1 section; the newest, from 2026-10-07, says: Demo thing");
+    expect(sentence(await call(client, "todo", { brief: true, query: "nothing-like-this" }))).toContain("no entries");
+    expect(sentence(await call(client, "handoff", { brief: true }))).toBe("1 agent note: cc on test-node.");
+    expect(sentence(await call(client, "sessions", { brief: true }))).toMatch(/^1 session; the newest is (Claude Code|Codex) on /);
+    const repos = await call(client, "repos", { brief: true });
+    expect(sentence(repos)).toBe("test-node has 2 repos at risk: 1 with unpushed commits (Livedemo), 2 with no remote (lonely, Livedemo).");
+    expect((repos.structuredContent as any).total).toBe(2);
+    expect(sentence(await call(client, "repos", { kind: "unpushed", brief: true }))).toBe("test-node has 1 repos at risk with unpushed commits, such as Livedemo.");
+    expect(sentence(await call(client, "repos", { risk: "safe", brief: true }))).toBe("test-node has 1 safe repos, such as fine.");
+    expect(sentence(await call(client, "repos_detail", { repo: "Livedemo", brief: true }))).toContain("Livedemo");
+    expect(sentence(await call(client, "sessions_search", { query: "zzz-none", brief: true }))).toContain("No cc or cx sessions match");
+    const services = await call(client, "services", { probe: true, brief: true });
+    expect(sentence(services)).toContain("3 services checked, 1 down: web-api on other.");
+    expect((services.structuredContent as any).down).toEqual(["web-api on other"]);
+    expect(sentence(await call(client, "collab_tasks", { brief: true }))).toContain("collab task");
+    expect(sentence(await call(client, "scan", { brief: true }))).toMatch(/^(Rescan started on test-node|test-node is already scanning)/);
+    await client.close();
+  });
+
+  test("full answers still carry the data, with the sentence first", async () => {
+    const client = await connect(srv.base);
+    const status = parsed(await call(client, "status"));
+    expect(Object.keys(status)[0]).toBe("brief");
+    expect(status.node.nodeName).toBe("test-node");
+    expect(parsed(await call(client, "hosts")).length).toBe(3);
+    const services = parsed(await call(client, "services"));
+    expect(services.brief).toContain("1 down");
+    expect(services.rows.length).toBe(3);
+    await client.close();
+  });
+
+  test("write tools say what they did", async () => {
+    const client = await connect(srv.base);
+    expect(sentence(await call(client, "todo_add", { text: "**Brief** check", brief: true }))).toBe("Added to the handoff list under Open: Brief check");
+    expect(sentence(await call(client, "todo_done", { match: "Demo", brief: true }))).toBe("Removed from the handoff list: 2026-10-07 Demo thing");
+    expect(sentence(await call(client, "handoff_note", { host: "other", text: "checked", brief: true }))).toBe("Recorded on other's handoff note (handoff/other-seed.md).");
+    expect(sentence(await call(client, "note", { text: "hello **there**", brief: true }))).toBe("Noted in the inbox: hello there");
+    const logs = await call(client, "service_logs", { host: "test-node", name: "x", lines: 5, brief: true });
+    expect(sentence(logs)).toMatch(/^(The last 5 lines of x on test-node end with: |x on test-node has no log lines\.|Could not read the log of x on test-node)/);
+    await client.close();
+  });
+});
+
+// ---- node tools: the reach a terminal agent has, through the same server (src/daemon/api/mcp-node.ts) ----
+describe("node tools", () => {
+  const NODE_DIR = join(SCRATCH, "node-tools");
+  beforeAll(() => {
+    process.env.CYBERDECK_TOOL_OUTPUT_DIR = join(SCRATCH, "tool-output");
+    Bun.spawnSync(["mkdir", "-p", join(NODE_DIR, "src"), join(NODE_DIR, "node_modules", "dep")]);
+    writeFileSync(join(NODE_DIR, "src", "a.ts"), "const a = 1;\nconst b = 2;\nexport const sum = a + b;\n");
+    writeFileSync(join(NODE_DIR, "node_modules", "dep", "index.js"), "const a = 1;\n");
+    writeFileSync(join(NODE_DIR, "README.md"), "# node tools\n");
+  });
+
+  test("the tools are listed on a full node and withheld when config turns them off", async () => {
+    const client = await connect(srv.base);
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    for (const n of ["shell", "read_file", "write_file", "edit_file", "list_dir", "grep", "deck_context"]) expect(names).toContain(n);
+    await client.close();
+    const off = startTestServer(testConfig({ fleetDir: FLEET_STUB, nodeName: "quiet", mcp: { nodeTools: false } }));
+    try {
+      const c2 = await connect(off.base);
+      const quiet = (await c2.listTools()).tools.map((t) => t.name);
+      expect(quiet).toContain("status");
+      expect(quiet).not.toContain("shell");
+      expect(quiet).not.toContain("read_file");
+      await c2.close();
+    } finally { off.stop(); }
+  });
+
+  test("shell runs in cwd through a login shell, reports the exit code, bounds long output to a file, and times out", async () => {
+    // (long: three real shell runs plus a deliberate timeout)
+    const client = await connect(srv.base);
+    const r = parsed(await call(client, "shell", { command: "pwd; printf 'a\\nb\\n'; echo err 1>&2; exit 3", cwd: NODE_DIR }));
+    expect(r).toMatchObject({ host: "test-node", cwd: NODE_DIR, code: 3, timedOut: false, truncated: false });
+    expect(r.stdout.replace(/^\/private/, "")).toBe(`${NODE_DIR.replace(/^\/private/, "")}\na\nb\n`);
+    expect(r.stderr).toBe("err\n");
+    expect(r.brief).toContain("exit 3");
+    const long = parsed(await call(client, "shell", { command: "seq 1 5000", cwd: "~" }));
+    expect(long.code).toBe(0);
+    expect(long.truncated).toBe(true);
+    expect(long.stdout.trimEnd().endsWith("5000")).toBe(true);
+    expect(long.stdout).toContain("characters dropped from the start");
+    expect(existsSync(long.outputFile)).toBe(true);
+    expect(readFileSync(long.outputFile, "utf8").split("\n").length).toBeGreaterThan(4999);
+    const head = parsed(await call(client, "shell", { command: "seq 1 5000", keep: "head" }));
+    expect(head.stdout.startsWith("1\n2\n")).toBe(true);
+    const t0 = Date.now();
+    const slow = parsed(await call(client, "shell", { command: "sleep 20; echo late", timeoutSec: 1 }));
+    expect(slow).toMatchObject({ timedOut: true, code: null });
+    expect(slow.stdout).toBe("");
+    expect(Date.now() - t0).toBeLessThan(6000);
+    const missing = parsed(await call(client, "shell", { command: "true", cwd: join(NODE_DIR, "nope") }));
+    expect(missing.code).toBe(97);
+    expect(missing.brief).toContain("could not cd");
+    expect((await call(client, "shell", { command: "echo hi", brief: true })).content[0].text).toContain("exit 0");
+    const audit = readFileSync(process.env.CYBERDECK_AUDIT_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(audit.filter((e) => e.tool === "shell").at(-1)).toMatchObject({ by: "mcp", host: "test-node", command: "echo hi" });
+    await client.close();
+  }, 30_000);
+
+  test("shell on a manifest host goes over ssh; unknown hosts and hosts without an alias are refused", async () => {
+    const client = await connect(srv.base);
+    const remote = parsed(await call(client, "shell", { command: "uptime", host: "other", cwd: "/srv" }));
+    expect(remote).toMatchObject({ host: "other", cwd: "/srv", code: 0 });
+    expect(remote.stdout).toContain("stub log line from other-alias");
+    expect((await call(client, "shell", { command: "uptime", host: "nowhere" })).isError).toBe(true);
+    expect((await call(client, "shell", { command: "uptime", host: "phone" })).content[0].text).toContain("no ssh alias");
+    const same = parsed(await call(client, "shell", { command: "echo local", host: "test-node" }));
+    expect(same.stdout).toBe("local\n");
+    await client.close();
+  });
+
+  test("read_file pages with offset and limit; write_file and edit_file change files and are audited", async () => {
+    const client = await connect(srv.base);
+    const file = join(NODE_DIR, "src", "a.ts");
+    const r = parsed(await call(client, "read_file", { path: file, offset: 2, limit: 1 }));
+    expect(r).toMatchObject({ path: file, totalLines: 3, offset: 2, returned: 1, nextOffset: 3 });
+    expect(r.content).toBe("     2\tconst b = 2;");
+    const all = parsed(await call(client, "read_file", { path: file }));
+    expect(all.nextOffset).toBeUndefined();
+    expect(all.content.split("\n")).toHaveLength(3);
+    expect((await call(client, "read_file", { path: join(NODE_DIR, "missing.txt") })).isError).toBe(true);
+    expect((await call(client, "read_file", { path: NODE_DIR })).content[0].text).toContain("list_dir");
+    const made = parsed(await call(client, "write_file", { path: join(NODE_DIR, "new", "note.md"), content: "hello\nworld\n" }));
+    expect(made).toMatchObject({ existed: false, bytes: 12 });
+    expect(readFileSync(join(NODE_DIR, "new", "note.md"), "utf8")).toBe("hello\nworld\n");
+    const edited = parsed(await call(client, "edit_file", { path: join(NODE_DIR, "new", "note.md"), old: "world", new: "fleet" }));
+    expect(edited).toMatchObject({ replaced: 1, line: 2 });
+    expect(readFileSync(join(NODE_DIR, "new", "note.md"), "utf8")).toBe("hello\nfleet\n");
+    expect((await call(client, "edit_file", { path: join(NODE_DIR, "new", "note.md"), old: "nope", new: "x" })).content[0].text).toContain("not found");
+    writeFileSync(join(NODE_DIR, "new", "dup.txt"), "x x x\n");
+    expect((await call(client, "edit_file", { path: join(NODE_DIR, "new", "dup.txt"), old: "x", new: "y" })).content[0].text).toContain("occurs 3 times");
+    expect(parsed(await call(client, "edit_file", { path: join(NODE_DIR, "new", "dup.txt"), old: "x", new: "y", replaceAll: true })).replaced).toBe(3);
+    expect(readFileSync(join(NODE_DIR, "new", "dup.txt"), "utf8")).toBe("y y y\n");
+    const audit = readFileSync(process.env.CYBERDECK_AUDIT_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(audit.some((e) => e.tool === "write_file" && e.path === join(NODE_DIR, "new", "note.md"))).toBe(true);
+    expect(audit.some((e) => e.tool === "edit_file" && e.replaced === 3)).toBe(true);
+    expect(expandPath("~/x/y")).toBe(join(homedir(), "x", "y"));
+    expect(expandPath("~")).toBe(homedir());
+    expect(expandPath("/abs/p")).toBe("/abs/p");
+    await client.close();
+  });
+
+  test("list_dir walks to a depth without junk dirs; grep finds matches and skips node_modules", async () => {
+    const client = await connect(srv.base);
+    const one = parsed(await call(client, "list_dir", { path: NODE_DIR }));
+    expect(one.entries.map((e: any) => e.path)).toEqual(expect.arrayContaining(["src/", "node_modules/", "README.md"]));
+    expect(one.entries.find((e: any) => e.path === "README.md").size).toBe(13);
+    const deep = parsed(await call(client, "list_dir", { path: NODE_DIR, depth: 3 }));
+    const paths = deep.entries.map((e: any) => e.path);
+    expect(paths).toContain("src/a.ts");
+    expect(paths).not.toContain("node_modules/dep/");
+    expect((await call(client, "list_dir", { path: join(NODE_DIR, "README.md") })).content[0].text).toContain("read_file");
+    const g = parsed(await call(client, "grep", { pattern: "const a = 1", path: NODE_DIR }));
+    expect(g.matches).toBe(1);
+    expect(g.results).toContain("src/a.ts:1:const a = 1;");
+    expect(g.results).not.toContain("node_modules");
+    const ts = parsed(await call(client, "grep", { pattern: "CONST", path: NODE_DIR, glob: "*.ts", ignoreCase: true, limit: 1 }));
+    expect(ts.matches).toBe(1);
+    expect(ts.truncated).toBe(true);
+    expect(parsed(await call(client, "grep", { pattern: "zzz-not-here", path: NODE_DIR })).matches).toBe(0);
+    await client.close();
+  });
+
+  test("deck_context is the deck briefing; a node without a Deck checkout says so", async () => {
+    const client = await connect(srv.base);
+    const r = parsed(await call(client, "deck_context", { dir: "~/Code/demo" }));
+    expect(r.context).toContain("host: test-node");
+    expect(r.context).toContain("project: demo");
+    expect(r.brief).toContain("Deck context: host: test-node");
+    const noDir = parsed(await call(client, "deck_context", {}));
+    expect(noDir.dir).toBeNull();
+    await client.close();
+    const c2 = await connect(bare.base);
+    const b = await call(c2, "deck_context", {});
+    expect(b.isError).toBe(true);
+    expect(b.content[0].text).toContain("no Deck checkout");
+    expect(parsed(await call(c2, "shell", { command: "echo still-works" })).stdout).toBe("still-works\n");
+    await c2.close();
   });
 });

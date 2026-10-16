@@ -1,4 +1,3 @@
-import { registerMusicRoutes } from "./api/music";
 import { registerDesktopRoutes } from "./api/desktop";
 import { registerKioskRoutes } from "./api/kiosk";
 import { registerAudioRoutes, audioBackend, type AudioBackend } from "./api/audio";
@@ -7,7 +6,7 @@ import { createBunWebSocket } from "hono/bun";
 import { serveStatic } from "hono/bun";
 import { join } from "path";
 import type { Database } from "bun:sqlite";
-import { saveConfigPatch, seedConfig, type CyberdeckConfig } from "./config";
+import { saveConfigPatch, seedConfig, type CyberdeckConfig, voiceHub } from "./config";
 import { getConnInfo } from "hono/bun";
 import { Tailscale, isLoopback, isTailscaleIp } from "./tailscale";
 import { bus } from "./events";
@@ -17,16 +16,16 @@ import type { RepoRow } from "./db";
 import { registerFsRoutes } from "./api/fs";
 import { registerSeedAgentsRoutes, seedAgentsCookieAuth } from "./api/seed-agents";
 import { createTermHandlers } from "./api/term";
-import { registerFleetRoutes } from "./api/fleet";
+import { registerFleetRoutes, type NodeRow } from "./api/fleet";
 import { registerMediaRoutes, cleanupHlsCache } from "./api/media";
 import { registerControlRoutes } from "./api/control";
 import { registerCmuxRoutes } from "./api/cmux";
 import { registerMcpRoutes } from "./api/mcp";
 import { registerCaseworkRoutes } from "./api/casework";
-import { registerVoiceRoutes } from "./api/voice";
+import { createVoiceRelay, registerVoiceRoutes, voiceSummary } from "./api/voice";
 import { SeedBridge, SeedError } from "./seed";
 import { nodeStatus } from "./status";
-import { registerSessionRoutes } from "./api/sessions";
+import { registerSessionRoutes, parseLastJson } from "./api/sessions";
 import { registerNetworkRoutes } from "./api/network";
 import { registerDashboardRoutes } from "./api/dashboard";
 import { registerBrowserRoutes } from "./api/browser";
@@ -213,7 +212,6 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   app.get("/api/applications", (c) => c.json({ applications: cfg.applications ?? [], casework: { apps: casework?.apps() ?? [], devices: casework?.devices() ?? [], kiosk: Boolean(cfg.kiosk?.enabled) } }));
   registerKioskRoutes(app, cfg, upgradeWebSocket, (c) => Boolean(authByReq.get(c.req.raw)));
   registerAudioRoutes(app, opts.audio ?? audioBackend());
-  registerMusicRoutes(app, db);
   registerFsRoutes(app);
   registerMediaRoutes(app, token);
   registerFleetRoutes(app, db, cfg, nodeId, token, upgradeWebSocket, { tailscale: ts, authedViaTailscale });
@@ -221,10 +219,14 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   registerCmuxRoutes(app);
   const isFullAuth = (c: { req: { raw: Request } }) => { const m = authByReq.get(c.req.raw)?.method; return m === "token" || m === "tailscale"; };
   // Seed agents bridge: voice calls from the Casework app / web Desk go to a Seed agent (docs/VOICE.md).
-  const seed = new SeedBridge({ config: seedConfig(cfg), port: cfg.port, token, home: opts.seed?.home, companionFile: opts.seed?.companionFile, runtimeFile: opts.seed?.runtimeFile });
-  casework = registerCaseworkRoutes(app, { token, nodeName: cfg.nodeName, kiosk: cfg.kiosk?.enabled, upgradeWebSocket, isFullAuth, experiencesDir: opts.caseworkExperiencesDir, key: opts.caseworkKey, voice: () => seed.voiceSummary(), secureOrigin: () => ts.serveOrigin(cfg.port), seedBridge: cfg.casework });
+  const seedCfg = seedConfig(cfg);
+  const seed = new SeedBridge({ config: seedCfg, port: cfg.port, token, home: opts.seed?.home, companionFile: opts.seed?.companionFile ?? seedCfg.companionFile, runtimeFile: opts.seed?.runtimeFile ?? seedCfg.runtimeFile, roots: cfg.roots, fleetDir: cfg.fleetDir, nodeTools: cfg.mcp?.nodeTools !== false });
+  // Voice is centralized on the hub (config voice.hub): every voice route relays to that paired node. Without
+  // a hub, a node without a bridge relays to the first paired node that has one.
+  const voiceRelay = createVoiceRelay(() => db.query("SELECT id, name, url, token, added_at, last_seen FROM nodes ORDER BY last_seen DESC").all() as NodeRow[], undefined, { hub: voiceHub(cfg), self: cfg.nodeName });
+  casework = registerCaseworkRoutes(app, { token, nodeName: cfg.nodeName, kiosk: cfg.kiosk?.enabled, upgradeWebSocket, isFullAuth, experiencesDir: opts.caseworkExperiencesDir, key: opts.caseworkKey, voice: () => voiceSummary(seed, voiceRelay), secureOrigin: () => ts.serveOrigin(cfg.port), seedBridge: cfg.casework });
   registerDesktopRoutes(app, cfg, upgradeWebSocket, isFullAuth);
-  registerVoiceRoutes(app, seed, { isFullAuth, serveOrigin: (port) => ts.serveOrigin(port) });
+  registerVoiceRoutes(app, seed, { isFullAuth, serveOrigin: (port) => ts.serveOrigin(port), relay: voiceRelay });
   // Seed's own agents UI in the browser: signing stays here, requests reach the agents server through us.
   registerSeedAgentsRoutes(app, seed, { token, upgradeWebSocket, isFullAuth, getNode: (id) => db.query("SELECT * FROM nodes WHERE id = ?").get(id) as import("./api/fleet").NodeRow | null });
   registerDashboardRoutes(app, db, cfg);
@@ -236,7 +238,10 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   const sessions = new SessionManager(db);
   sessions.recover().catch((err) => console.error("session recovery failed:", err));
   setUpdateGuard(() => { const n = sessions.fragileCount(); return n ? `${n} live session(s) would be killed` : null; });
-  registerSessionRoutes(app, sessions, upgradeWebSocket, (c) => Boolean(authByReq.get(c.req.raw)), seed);
+  registerSessionRoutes(app, sessions, upgradeWebSocket, (c) => Boolean(authByReq.get(c.req.raw)), seed, {
+    nodeName: cfg.nodeName,
+    project: async (dir) => { if (!control.fleetDir()) return null; const r = await control.cli(["projects", "--for", dir, "--json"]); return r ? parseLastJson(r.out) : null; },
+  });
 
   // Remote browser (persistent headless Chromium per profile) + the Cloud AI archive that drives it.
   registerBrowserRoutes(app, browsers, upgradeWebSocket, (c) => Boolean(authByReq.get(c.req.raw)));

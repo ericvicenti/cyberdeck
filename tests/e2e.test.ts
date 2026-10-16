@@ -126,8 +126,24 @@ test("desk view: talk button and the not-configured card render", async () => {
   // nothing to talk to: the button is inert and the state label says so
   expect(await page.isDisabled('[data-testid="talk-button"]')).toBe(true);
   expect(await page.textContent('[data-testid="voice-state"]')).toContain("tap to talk");
+  // talk modes: hands-free is the default; push to talk is remembered across reloads and changes the state line
+  expect(await page.getAttribute('[data-testid="voice-mode-hands-free"]', "aria-pressed")).toBe("true");
+  expect(await page.getAttribute('[data-testid="talk-button"]', "data-mode")).toBe("hands-free");
+  await page.click('[data-testid="voice-mode-push-to-talk"]');
+  expect(await page.getAttribute('[data-testid="voice-mode-push-to-talk"]', "aria-pressed")).toBe("true");
+  expect(await page.textContent('[data-testid="voice-state"]')).toContain("hold to talk");
+  await page.reload();
+  await page.waitForSelector('[data-testid="talk-button"][data-mode="push-to-talk"]');
+  expect(await page.evaluate(() => localStorage.getItem("cyberdeck-voice-mode"))).toBe("push-to-talk");
+  await page.click('[data-testid="voice-mode-hands-free"]');
+  expect(await page.textContent('[data-testid="voice-state"]')).toContain("tap to talk");
   expect(await page.textContent('[data-testid="voice-status"]')).toContain("e2e-node");
   expect(await page.textContent('[data-testid="voice-transcript"]')).toContain("transcript");
+  // the Fleet / Services / Agents glance sits under the TALK button; this node has no fleet dir and says so
+  await page.waitForFunction(() => document.querySelector('[data-testid="glance-empty"]')?.textContent?.includes("No fleet dir"));
+  await page.click('[data-testid="glance-tab-services"]');
+  expect(await page.getAttribute('[data-testid="glance-tab-services"]', "aria-selected")).toBe("true");
+  expect(await page.isVisible('[data-testid="glance-services"]')).toBe(true);
   // "Add to Home Screen" from here installs the Desk (its own manifest + icon), and the manifest is served
   expect(await page.getAttribute('link[rel="manifest"]', "href")).toBe("/desk.webmanifest");
   expect(await page.getAttribute('meta[name="apple-mobile-web-app-title"]', "content")).toBe("Desk");
@@ -135,32 +151,36 @@ test("desk view: talk button and the not-configured card render", async () => {
   expect(m.start_url).toBe("/#/desk");
   await page.goto(`${BASE}/#/services`);
   await page.waitForFunction(() => document.querySelector('link[rel="manifest"]')?.getAttribute("href") === "/manifest.webmanifest");
-});
+}, 20000);
 
-test("desk view: a paired node with voice takes the call when this one has none", async () => {
-  // the agents server lives on one machine; the Desk finds it through the fleet and proxies there
+test("desk view: the daemon relays voice to the hub; the page names it and has no machine dropdown", async () => {
+  // voice is centralized: the daemon in view answers with `via` and the page talks to nobody else
   const calls: string[] = [];
-  await page.route("**/api/fleet/nodes", (r) => r.fulfill({ json: { self: { name: "e2e-node" }, nodes: [{ id: "n-off", name: "Offline", online: false }, { id: "n-voice", name: "Yacht", online: true }] } }));
-  await page.route("**/api/nodes/n-voice/proxy/voice/**", (r) => {
-    const path = new URL(r.request().url()).pathname.split("/proxy/")[1];
+  await page.route("**/api/voice/**", (r) => {
+    const path = new URL(r.request().url()).pathname.split("/api/")[1];
     calls.push(path);
-    if (path === "voice/config") return r.fulfill({ json: { configured: true, provider: "livekit", engine: "seed", agentId: "agent-1", sessionId: "sess-1234abcd" } });
-    if (path === "voice/status") return r.fulfill({ json: { configured: true, agent: { id: "agent-1", name: "Companion" }, sessionId: "sess-1234abcd", health: { ok: true } } });
-    return r.fulfill({ json: { supported: true, messages: [{ role: "assistant", text: "hello from yacht", at: 1 }] } });
+    const via = { node: "n-hub", name: "Clipper" };
+    if (path === "voice/config") return r.fulfill({ json: { configured: true, provider: "livekit", engine: "seed", agentId: "agent-1", sessionId: "sess-1234abcd", via } });
+    if (path === "voice/status") return r.fulfill({ json: { configured: true, agent: { id: "agent-1", name: "Companion" }, sessionId: "sess-1234abcd", health: { ok: true }, via } });
+    return r.fulfill({ json: { supported: true, messages: [{ role: "assistant", text: "hello from clipper", at: 1 }], via } });
   });
   try {
     await page.goto(`${BASE}/#/fleet`);
+    expect(await page.isVisible('[data-testid="node-switcher"]')).toBe(true);
     await page.goto(`${BASE}/#/desk`);
     await page.waitForSelector('[data-testid="talk-button"]');
-    await waitFor(async () => (await page.textContent('[data-testid="voice-node"]'))?.includes("Yacht") ?? false);
+    await waitFor(async () => (await page.textContent('[data-testid="voice-node"]'))?.includes("Clipper") ?? false);
+    expect(await page.isVisible('[data-testid="node-switcher"]')).toBe(false);
     expect(await page.isVisible('[data-testid="voice-unconfigured"]')).toBe(false);
     await waitFor(async () => (await page.textContent('[data-testid="voice-status"]'))?.includes("Companion") ?? false);
-    await waitFor(async () => (await page.textContent('[data-testid="voice-transcript"]'))?.includes("hello from yacht") ?? false);
+    await waitFor(async () => (await page.textContent('[data-testid="voice-transcript"]'))?.includes("hello from clipper") ?? false);
     expect(calls).toContain("voice/config");
     expect(calls.some((c) => c.startsWith("voice/transcript"))).toBe(true);
+    expect(calls.every((c) => !c.includes("/proxy/"))).toBe(true);
+    await page.goto(`${BASE}/#/fleet`);
+    await page.waitForSelector('[data-testid="node-switcher"]');
   } finally {
-    await page.unroute("**/api/fleet/nodes");
-    await page.unroute("**/api/nodes/n-voice/proxy/voice/**");
+    await page.unroute("**/api/voice/**");
   }
 }, 30000);
 

@@ -3,14 +3,14 @@
 // then exiting - launchd/systemd (KeepAlive/Restart=always) brings it back on
 // the new code. Nodes nudge peers whose commit differs, so an update pushed
 // anywhere propagates across the fleet within minutes.
-import { join } from "path";
+import { dirname, join } from "path";
 import type { Database } from "bun:sqlite";
 import { bus } from "./events";
 
 export const SRC_ROOT = join(import.meta.dir, "../..");
 
-async function run(cmd: string[], cwd = SRC_ROOT): Promise<{ code: number; out: string; err: string }> {
-  const proc = Bun.spawn(cmd, { cwd, stdout: "pipe", stderr: "pipe" });
+async function run(cmd: string[], cwd = SRC_ROOT, env?: Record<string, string | undefined>): Promise<{ code: number; out: string; err: string }> {
+  const proc = Bun.spawn(cmd, { cwd, stdout: "pipe", stderr: "pipe", env });
   const [out, err] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -49,11 +49,13 @@ export async function applyUpdate(): Promise<{ ok: boolean; detail: string }> {
     await run(["git", "checkout", "--", "bun.lock"]);
     const pull = await run(["git", "pull", "--ff-only", "--quiet", "origin", "main"]);
     if (pull.code !== 0) throw new Error(`git pull failed: ${pull.err.slice(0, 300)}`);
-    // The service's PATH (launchd/systemd) may not include bun; we ARE bun.
+    // The service's PATH (launchd/systemd) may not include bun; we ARE bun. Package scripts that call
+    // `bun` themselves (`bun run prepare:… && vite build`) need it on PATH too.
     const bun = process.execPath;
-    const install = await run([bun, "install"]);
+    const env = { ...process.env, PATH: `${dirname(bun)}:${process.env.PATH ?? "/usr/bin:/bin"}` };
+    const install = await run([bun, "install"], SRC_ROOT, env);
     if (install.code !== 0) throw new Error(`bun install failed: ${install.err.slice(0, 300)}`);
-    const build = await run([bun, "run", "build"]);
+    const build = await run([bun, "run", "build"], SRC_ROOT, env);
     if (build.code !== 0) throw new Error(`build failed: ${build.err.slice(0, 300)}`);
     const target = await run(["git", "rev-parse", "--short", "HEAD"]);
     bus.emit({ kind: "update:restarting", commit: target.out });
