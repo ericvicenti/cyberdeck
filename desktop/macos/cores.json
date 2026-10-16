@@ -1,0 +1,44 @@
+[
+  {
+    "file": "fceumm_libretro.dylib",
+    "url": "https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/fceumm_libretro.dylib.zip",
+    "sha256": "ae7956dc6f3470eff433d907ecf57ed728dc1d839e45f04043712e1336ee7444",
+    "binarySha256": "5d1db7d31c0dc810ad44888d7a00ea1b77897f9d0d883ec81954694cbfb6fc60"
+  },
+  {
+    "file": "snes9x_libretro.dylib",
+    "url": "https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/snes9x_libretro.dylib.zip",
+    "sha256": "e54f739b826d7019e1eeb34ca71eef42c0aab733e4874011d19a0b175b955810",
+    "binarySha256": "8ed333ac04544cc6ab67ceb445d095f7600bb17586d4887d99117fbd1ef776f6"
+  },
+  {
+    "file": "gambatte_libretro.dylib",
+    "url": "https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/gambatte_libretro.dylib.zip",
+    "sha256": "530ab090a0f0d0a778c36319535cf29c605722c19399d942f27fcfb6e5ff6bc2",
+    "binarySha256": "19f088f910a89ffef80a26766f682dd01aa5ae81c95adca6926a3d9c10733a50"
+  },
+  {
+    "file": "mgba_libretro.dylib",
+    "url": "https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/mgba_libretro.dylib.zip",
+    "sha256": "4bdf899bd18a03b4c56d8964cd332b16d5ac9a2255ab21031173394c165df917",
+    "binarySha256": "54ae92e80b012013f6d777fb3158b9f925be22c97896049b8549614d7514f505"
+  },
+  {
+    "file": "genesis_plus_gx_libretro.dylib",
+    "url": "https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/genesis_plus_gx_libretro.dylib.zip",
+    "sha256": "757e3f90ddce3b9a0ef5f23a3f39d287d82f641d0471a9974155cf588c1df90b",
+    "binarySha256": "c77c359f6f2064313277741035b00aa96286ac0a205604007f36ef8a190dc86f"
+  },
+  {
+    "file": "2048_libretro.dylib",
+    "url": "https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/2048_libretro.dylib.zip",
+    "sha256": "632c703735e8f6d6e322acedf0cebac1e7a80defe2d1cd1c07c63d238264d12d",
+    "binarySha256": "b9addeb32d6f1b857b5744105909e48b3dd7d3791d8dcf92eefb7d6178e7cda8"
+  },
+  {
+    "file": "parallel_n64_libretro.dylib",
+    "url": "https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/parallel_n64_libretro.dylib.zip",
+    "sha256": "ff74f65a8aa49b847586736036322f8fe76514182f181b8e3628b6827cd21827",
+    "binarySha256": "02c67817ea14578d00d7b8a8e09d276be688bf9c915cd208fc9d67de4a9bcd10"
+  }
+]
