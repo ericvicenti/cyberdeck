@@ -1,7 +1,7 @@
 // Seed's own agents UI, embedded: agents, sessions with their tool calls and runs, triggers, memory,
 // tools and MCP servers, system prompt, collaborators and settings. Cyberdeck only supplies the host
-// (ui/lib/seed-agents.ts) and keeps the route in its hash URL (#/seed?r=<path>), so this view gains
-// every feature Seed ships when vendor/seed-agents-ui is refreshed (scripts/seed-agents-ui.ts).
+// (ui/lib/seed-agents.ts) and keeps the route in its hash URL (#/seed?r=<path>). The published
+// package keeps this view aligned with the UI Seed ships without copying that UI into Cyberdeck.
 import { useMemo } from "react";
 import { SeedAgentsProvider, SeedAgentsView, seedAgentsRouteFromPath, seedAgentsRouteToPath, type SeedAgentsRoute } from "@seed-hypermedia/agents-ui";
 import "@seed-hypermedia/agents-ui/styles.css";

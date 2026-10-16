@@ -121,15 +121,9 @@ Cyberdeck only hosts it (`ui/lib/seed-agents.ts`, `src/daemon/api/seed-agents.ts
 the Seed API on the same origin behind an HttpOnly cookie, so the browser never holds the key or talks
 to the private agents server directly. Remote nodes' Seed sessions still use the plain transcript pane.
 
-The package is vendored in `vendor/seed-agents-ui` until it is on npm. Refresh it from a Seed checkout
-with its dependencies installed, then commit the result:
-
-```
-bun scripts/seed-agents-ui.ts --seed ~/Code/Seed && bun install && bun run build
-```
-
-`vendor/seed-agents-ui/SOURCE.json` records the Seed commit. Restyling goes through Seed's CSS variables
-(`ui/views/seed-agents.css`), not its markup.
+Cyberdeck consumes the published `@seed-hypermedia/agents-ui` package at an exact version. Upgrade it
+with Bun after a compatible Seed release is published. Restyling goes through Seed's supported CSS
+variables (`ui/views/seed-agents.css`), not its markup.
 
 ## Cross-agent session index (planned)
 

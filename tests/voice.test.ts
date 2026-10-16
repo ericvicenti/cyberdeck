@@ -37,6 +37,7 @@ function fakeAgents(opts: { voice: boolean }) {
   const mcp = new Map<string, Record<string, any>>();
   const triggers = new Map<string, Record<string, any>[]>();
   const runtimeCalls: { auth: string | null; body: any }[] = [];
+  let heldMessage: { entered: () => void; wait: Promise<void> } | null = null;
   let n = 0;
   const err = (status: number, message: string) => new Response(cbor.encode({ _: "Error", message }) as unknown as BodyInit, { status, headers: { "content-type": "application/cbor" } });
   const ok = (body: unknown) => new Response(cbor.encode(body) as unknown as BodyInit, { headers: { "content-type": "application/cbor" } });
@@ -76,6 +77,9 @@ function fakeAgents(opts: { voice: boolean }) {
         case "ListSessions": return ok({ _: "ListSessionsResponse", sessions: [...sessions].filter(([, s]) => s.agentId === a.agentId).map(([id, s]) => ({ id, ...s, status: "idle", createdAt: 1, updatedAt: 2 })) });
         case "MessageSession": {
           if (!sessions.has(a.sessionId)) return err(404, "No session");
+          const hold = heldMessage;
+          hold?.entered();
+          if (hold) await hold.wait;
           const rows = queryEvents.get(a.sessionId) ?? [];
           const text = a.content.find((p: any) => p.type === "text")?.text;
           rows.push({ seq: rows.length + 1, event: { type: "message", role: "user", content: text } }, { seq: rows.length + 2, event: { type: "message", role: "assistant", content: `Seed reply: ${text}` } });
@@ -114,7 +118,25 @@ function fakeAgents(opts: { voice: boolean }) {
       }
     },
   });
-  return { url: `http://127.0.0.1:${server.port}`, actions, agents, sessions, secrets, mcp, triggers, runtimeCalls, stop: () => void server.stop(true) };
+  return {
+    url: `http://127.0.0.1:${server.port}`,
+    actions,
+    agents,
+    sessions,
+    secrets,
+    mcp,
+    triggers,
+    runtimeCalls,
+    holdNextMessage() {
+      let entered!: () => void;
+      let release!: () => void;
+      const received = new Promise<void>((resolve) => { entered = resolve; });
+      const wait = new Promise<void>((resolve) => { release = resolve; });
+      heldMessage = { entered, wait };
+      return { received, release: () => { heldMessage = null; release(); } };
+    },
+    stop: () => void server.stop(true),
+  };
 }
 
 type Node = { base: string; wsBase: string; home: string; stop: () => void; cleanup: () => void };
@@ -439,13 +461,23 @@ test("Seed query UI defaults, starts, resumes after reload, and sends a follow-u
     await page.waitForFunction(() => !document.querySelector<HTMLButtonElement>('[data-testid="prompt-go"]')?.disabled);
     expect(await page.locator('[data-testid="plan-tool"]').textContent()).toContain("Seed agents");
     expect(await page.locator('[data-testid="plan-runner"]').count()).toBe(0);
+    const held = voiced.holdNextMessage();
     await input.press("Enter");
+    try {
+      await held.received;
+      // The session exists and opens before MessageSession responds. Agent startup and the first
+      // model turn happen in the conversation instead of freezing the launcher.
+      expect(page.url()).toContain("session=seed-");
+      await page.locator('[data-testid="seed-agents"]').waitFor();
+    } finally {
+      held.release();
+    }
     await page.getByText("Seed reply: Check the fleet", { exact: true }).waitFor();
     const url = page.url();
     expect(url).toContain("session=seed-");
     await page.reload();
     await page.getByText("Seed reply: Check the fleet", { exact: true }).waitFor();
-    // Local Seed sessions render in Seed's own agents UI (vendor/seed-agents-ui): its block editor composes replies.
+    // Local Seed sessions render in Seed's own published agents UI: its block editor composes replies.
     const reply = async (text: string) => {
       const seed = page.locator('[data-testid="seed-agents"]');
       const editor = seed.locator('[contenteditable="true"]:visible').last();
