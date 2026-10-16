@@ -53,6 +53,8 @@ function fakeUpstreams() {
 
 let up: ReturnType<typeof fakeUpstreams>;
 let base: string, wsBase: string, stop: () => void, cleanup: () => void;
+let relayBase: string, stopRelay: () => void;
+const RELAY_TOKEN = "separate-relay-token";
 beforeAll(() => {
   up = fakeUpstreams();
   const home = tmpHomeDir("seed-agents");
@@ -71,8 +73,17 @@ beforeAll(() => {
   base = `http://127.0.0.1:${server.port}`;
   wsBase = `ws://127.0.0.1:${server.port}`;
   stop = () => { s.sessions.close(); void server.stop(true); };
+  const relayDb = new Database(":memory:");
+  initSchema(relayDb);
+  relayDb.query("INSERT INTO nodes (id, name, url, token, added_at) VALUES (?, ?, ?, ?, ?)").run("peer", "Peer", base, TEST_TOKEN, Date.now());
+  const relay = createServer(relayDb, testConfig(), RELAY_TOKEN, "relay", {
+    persistOwner: false, cloudSync: false, tailscale: new Tailscale(async () => null),
+  });
+  const relayServer = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: relay.fetch, websocket: relay.websocket });
+  relayBase = `http://127.0.0.1:${relayServer.port}`;
+  stopRelay = () => { relay.sessions.close(); void relayServer.stop(true); };
 });
-afterAll(() => { stop(); up.stop(); cleanup(); });
+afterAll(() => { stopRelay(); stop(); up.stop(); cleanup(); });
 
 const authed = (path: string, init: RequestInit = {}, token = TEST_TOKEN) => fetch(`${base}${path}`, { ...init, headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...init.headers } });
 const cookie = () => `cyberdeck-seed-agents=${seedAgentsCookieValue(TEST_TOKEN)}`;
@@ -98,6 +109,9 @@ describe("envelope check", () => {
     expect(seedAgentsCookieAuth("/api/seed-agents/proxy/api/message", c, TEST_TOKEN)).toBe(true);
     expect(seedAgentsCookieAuth("/api/seed-agents/hm/api/Resource", c, TEST_TOKEN)).toBe(true);
     expect(seedAgentsCookieAuth("/api/seed-agents/sign", c, TEST_TOKEN)).toBe(false);
+    expect(seedAgentsCookieAuth("/api/seed-agents/nodes/peer/proxy/agents/ws", c, TEST_TOKEN)).toBe(true);
+    expect(seedAgentsCookieAuth("/api/seed-agents/nodes/peer/sign", c, TEST_TOKEN)).toBe(false);
+    expect(seedAgentsCookieAuth("/api/seed-agents/nodes/peer/session", c, TEST_TOKEN)).toBe(false);
     expect(seedAgentsCookieAuth("/api/seed-agents/proxyx", c, TEST_TOKEN)).toBe(false);
     expect(seedAgentsCookieAuth("/api/term", c, TEST_TOKEN)).toBe(false);
     expect(seedAgentsCookieAuth("/api/seed-agents/proxy/x", `${c}x`, TEST_TOKEN)).toBe(false);
@@ -146,6 +160,37 @@ describe("signing", () => {
 });
 
 describe("proxy", () => {
+  test("paired-node host signs on the peer and relays binary HTTP and live events", async () => {
+    const prefix = `${relayBase}/api/seed-agents/nodes/peer`;
+    const headers = { authorization: `Bearer ${RELAY_TOKEN}`, "content-type": "application/json" };
+    const session = await fetch(`${prefix}/session`, { headers });
+    expect(session.status).toBe(200);
+    expect(await session.json()).toMatchObject({ accountUid: PRINCIPAL, serverPath: "/api/seed-agents/nodes/peer/proxy", hmPath: "/api/seed-agents/nodes/peer/hm" });
+    const relayCookie = session.headers.get("set-cookie")!.split(";")[0];
+    expect(relayCookie).toBe(`cyberdeck-seed-agents=${seedAgentsCookieValue(RELAY_TOKEN)}`);
+    expect((await fetch(`${prefix}/sign`, { method: "POST", headers: { cookie: relayCookie } })).status).toBe(401);
+    expect((await fetch(`${prefix}/session`, { headers: { cookie: relayCookie } })).status).toBe(401);
+    const env = unsigned({ _: "ListAgents" });
+    const signed = await fetch(`${prefix}/sign`, { method: "POST", headers, body: JSON.stringify({ data: Buffer.from(encode(env)).toString("base64") }) });
+    expect(signed.status).toBe(200);
+    const sig = new Uint8Array(Buffer.from((await signed.json()).sig, "base64"));
+    const result = await fetch(`${prefix}/proxy/api/message`, { method: "POST", headers: { cookie: relayCookie, "content-type": "application/cbor" }, body: encode({ ...env, sig }) });
+    expect(result.status).toBe(200);
+    expect(cbor.decode(new Uint8Array(await result.arrayBuffer()))).toMatchObject({ _: "ListAgentsResponse" });
+    const hm = await fetch(`${prefix}/hm/api/Resource?id=test`, { headers: { cookie: relayCookie } });
+    expect(await hm.json()).toEqual({ path: "/api/Resource", search: "?id=test" });
+    const ws = new WebSocket(`${prefix.replace(/^http/, "ws")}/proxy/agents/ws`, { headers: { cookie: relayCookie } } as any);
+    ws.binaryType = "arraybuffer";
+    const frame = encode(unsigned({ _: "Subscribe" }));
+    try {
+      const echoed = await new Promise<Uint8Array>((resolve, reject) => {
+        ws.onopen = () => ws.send(frame);
+        ws.onmessage = (m) => resolve(new Uint8Array(m.data as ArrayBuffer));
+        ws.onerror = () => reject(new Error("relay socket error"));
+      });
+      expect(Array.from(echoed)).toEqual(Array.from(frame));
+    } finally { ws.close(); }
+  });
   test("needs the cookie (or full auth)", async () => {
     expect((await fetch(`${base}/api/seed-agents/proxy/agents/api/health`)).status).toBe(401);
     expect((await fetch(`${base}/api/seed-agents/proxy/agents/api/health`, { headers: { cookie: cookie() } })).status).toBe(200);

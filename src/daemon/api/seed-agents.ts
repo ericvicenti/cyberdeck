@@ -14,6 +14,7 @@ import type { Hono } from "hono";
 import * as blobs from "@seed-hypermedia/client/blobs";
 import * as cbor from "@seed-hypermedia/client/cbor";
 import type { SeedBridge } from "../seed";
+import { peerFetch, type NodeRow } from "./fleet";
 
 export const SEED_AGENTS_PREFIX = "/api/seed-agents";
 const PROXY = `${SEED_AGENTS_PREFIX}/proxy`;
@@ -35,7 +36,7 @@ export function seedAgentsCookieValue(token: string): string {
 
 /** True when a request to one of the proxies carries the cookie this node issued. */
 export function seedAgentsCookieAuth(path: string, cookieHeader: string | undefined, token: string): boolean {
-  if (!path.startsWith(`${PROXY}/`) && !path.startsWith(`${HM}/`) && path !== PROXY && path !== HM) return false;
+  if (!/^\/api\/seed-agents\/(?:nodes\/[^/]+\/)?(?:proxy|hm)(?:\/|$)/.test(path)) return false;
   const value = cookieHeader?.split(/;\s*/).find((part) => part.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
   if (!value) return false;
   const expected = Buffer.from(seedAgentsCookieValue(token));
@@ -73,8 +74,10 @@ type Deps = {
   upgradeWebSocket: any;
   isFullAuth: (c: any) => boolean;
   fetch?: typeof fetch;
+  getNode: (id: string) => NodeRow | null;
 };
 
+/** Mount the local Seed host and authenticated paired-node transports. */
 export function registerSeedAgentsRoutes(app: Hono, seed: SeedBridge, deps: Deps) {
   const doFetch = deps.fetch ?? fetch;
   const agentsUrl = () => seed.config.agentsUrl.replace(/\/+$/, "");
@@ -128,15 +131,18 @@ export function registerSeedAgentsRoutes(app: Hono, seed: SeedBridge, deps: Deps
     return c.json({ sig: Buffer.from(sig).toString("base64") });
   });
 
-  // The agents server's live-update socket. Frames are binary DAG-CBOR both ways (signed Subscribe up, events down).
-  app.get(
-    `${PROXY}/agents/ws`,
-    deps.upgradeWebSocket(() => {
+  // Preserve signed DAG-CBOR subscriptions upstream and JSON events downstream,
+  // including when relayed through a paired node.
+  const socket = (remote: boolean) => deps.upgradeWebSocket((c: any) => {
+      const node = remote ? deps.getNode(c.req.param("node")) : null;
       let upstream: WebSocket | null = null;
       const pending: (string | ArrayBuffer | Uint8Array)[] = [];
       return {
         onOpen(_ev: unknown, ws: { send: (d: string | ArrayBuffer | Uint8Array) => void; close: (code?: number, reason?: string) => void }) {
-          upstream = new WebSocket(`${agentsUrl().replace(/^http/, "ws")}/agents/ws`);
+          if (remote && !node) { ws.close(1008, "unknown node"); return; }
+          upstream = node
+            ? new WebSocket(`${node.url.replace(/^http/, "ws")}${PROXY}/agents/ws`, { headers: { authorization: `Bearer ${node.token}` } } as any)
+            : new WebSocket(`${agentsUrl().replace(/^http/, "ws")}/agents/ws`);
           upstream.binaryType = "arraybuffer";
           upstream.onopen = () => {
             for (const frame of pending.splice(0)) upstream!.send(frame);
@@ -157,8 +163,51 @@ export function registerSeedAgentsRoutes(app: Hono, seed: SeedBridge, deps: Deps
           upstream = null;
         },
       };
-    }),
-  );
+    });
+  app.get(`${PROXY}/agents/ws`, socket(false));
+  const remotePrefix = `${SEED_AGENTS_PREFIX}/nodes/:node`;
+  app.get(`${remotePrefix}/proxy/agents/ws`, socket(true));
+
+  // Keep the peer's token and cookie on the daemon. The browser receives this daemon's
+  // proxy-only cookie and paths bound to the selected node, never a mutable global selection.
+  app.all(`${remotePrefix}/*`, async (c) => {
+    const node = deps.getNode(c.req.param("node"));
+    if (!node) return c.json({ error: "unknown node" }, 404);
+    const prefix = `${SEED_AGENTS_PREFIX}/nodes/${c.req.param("node")}`;
+    const rest = c.req.path.slice(prefix.length);
+    const isSession = rest === "/session" && c.req.method === "GET";
+    const isSign = rest === "/sign" && c.req.method === "POST";
+    if (!isSession && !isSign && !/^\/(proxy|hm)\//.test(rest)) return c.notFound();
+    if ((isSession || isSign) && !deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);
+    const headers: Record<string, string> = {};
+    for (const name of FORWARD_REQUEST) {
+      const value = c.req.header(name);
+      if (value) headers[name] = value;
+    }
+    try {
+      const search = new URL(c.req.url).searchParams;
+      search.delete("token");
+      const response = await peerFetch(node, `${SEED_AGENTS_PREFIX}${rest}?${search}`, {
+        method: c.req.method, headers,
+        body: ["GET", "HEAD"].includes(c.req.method) ? undefined : await c.req.arrayBuffer(),
+        redirect: "manual", signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
+      });
+      if (isSession && response.ok) {
+        const session = await response.json() as Record<string, unknown>;
+        const secure = new URL(c.req.url).protocol === "https:" || c.req.header("x-forwarded-proto") === "https";
+        c.header("set-cookie", `${COOKIE}=${seedAgentsCookieValue(deps.token)}; Path=${SEED_AGENTS_PREFIX}/; HttpOnly; SameSite=Strict${secure ? "; Secure" : ""}`);
+        return c.json({ ...session, serverPath: `${prefix}/proxy`, hmPath: `${prefix}/hm` });
+      }
+      const out = new Headers();
+      for (const name of FORWARD_RESPONSE) {
+        const value = response.headers.get(name);
+        if (value) out.set(name, value);
+      }
+      return new Response(response.body, { status: response.status, headers: out });
+    } catch {
+      return c.json({ error: `Seed agents on ${node.name} are unreachable` }, 502);
+    }
+  });
 
   const proxy = (base: () => string | Promise<string>, prefix: string) => async (c: any) => {
     const url = new URL(c.req.url);

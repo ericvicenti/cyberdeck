@@ -4,7 +4,7 @@
 // same-origin proxy, opened by the cookie GET /api/seed-agents/session sets. See src/daemon/api/seed-agents.ts.
 import { useEffect, useState } from "react";
 import type { SeedAgentsHost, SeedAgentsRoute } from "@seed-hypermedia/agents-ui";
-import { api, navigate, post } from "./api";
+import { api, navigate } from "./api";
 
 export type SeedAgentsSession = {
   available: boolean;
@@ -24,8 +24,8 @@ const toBase64 = (bytes: Uint8Array) => {
 };
 const fromBase64 = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 
-/** The agents UI host for this node, or why there is none. Always the local daemon: the proxy and key live there. */
-export function useSeedAgentsHost(): { host: SeedAgentsHost | null; session: SeedAgentsSession | null; error: string | null; retry: () => void } {
+/** The agents UI host for a fixed local or paired node; keys stay on the signing daemon. */
+export function useSeedAgentsHost(node = ""): { host: SeedAgentsHost | null; session: SeedAgentsSession | null; error: string | null; retry: () => void } {
   const [session, setSession] = useState<SeedAgentsSession | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -33,7 +33,9 @@ export function useSeedAgentsHost(): { host: SeedAgentsHost | null; session: See
   useEffect(() => {
     let alive = true;
     setError(null);
-    api<SeedAgentsSession>("/api/seed-agents/session", { local: true })
+    setHost(null);
+    const prefix = node ? `/api/seed-agents/nodes/${encodeURIComponent(node)}` : "/api/seed-agents";
+    api<SeedAgentsSession>(`${prefix}/session`, { local: true })
       .then((s) => {
         if (!alive) return;
         setSession(s);
@@ -45,14 +47,14 @@ export function useSeedAgentsHost(): { host: SeedAgentsHost | null; session: See
           signer: s.available && s.accountUid
             ? {
                 accountUid: s.accountUid,
-                sign: async (data) => fromBase64((await post<{ sig: string }>("/api/seed-agents/sign", { data: toBase64(data) })).sig),
+                sign: async (data) => fromBase64((await api<{ sig: string }>(`${prefix}/sign`, { local: true, method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ data: toBase64(data) }) })).sig),
               }
             : null,
         });
       })
       .catch((e) => alive && setError(e instanceof Error ? e.message : String(e)));
     return () => { alive = false; };
-  }, [attempt]);
+  }, [attempt, node]);
   return { host, session, error, retry: () => setAttempt((n) => n + 1) };
 }
 

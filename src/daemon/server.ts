@@ -222,7 +222,7 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   casework = registerCaseworkRoutes(app, { token, nodeName: cfg.nodeName, kiosk: cfg.kiosk?.enabled, upgradeWebSocket, isFullAuth, experiencesDir: opts.caseworkExperiencesDir, key: opts.caseworkKey, voice: () => seed.voiceSummary(), secureOrigin: () => ts.serveOrigin(cfg.port), seedBridge: cfg.casework });
   registerVoiceRoutes(app, seed, { isFullAuth, serveOrigin: (port) => ts.serveOrigin(port) });
   // Seed's own agents UI in the browser: signing stays here, requests reach the agents server through us.
-  registerSeedAgentsRoutes(app, seed, { token, upgradeWebSocket, isFullAuth });
+  registerSeedAgentsRoutes(app, seed, { token, upgradeWebSocket, isFullAuth, getNode: (id) => db.query("SELECT * FROM nodes WHERE id = ?").get(id) as import("./api/fleet").NodeRow | null });
   registerDashboardRoutes(app, db, cfg);
   const network = registerNetworkRoutes(app, db, cfg);
   registerMcpRoutes(app, db, cfg, control, { status, version: VERSION });

@@ -6,7 +6,7 @@ import { useMemo } from "react";
 import { SeedAgentsProvider, SeedAgentsView, seedAgentsRouteFromPath, seedAgentsRouteToPath, type SeedAgentsRoute } from "@seed-hypermedia/agents-ui";
 import "@seed-hypermedia/agents-ui/styles.css";
 import "./seed-agents.css";
-import { navigate } from "../lib/api";
+import { activeNode, navigate } from "../lib/api";
 import { seedHash, useSeedAgentsHost } from "../lib/seed-agents";
 
 /** The whole agents UI at the route in the hash (`#/seed?r=…`). */
@@ -27,8 +27,8 @@ export default function SeedAgents({ params }: { params: URLSearchParams }) {
 type RouteChange = (route: SeedAgentsRoute, mode: "push" | "replace", path: string) => void;
 
 /** The agents UI at one route, for other views to embed (Sessions shows Seed sessions with it). */
-export function SeedAgentsEmbed({ route, onRouteChange }: { route: SeedAgentsRoute; onRouteChange?: RouteChange }) {
-  const { host, session, error, retry } = useSeedAgentsHost();
+export function SeedAgentsEmbed({ route, onRouteChange, node = activeNode() }: { route: SeedAgentsRoute; onRouteChange?: RouteChange; node?: string }) {
+  const { host, session, error, retry } = useSeedAgentsHost(node);
   if (error) {
     return (
       <div className="m-4 hud-card p-4 text-sm" role="alert">
