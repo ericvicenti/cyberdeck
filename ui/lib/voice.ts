@@ -7,13 +7,15 @@
 import type { Room, LocalAudioTrack, Participant, RemoteTrack, TranscriptionSegment } from "livekit-client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, activeNode, ApiError, type ApiInit } from "./api";
+import { readTalkMode, TALK_MODE_KEY, type TalkMode } from "./talk";
 
 export type VoicePhase = "idle" | "connecting" | "live" | "ending" | "error";
 /** The worker's published pipeline state; `initializing` until it says otherwise. */
 export type AgentState = "initializing" | "listening" | "thinking" | "speaking" | "idle";
 export type TranscriptLine = { id: string; who: "me" | "agent"; text: string; final: boolean; at: number };
 
-export type VoiceConfig = { configured: boolean; provider: "livekit" | "none"; reason?: string; agentId?: string; sessionId?: string };
+/** `via`: the paired node that answers for this one because it has no voice bridge (the daemon relays). */
+export type VoiceConfig = { configured: boolean; provider: "livekit" | "none"; reason?: string; agentId?: string; sessionId?: string; via?: { node: string; name: string } };
 /** `secureUrl`: the wss:// twin of `url` an https page must use (see secureCallUrl in api/voice.ts). */
 type LivekitGrant = { url: string; secureUrl?: string; token: string; room: string; identity: string; expiresAt?: number };
 
@@ -36,6 +38,12 @@ export type Voice = {
   /** Send "Hi" on lk.chat right after joining so the agent greets first (the iPad client does). */
   greet: boolean;
   setGreet: (on: boolean) => void;
+  /** hands-free (mic open for the whole call) or push-to-talk (mic open only while `hold(true)`); saved per browser. */
+  mode: TalkMode;
+  setMode: (mode: TalkMode) => void;
+  /** Push-to-talk: the button (or the space bar) is held, so the mic is open. */
+  held: boolean;
+  hold: (on: boolean) => void;
   start: () => Promise<void>;
   stop: () => void;
   toggle: () => void;
@@ -127,6 +135,11 @@ export function useVoice({ onLocked }: { onLocked?: () => void } = {}): Voice {
   const [greet, setGreetState] = useState<boolean>(() => {
     try { return localStorage.getItem(GREET_KEY) === "1"; } catch { return false; }
   });
+  const [mode, setModeState] = useState<TalkMode>(() => {
+    try { return readTalkMode(localStorage.getItem(TALK_MODE_KEY)); } catch { return "hands-free"; }
+  });
+  const modeRef = useRef<TalkMode>(mode);
+  const [held, setHeld] = useState(false);
 
   const roomRef = useRef<Room | null>(null);
   const audioElsRef = useRef<HTMLMediaElement[]>([]);
@@ -198,6 +211,7 @@ export function useVoice({ onLocked }: { onLocked?: () => void } = {}): Voice {
   const resetLive = useCallback(() => {
     setAgentState("initializing");
     setMuted(false);
+    setHeld(false);
     setRoomName(null);
     stopAnalyser();
   }, [stopAnalyser]);
@@ -313,6 +327,13 @@ export function useVoice({ onLocked }: { onLocked?: () => void } = {}): Voice {
       current.remoteParticipants.forEach((p) => readAgentState(p));
       await current.localParticipant.setMicrophoneEnabled(true);
       if (superseded()) { current.removeAllListeners(); await current.disconnect(); return; }
+      // Push-to-talk: publish the mic (so the first hold is instant) but keep it muted until held.
+      if (modeRef.current === "push-to-talk") {
+        await current.localParticipant.setMicrophoneEnabled(false);
+        if (superseded()) { current.removeAllListeners(); await current.disconnect(); return; }
+        setMuted(true);
+        setLevel(0);
+      }
       // Browsers may hold playback until a gesture; the tap that started us counts.
       void current.startAudio().catch(() => {});
       roomRef.current = current;
@@ -346,6 +367,30 @@ export function useVoice({ onLocked }: { onLocked?: () => void } = {}): Voice {
     if (!next) setLevel(0);
   }, []);
 
+  /** Push-to-talk: open the mic while held, close it when let go. A no-op in hands-free or off a call. */
+  const hold = useCallback((on: boolean) => {
+    const room = roomRef.current;
+    if (!room || modeRef.current !== "push-to-talk") return;
+    setHeld(on);
+    void room.localParticipant.setMicrophoneEnabled(on).catch(() => {});
+    setMuted(!on);
+    if (!on) setLevel(0);
+  }, []);
+
+  const setMode = useCallback((next: TalkMode) => {
+    modeRef.current = next;
+    setModeState(next);
+    try { localStorage.setItem(TALK_MODE_KEY, next); } catch {}
+    // Mid-call the switch takes effect at once: hands-free opens the mic, push-to-talk closes it until held.
+    const room = roomRef.current;
+    if (!room) return;
+    const open = next === "hands-free";
+    setHeld(false);
+    void room.localParticipant.setMicrophoneEnabled(open).catch(() => {});
+    setMuted(!open);
+    if (!open) setLevel(0);
+  }, []);
+
   const clearTranscript = useCallback(() => setTranscript([]), []);
 
   // Leave the room when the view unmounts or the page goes away.
@@ -358,5 +403,5 @@ export function useVoice({ onLocked }: { onLocked?: () => void } = {}): Voice {
     };
   }, [stop]);
 
-  return { phase, agentState, room: roomName, error, config, configError, route, transcript, level, muted, greet, setGreet, start, stop, toggle, toggleMute, refreshConfig, clearTranscript };
+  return { phase, agentState, room: roomName, error, config, configError, route, transcript, level, muted, greet, setGreet, mode, setMode, held, hold, start, stop, toggle, toggleMute, refreshConfig, clearTranscript };
 }

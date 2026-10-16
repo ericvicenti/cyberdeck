@@ -48,10 +48,10 @@ beforeAll(() => {
   writeFileSync(join(LIVE_REPO, "b.txt"), "x\n");
   srv = startTestServer(testConfig({ fleetDir: FLEET_STUB, nodeName: "test-node" }));
   srv.db.query(
-    `INSERT INTO repos (path, name, head_branch, dirty_files, remotes, risk, risk_reasons, scanned_at)
-     VALUES ('/home/x/Code/lonely', 'lonely', 'main', 2, '[]', 'at-risk', '["no remote"]', 1),
-            ('/home/x/Code/fine', 'fine', 'main', 0, '["origin"]', 'safe', '[]', 1),
-            ('${LIVE_REPO}', 'Livedemo', 'main', 1, '[]', 'at-risk', '["no remote"]', 1)`
+    `INSERT INTO repos (path, name, head_branch, dirty_files, ahead, remotes, risk, risk_reasons, scanned_at)
+     VALUES ('/home/x/Code/lonely', 'lonely', 'main', 2, 0, '[]', 'at-risk', '["no remote"]', 1),
+            ('/home/x/Code/fine', 'fine', 'main', 0, 0, '["origin"]', 'safe', '[]', 1),
+            ('${LIVE_REPO}', 'Livedemo', 'main', 1, 3, '[]', 'at-risk', '["no remote"]', 1)`
   ).run();
   bare = startTestServer(testConfig({ fleetDir: null, nodeName: "bare" }));
 }, 60_000);
@@ -123,6 +123,12 @@ describe("mcp tools", () => {
     expect(all.items.length).toBe(1);
     const byQuery = parsed(await call(client, "repos", { risk: "all", query: "FINE" }));
     expect(byQuery.items.map((r: any) => r.name)).toEqual(["fine"]);
+    // kind narrows to what the owner asks by voice: "which repos have unpushed commits?"
+    expect(parsed(await call(client, "repos", { kind: "unpushed" })).items.map((r: any) => r.name)).toEqual(["Livedemo"]);
+    expect(parsed(await call(client, "repos", { kind: "remote-less" })).items.map((r: any) => r.name).sort()).toEqual(["Livedemo", "lonely"]);
+    expect(parsed(await call(client, "repos", { risk: "all", kind: "dirty" })).items.map((r: any) => r.name).sort()).toEqual(["Livedemo", "lonely"]);
+    expect(parsed(await call(client, "repos", { risk: "safe", kind: "dirty" })).total).toBe(0);
+    expect(parsed(await call(client, "repos"))).toMatchObject({ unpushed: 1, remoteless: 2 });
     const unknown = await call(client, "repos", { node: "nowhere" });
     expect(unknown.isError).toBe(true);
     expect(unknown.content[0].text).toContain("No paired node");
@@ -302,13 +308,18 @@ describe("mcp brief mode", () => {
     expect((fleet.structuredContent as any).hostsOnline).toBe(2);
     expect(sentence(await call(client, "hosts", { brief: true }))).toBe("The fleet manifest lists 3 hosts: test-node (laptop), other (server), phone (phone).");
     expect(sentence(await call(client, "projects", { brief: true }))).toBe("1 project, 1 active: Demo.");
-    expect(sentence(await call(client, "todo", { brief: true }))).toBe("1 handoff entry in 1 section; the newest, from 2026-10-07, says: Demo thing");
+    const todo = await call(client, "todo", { brief: true });
+    expect(sentence(todo)).toBe("2 handoff entries in 2 sections; the newest, from 2026-10-07, says: Demo thing; the oldest, from 2026-09-15, says: Old thing nobody did");
+    expect(todo.structuredContent).toMatchObject({ entries: 2, sections: 2, newest: "2026-10-07", oldest: "2026-09-15" });
+    expect(sentence(await call(client, "todo", { brief: true, query: "demo" }))).toBe("1 handoff entry mention \"demo\" in 1 section; the newest, from 2026-10-07, says: Demo thing");
     expect(sentence(await call(client, "todo", { brief: true, query: "nothing-like-this" }))).toContain("no entries");
     expect(sentence(await call(client, "handoff", { brief: true }))).toBe("1 agent note: cc on test-node.");
     expect(sentence(await call(client, "sessions", { brief: true }))).toMatch(/^1 session; the newest is (Claude Code|Codex) on /);
     const repos = await call(client, "repos", { brief: true });
-    expect(sentence(repos)).toBe("test-node has 2 repos at risk, such as lonely, Livedemo.");
+    expect(sentence(repos)).toBe("test-node has 2 repos at risk: 1 with unpushed commits (Livedemo), 2 with no remote (lonely, Livedemo).");
     expect((repos.structuredContent as any).total).toBe(2);
+    expect(sentence(await call(client, "repos", { kind: "unpushed", brief: true }))).toBe("test-node has 1 repos at risk with unpushed commits, such as Livedemo.");
+    expect(sentence(await call(client, "repos", { risk: "safe", brief: true }))).toBe("test-node has 1 safe repos, such as fine.");
     expect(sentence(await call(client, "repos_detail", { repo: "Livedemo", brief: true }))).toContain("Livedemo");
     expect(sentence(await call(client, "sessions_search", { query: "zzz-none", brief: true }))).toContain("No cc or cx sessions match");
     const services = await call(client, "services", { probe: true, brief: true });
