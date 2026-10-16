@@ -1,3 +1,4 @@
+import { updateParams, useRouteTitle } from "../lib/navigation";
 // Cloud AI: ChatGPT and Claude accounts driven through the node's remote browser,
 // with every conversation archived into the Deck repo.
 import { useEffect, useState } from "react";
@@ -27,11 +28,16 @@ const STATUS: Record<ProviderState["status"], { led: string; text: string }> = {
 export function Cloud({ params, onLocked }: { params: URLSearchParams; onLocked: () => void }) {
   const [sum, setSum] = useState<Summary | null>(null);
   const [profiles, setProfiles] = useState<Profiles | null>(null);
-  const [profile, setProfile] = useState(params.get("profile") ?? "chatgpt");
-  const [navUrl, setNavUrl] = useState<string | undefined>(params.get("url") ?? undefined);
-  const [q, setQ] = useState("");
+  const profile = params.get("profile") ?? "chatgpt";
+  const navUrl = params.get("url") ?? undefined;
+  const q = params.get("q") ?? "";
+  const setQ = (q: string) => updateParams({ q }, "edit");
+  const conversation = params.get("conversation") ?? "";
+  const provider = params.get("provider") === "claude" ? "claude" : "chatgpt";
   const [convs, setConvs] = useState<Conv[]>([]);
-  const [sel, setSel] = useState<Conv | null>(null);
+  const sel = conversation ? convs.find(c => c.id === conversation && (c.tool === "chatgpt" ? "chatgpt" : "claude") === provider) : undefined;
+  const setSel = (c: Conv) => updateParams({ conversation: c.id, provider: c.tool === "chatgpt" ? "chatgpt" : "claude" });
+  const [docError, setDocError] = useState("");
   const [doc, setDoc] = useState<{ frontmatter: Record<string, string>; markdown: string } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -41,22 +47,30 @@ export function Cloud({ params, onLocked }: { params: URLSearchParams; onLocked:
   };
   useEffect(() => { load(); const iv = setInterval(load, 8000); return () => clearInterval(iv); }, []);
 
-  const loadConvs = async () => {
-    const all: Conv[] = [];
-    for (const p of PROVIDERS) { try { all.push(...(await api<Conv[]>(`/api/cloud/${p.key}/conversations?q=${encodeURIComponent(q)}`))); } catch {} }
-    all.sort((a, b) => b.updated.localeCompare(a.updated));
-    setConvs(all);
-  };
-  useEffect(() => { const t = setTimeout(loadConvs, 200); return () => clearTimeout(t); }, [q, sum?.providers.chatgpt.conversations, sum?.providers.claude.conversations]);
+  useEffect(() => {
+    let alive = true;
+    const timer = setTimeout(async () => {
+      const all: Conv[] = [];
+      for (const p of PROVIDERS) { try { all.push(...(await api<Conv[]>(`/api/cloud/${p.key}/conversations?q=${encodeURIComponent(q)}`))); } catch {} }
+      all.sort((a, b) => b.updated.localeCompare(a.updated));
+      if (alive) setConvs(all);
+    }, 200);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [q, sum?.providers.chatgpt.conversations, sum?.providers.claude.conversations]);
 
   useEffect(() => {
-    if (!sel) { setDoc(null); return; }
-    const prov = sel.tool === "chatgpt" ? "chatgpt" : "claude";
-    api<{ frontmatter: Record<string, string>; markdown: string }>(`/api/cloud/${prov}/conversations/${encodeURIComponent(sel.id)}`).then(setDoc).catch(() => setDoc(null));
-  }, [sel?.id]);
+    setDoc(null); setDocError("");
+    if (!conversation) return;
+    let alive = true;
+    api<{ frontmatter: Record<string, string>; markdown: string }>(`/api/cloud/${provider}/conversations/${encodeURIComponent(conversation)}`)
+      .then(value => { if (alive) setDoc(value); })
+      .catch(e => { if (alive) { if (e instanceof ApiError && e.status === 401) onLocked(); setDocError(e instanceof ApiError && e.status === 404 ? "Conversation not found" : String(e)); } });
+    return () => { alive = false; };
+  }, [conversation, provider]);
+  useRouteTitle(conversation ? `${docError || doc?.frontmatter.title || sel?.title || conversation} · Cloud` : undefined);
 
   const sync = async (p: string) => { try { await post(`/api/cloud/${p}/sync`, {}); setMsg(`${p}: sync started`); setTimeout(load, 1500); } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); } };
-  const openSite = (p: typeof PROVIDERS[number]) => { setProfile(p.key); setNavUrl(p.home + "?t=" + Date.now()); };
+  const openSite = (p: typeof PROVIDERS[number]) => updateParams({ profile: p.key, url: p.home });
   const where = activeNodeName() || "this node";
 
   return (
@@ -102,7 +116,7 @@ export function Cloud({ params, onLocked }: { params: URLSearchParams; onLocked:
           title="Remote browser"
           right={
             <div className="flex items-center gap-2 text-[11px]">
-              <select value={profile} onChange={(e) => { setProfile(e.target.value); setNavUrl(undefined); }} className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-300">
+              <select value={profile} onChange={(e) => { updateParams({ profile: e.target.value, url: null }); }} className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-300">
                 {(profiles?.profiles ?? [{ name: "chatgpt" }, { name: "claude" }, { name: "default" }]).map((pr) => <option key={pr.name} value={pr.name}>{pr.name}{"open" in pr && pr.open ? " ●" : ""}</option>)}
               </select>
               <span className="text-zinc-500">profile · logins persist on {where}</span>
@@ -132,19 +146,20 @@ export function Cloud({ params, onLocked }: { params: URLSearchParams; onLocked:
             </div>
           </Panel>
           <Panel
-            title={sel ? sel.title : "Conversation"}
+            title={doc?.frontmatter.title || sel?.title || "Conversation"}
             right={sel ? (
               <div className="flex gap-2">
-                <button onClick={() => { setProfile(sel.tool === "chatgpt" ? "chatgpt" : "claude"); setNavUrl(sel.url); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="rounded border border-cyan-500/40 px-2 py-0.5 text-[10px] text-cyan-300 hover:bg-cyan-500/10">Open live in browser</button>
+                <button onClick={() => { updateParams({ profile: sel.tool === "chatgpt" ? "chatgpt" : "claude", url: sel.url }); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="rounded border border-cyan-500/40 px-2 py-0.5 text-[10px] text-cyan-300 hover:bg-cyan-500/10">Open live in browser</button>
                 <a href={sel.url} target="_blank" rel="noreferrer" className="rounded border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800">Site ↗</a>
               </div>
             ) : null}
           >
-            {!sel && <Empty>Select an archived conversation.</Empty>}
-            {sel && !doc && <Empty>Loading…</Empty>}
-            {sel && doc && (
+            {!conversation && <Empty>Select an archived conversation.</Empty>}
+            {docError && <p role="alert">{docError}</p>}
+            {conversation && !doc && !docError && <Empty>Loading…</Empty>}
+            {conversation && doc && (
               <div className="max-h-[70vh] overflow-y-auto">
-                <div className="pb-2 font-mono text-[10px] text-zinc-500">{doc.frontmatter.provider} · {doc.frontmatter.model ?? "model unknown"} · {doc.frontmatter.messages} messages · updated {doc.frontmatter.updated} · <span className="text-zinc-600">{sel.file}</span></div>
+                <div className="pb-2 font-mono text-[10px] text-zinc-500">{doc.frontmatter.provider} · {doc.frontmatter.model ?? "model unknown"} · {doc.frontmatter.messages} messages · updated {doc.frontmatter.updated} · <span className="text-zinc-600">{sel?.file}</span></div>
                 <Markdown text={doc.markdown} className="text-[12px]" />
               </div>
             )}

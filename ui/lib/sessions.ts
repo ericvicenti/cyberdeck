@@ -15,7 +15,7 @@ export type LiveSession = {
 export type FleetNode = { id: string; name: string; online: boolean };
 export type FleetNodes = { self: { nodeId: string; name: string; commit?: string }; nodes: FleetNode[] };
 
-const nodePath = (node: string, path: string) => (node ? `/api/nodes/${node}/proxy/${path.slice("/api/".length)}` : path);
+const nodePath = (node: string, path: string) => (node ? `/api/nodes/${encodeURIComponent(node)}/proxy/${path.slice("/api/".length)}` : path);
 
 /** Fetch against a specific node regardless of the UI's active node. */
 export async function apiOn<T>(node: string, path: string, init?: RequestInit): Promise<T> {
@@ -49,7 +49,7 @@ export const sendInput = (node: string, id: string, data: string, enter = true) 
 
 /** WebSocket URL to attach to a session on a node. */
 export function attachUrl(node: string, id: string, size?: { cols: number; rows: number }): string {
-  const path = node ? `/api/nodes/${node}/sessions/${id}/attach` : `/api/sessions/${id}/attach`;
+  const path = node ? `/api/nodes/${encodeURIComponent(node)}/sessions/${id}/attach` : `/api/sessions/${id}/attach`;
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const q = new URLSearchParams({ token: token(), ...(size ? { cols: String(size.cols), rows: String(size.rows) } : {}) });
   return `${proto}://${location.host}${path}?${q}`;
@@ -69,8 +69,7 @@ export function getCaps(node: string): Promise<Caps | null> {
 
 /** Go to a session's terminal, switching the UI onto its node first. */
 export function openSession(s: { node: string; nodeName: string; id: string }) {
-  if (s.node !== activeNode()) setActiveNode(s.node, s.nodeName);
-  navigate("term", { session: s.id });
+  navigate("term", { session: s.id, node: s.node });
 }
 
 export const toolForCmd = (cmd: string | undefined): Tool => (!cmd ? "shell" : /^claude(\s|$)/.test(cmd) ? "cc" : /^codex(\s|$)/.test(cmd) ? "cx" : "shell");

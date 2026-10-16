@@ -8,6 +8,9 @@ export default defineConfig({
   build: {
     outDir: "../dist/ui",
     emptyOutDir: true,
+    rollupOptions: {
+      input: { main: "ui/index.html", spotifyPlayer: "ui/spotify-player.html" },
+    },
   },
   server: {
     proxy: {

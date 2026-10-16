@@ -1,3 +1,4 @@
+import { updateParams } from "../lib/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { api, wsUrl, fmtAgo, navigate, activeNode, activeNodeName, ApiError } from "../lib/api";
 
@@ -67,12 +68,13 @@ function StatCard(props: { label: string; value: string; tone?: "red" | "amber" 
   );
 }
 
-export function Data({ onLocked }: { onLocked: () => void }) {
+export function Data({ params, onLocked }: { params: URLSearchParams; onLocked: () => void }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [repos, setRepos] = useState<Repo[]>([]);
   const [dataDirs, setDataDirs] = useState<DataDir[]>([]);
-  const [dataRoot, setDataRoot] = useState<string>("");
-  const [filter, setFilter] = useState("");
+  const dataRoot = params.get("root") ?? "", filter = params.get("q") ?? "";
+  const setDataRoot = (root: string) => updateParams({ root });
+  const setFilter = (q: string) => updateParams({ q }, "edit");
   const [scanProgress, setScanProgress] = useState<{ done: number; total: number } | null>(null);
 
   const refresh = async () => {

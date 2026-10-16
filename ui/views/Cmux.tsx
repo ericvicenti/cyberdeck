@@ -1,3 +1,4 @@
+import { updateParams, useRouteTitle } from "../lib/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, post, activeNode, activeNodeName, ApiError } from "../lib/api";
 import type { Overview } from "../lib/control";
@@ -9,11 +10,13 @@ const QUICK: [string, string][] = [["Enter", "Enter"], ["Esc", "Escape"], ["Tab"
 
 function flatten(nodes: Node[], out: Node[] = []): Node[] { for (const n of nodes) { out.push(n); flatten(n.children, out); } return out; }
 
-export function Cmux({ onLocked }: { onLocked: () => void }) {
+export function Cmux({ params, onLocked }: { params: URLSearchParams; onLocked: () => void }) {
   const [tree, setTree] = useState<Tree | null>(null);
-  const [surface, setSurface] = useState<string>("");
+  const surface = params.get("surface") ?? "";
+  const setSurface = (surface: string) => updateParams({ surface });
   const [screen, setScreen] = useState("");
-  const [scrollback, setScrollback] = useState(false);
+  const scrollback = params.get("scrollback") === "1";
+  const setScrollback = (value: boolean) => updateParams({ scrollback: value ? "1" : null });
   const [input, setInput] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -31,7 +34,8 @@ export function Cmux({ onLocked }: { onLocked: () => void }) {
 
   const all = useMemo(() => (tree ? flatten(tree.tree) : []), [tree]);
   const surfaces = useMemo(() => all.filter((n) => n.kind === "surface"), [all]);
-  useEffect(() => { if (!surface && surfaces.length) setSurface((surfaces.find((s) => s.active) ?? surfaces.find((s) => s.selected) ?? surfaces[0]).ref); }, [surfaces.length]);
+  useEffect(() => { if (!surface && surfaces.length) updateParams({ surface: (surfaces.find((s) => s.active) ?? surfaces.find((s) => s.selected) ?? surfaces[0]).ref }, "replace"); }, [surface, surfaces]);
+  useRouteTitle(surface && tree ? `${surfaces.find(s => s.ref === surface)?.title ?? surface} · cmux` : undefined);
   const workspaceOf = (ref: string): Node | undefined => { for (const w of all.filter((n) => n.kind === "workspace")) if (flatten(w.children).some((n) => n.ref === ref)) return w; return undefined; };
 
   useEffect(() => {

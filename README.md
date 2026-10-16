@@ -92,40 +92,66 @@ unreachable source/target reports that condition rather than an inferred speed.
 
 ### Spotify app
 
-Open **Spotify** in the sidebar or Applications, then **Open Spotify player**. The default
-experience uses Spotify's official web player in a separate tab with your existing Spotify
-login and subscription: no Developer app, Client ID, or configuration. **Open Spotify app**
-launches the installed app on the viewing device; search opens Spotify's own search. Keep the
-player tab open while using Cyberdeck. Spotify's full website does not allow embedding in
-Cyberdeck (its Content-Security-Policy restricts frame ancestors).
+Open **Spotify** in the sidebar or Applications for the custom **Listening room**. Catalog
+navigation stays inside Cyberdeck: search songs/artists/albums/playlists, follow artist credits,
+open album and playlist pages, browse liked songs, saved albums, followed artists, recent plays,
+and your listening journal. Create private playlists, rename editable playlists, add/remove songs,
+and move tracks up. Queue supports viewing and adding songs; Spotify does not expose removal or
+reordering of its live queue. Radio mixes searches available playlists, not personalized radio.
+Some development-mode apps cannot read other owners' playlist contents; context playback remains
+available and the page explains the restriction. Search pages through ten results per category at a time.
 
-The collapsed **Advanced: custom Cyberdeck player** option is for users who explicitly want
-custom controls. It plays full music through Spotify's Web Playback SDK with your existing Premium subscription and can control Spotify Connect
-devices. Search songs, play a Spotify track/album/playlist link, browse your playlists, and
-use play/pause, skip, seek, volume, and device transfer. The player stays mounted while you
-browse other dashboard views; closing/reloading the page disconnects the browser player.
-The fleet node selector does not move playback to that machine.
+Playback uses the Web Playback SDK and Spotify Connect. Press Play on a song, album, or playlist;
+with no selected or active device, the browser player connects automatically before playback starts.
+Other devices can be selected under Playback & connection. Shuffle/repeat, seek, volume, skip and
+transfer stay in-app. Clicking artwork opens
+a full-viewport listening view, with browser fullscreen where supported and an explicit close
+button (Escape also exits). The player remains mounted across dashboard navigation. Changing the
+fleet node selector does not move playback or the music archive.
 
-One-time setup: create an app at <https://developer.spotify.com/dashboard>, enable Web API
-and Web Playback SDK, and register the exact redirect URI displayed in Spotify's setup card
-(e.g. `http://127.0.0.1:4777/`). Paste the public Client ID and choose Connect Spotify. No client
-secret is needed. Spotify requires HTTPS except for literal loopback IPs; plain HTTP tailnet
-URLs and `localhost` are not supported. On a remote machine use Cyberdeck's HTTPS URL.
-In development mode, add any other account under the Spotify app's User Management.
+Eligible music videos appear automatically in Spotify's embedded track panel. **Watch here** pauses
+SDK/Connect audio before enabling interaction; resuming custom audio remounts the preview so the
+players do not overlap. The frame cannot open popups or navigate the parent app. Spotify decides
+video eligibility, sign-in and autoplay behavior; the SDK itself is audio-only. This is not a
+custom video streaming API and video availability has not been verified with Eric's account.
 
-After connecting, choose **Enable browser playback**, then play a song or choose **Listen
-here** to transfer your current music. Protected-content/DRM support is required; if the
-browser cannot play, select a Spotify desktop/mobile device instead. Playback only starts
-on an explicit action. Autoplay restrictions may require pressing Play again.
+The public Client ID `6dc6300fa4364a81acb8a5f5e920f809` is hardcoded from Eric's existing
+**Cyberdeck** app, verified in Spotify's dashboard on 2026-10-11. No setup field or client
+secret is needed. Its currently registered callback is `http://127.0.0.1:4777/`; other origins
+must be registered in that existing app before they can authorize. Premium and DRM-capable browser playback are required. Spotify
+requires HTTPS except literal loopback IPs; plain HTTP tailnet URLs and `localhost` are unsupported.
+OAuth sign-in necessarily visits Spotify and returns here; there are no external player links.
+PKCE uses a one-use state with a ten-minute expiry. Tokens stay in tab sessionStorage and are sent
+only to Spotify. The public Client ID is shared in source. **Renew permissions** grants the new
+library/playlist scopes to an existing connection. Other accounts must be permitted in the app's
+Spotify User Management when development-mode restrictions apply.
 
-OAuth uses PKCE, a single-use state with a ten-minute expiry, and automatic token refresh.
-Spotify tokens live only in this tab's sessionStorage and go directly to Spotify; the
-public Client ID is remembered in localStorage. Disconnect clears local tokens and stops
-this browser player (other Spotify devices keep their playback). To revoke app access
-entirely, remove Cyberdeck from your Spotify account's connected apps. Sign in separately
-on each browser/origin. Search uses the current development-mode limit of ten results;
-rate-limit responses honor Retry-After. No Spotify credentials enter daemon config or Git.
+Fetched metadata and observed playback transitions are saved automatically to IndexedDB and to
+this serving node's `music_archive` table in `~/.cyberdeck/cyberdeck.db`, with account isolation and
+no automatic expiry/pruning. API responses are latest snapshots per request path; the listening
+journal appends observed track changes. This is not a complete Spotify lifetime history. Polling
+runs every ten seconds while the document is visible, and SDK events capture browser track changes.
+Play defaults to this browser, including when another device is active. Explicit device selections
+remain available in Playback & connection.
+Browser playback also records audio through a same-origin SDK frame and the media element's Web
+Audio output. The vendored bootstrap changes only its frame URL; the official embedded player still
+handles authorization and protected playback. The tap never reads keys or licenses. MediaRecorder
+checkpoints real WebM/Opus (or supported MP4) audio in IndexedDB every two seconds, finalizes on
+pause/seek/track change, and backs up finalized intervals in SQLite. Ten-minute segments bound memory.
+Listening journal → Saved audio plays local blobs without Spotify or a network and exports audio.
+It records only portions actually played here, not unplayed songs, videos, artwork bytes, or another
+device's output. Unsupported/silent output and storage failures are shown, not marked saved.
+Keep the page open when offline; reopening localhost works while this node is running. Browser
+storage can be evicted unless persistence is granted; back up the node's SQLite database normally. Browser-local writes survive node sync failures;
+opening the journal/export retries them. Storage errors remain visible rather than claiming a save.
+**Music archive → Export metadata** downloads a portable JSON backup of browser and node records;
+**Protect storage** requests browser persistence where supported. Disconnect deletes this account's
+browser/node archive and tokens; export first to retain a backup. Account disconnect is kept pending
+if node deletion fails, so it can be retried. Existing Spotify playlists/likes remain on Spotify.
 
+Validation: `bun run typecheck`, `bun run build`, then
+`bun test tests/music.test.ts tests/spotify.test.ts tests/spotify-e2e.test.ts`. Browser tests use an
+isolated account/API/SDK fixture; they do not establish real Premium audio or video availability.
 
 ### Casework: the whole deck on the iPad, and the kitchen sink
 

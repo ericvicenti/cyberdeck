@@ -1,7 +1,12 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { writeFileSync, mkdirSync, readFileSync } from "fs";
 import { join } from "path";
-import { startTestServer, testConfig, TEST_TOKEN, type TestServer } from "./helpers";
+import {
+  startTestServer,
+  testConfig,
+  TEST_TOKEN,
+  type TestServer,
+} from "./helpers";
 import { tmpHomeDir } from "./helpers";
 
 const { dir, cleanup } = tmpHomeDir("api");
@@ -9,7 +14,10 @@ let srv: TestServer;
 
 beforeAll(() => {
   writeFileSync(join(dir, "readable.txt"), "file contents here");
-  writeFileSync(join(dir, "image.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01]));
+  writeFileSync(
+    join(dir, "image.png"),
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01]),
+  );
   mkdirSync(join(dir, "zipme"));
   writeFileSync(join(dir, "zipme", "inner.txt"), "zip inner");
   srv = startTestServer();
@@ -32,7 +40,9 @@ describe("auth", () => {
   });
   test("accepts bearer header and query token", async () => {
     expect((await srv.api("/api/status")).status).toBe(200);
-    expect((await fetch(`${srv.base}/api/status?token=${TEST_TOKEN}`)).status).toBe(200);
+    expect(
+      (await fetch(`${srv.base}/api/status?token=${TEST_TOKEN}`)).status,
+    ).toBe(200);
   });
 });
 
@@ -59,30 +69,45 @@ describe("fs over http", () => {
     expect(body.entries.map((e: any) => e.name)).toContain("Users");
   });
   test("read streams file with mime", async () => {
-    const res = await srv.api(`/api/fs/read?path=${encodeURIComponent(join(dir, "image.png"))}`);
+    const res = await srv.api(
+      `/api/fs/read?path=${encodeURIComponent(join(dir, "image.png"))}`,
+    );
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("image/png");
     expect((await res.arrayBuffer()).byteLength).toBe(6);
   });
   test("text endpoint returns content for text, 415 for binary", async () => {
-    const ok = await srv.api(`/api/fs/text?path=${encodeURIComponent(join(dir, "readable.txt"))}`);
+    const ok = await srv.api(
+      `/api/fs/text?path=${encodeURIComponent(join(dir, "readable.txt"))}`,
+    );
     expect((await ok.json()).content).toBe("file contents here");
-    const bad = await srv.api(`/api/fs/text?path=${encodeURIComponent(join(dir, "image.png"))}`);
+    const bad = await srv.api(
+      `/api/fs/text?path=${encodeURIComponent(join(dir, "image.png"))}`,
+    );
     expect(bad.status).toBe(415);
   });
   test("write via POST", async () => {
     const res = await srv.api("/api/fs/write", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: join(dir, "posted.txt"), content: "from api" }),
+      body: JSON.stringify({
+        path: join(dir, "posted.txt"),
+        content: "from api",
+      }),
     });
     expect(res.status).toBe(200);
     expect(readFileSync(join(dir, "posted.txt"), "utf8")).toBe("from api");
   });
   test("upload multipart", async () => {
     const fd = new FormData();
-    fd.append("files", new File(["upload body"], "uploaded.txt", { type: "text/plain" }));
-    fd.append("files", new File(["second"], "uploaded2.txt", { type: "text/plain" }));
+    fd.append(
+      "files",
+      new File(["upload body"], "uploaded.txt", { type: "text/plain" }),
+    );
+    fd.append(
+      "files",
+      new File(["second"], "uploaded2.txt", { type: "text/plain" }),
+    );
     const res = await srv.api(`/api/fs/upload?dir=${encodeURIComponent(dir)}`, {
       method: "POST",
       body: fd,
@@ -93,17 +118,27 @@ describe("fs over http", () => {
   });
   test("folder upload preserves relative structure", async () => {
     const fd = new FormData();
-    fd.append("files", new File(["deep body"], "x", { type: "text/plain" }), "proj/src/deep.txt");
+    fd.append(
+      "files",
+      new File(["deep body"], "x", { type: "text/plain" }),
+      "proj/src/deep.txt",
+    );
     const res = await srv.api(`/api/fs/upload?dir=${encodeURIComponent(dir)}`, {
       method: "POST",
       body: fd,
     });
     expect(res.status).toBe(200);
-    expect(readFileSync(join(dir, "proj", "src", "deep.txt"), "utf8")).toBe("deep body");
+    expect(readFileSync(join(dir, "proj", "src", "deep.txt"), "utf8")).toBe(
+      "deep body",
+    );
   });
   test("folder upload rejects traversal in relative paths", async () => {
     const fd = new FormData();
-    fd.append("files", new File(["evil"], "x", { type: "text/plain" }), "a/../../b/evil.txt");
+    fd.append(
+      "files",
+      new File(["evil"], "x", { type: "text/plain" }),
+      "a/../../b/evil.txt",
+    );
     const res = await srv.api(`/api/fs/upload?dir=${encodeURIComponent(dir)}`, {
       method: "POST",
       body: fd,
@@ -115,7 +150,10 @@ describe("fs over http", () => {
   });
   test("upload strips path components from filenames", async () => {
     const fd = new FormData();
-    fd.append("files", new File(["evil"], "../../../escape.txt", { type: "text/plain" }));
+    fd.append(
+      "files",
+      new File(["evil"], "../../../escape.txt", { type: "text/plain" }),
+    );
     const res = await srv.api(`/api/fs/upload?dir=${encodeURIComponent(dir)}`, {
       method: "POST",
       body: fd,
@@ -124,7 +162,9 @@ describe("fs over http", () => {
     expect(body.saved[0].path).toBe(join(dir, "escape.txt"));
   });
   test("download dir as zip", async () => {
-    const res = await srv.api(`/api/fs/download?path=${encodeURIComponent(join(dir, "zipme"))}`);
+    const res = await srv.api(
+      `/api/fs/download?path=${encodeURIComponent(join(dir, "zipme"))}`,
+    );
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("application/zip");
     const buf = Buffer.from(await res.arrayBuffer());
@@ -133,10 +173,12 @@ describe("fs over http", () => {
   });
   test("search", async () => {
     const res = await srv.api(
-      `/api/fs/search?dir=${encodeURIComponent(dir)}&q=readable`
+      `/api/fs/search?dir=${encodeURIComponent(dir)}&q=readable`,
     );
     const body = await res.json();
-    expect(body.results.some((r: string) => r.endsWith("readable.txt"))).toBe(true);
+    expect(body.results.some((r: string) => r.endsWith("readable.txt"))).toBe(
+      true,
+    );
   });
   test("chmod + stat roundtrip", async () => {
     await srv.api("/api/fs/chmod", {
@@ -145,7 +187,9 @@ describe("fs over http", () => {
       body: JSON.stringify({ path: join(dir, "readable.txt"), mode: "640" }),
     });
     const st = await (
-      await srv.api(`/api/fs/stat?path=${encodeURIComponent(join(dir, "readable.txt"))}`)
+      await srv.api(
+        `/api/fs/stat?path=${encodeURIComponent(join(dir, "readable.txt"))}`,
+      )
     ).json();
     expect((st.mode & 0o777).toString(8)).toBe("640");
     expect(st.user).toBeTruthy();
@@ -178,13 +222,57 @@ describe("control module", () => {
       expect(body.collab.auto).toBe(false);
       const sessions = await (await s.api("/api/control/sessions?q=t")).json();
       expect(sessions[0].id).toBe("abc");
-      const added = await (await s.api("/api/control/collab/add", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "New" }) })).json();
+      const added = await (
+        await s.api("/api/control/collab/add", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ title: "New" }),
+        })
+      ).json();
       expect(added.id).toBe("t2");
-      const log = await (await s.api("/api/control/collab/runs/nope/log?file=worker.log")).json();
+      const log = await (
+        await s.api("/api/control/collab/runs/nope/log?file=worker.log")
+      ).json();
       expect(log.size).toBe(0);
-      expect((await s.api("/api/control/collab/runs/nope/log?file=../etc")).status).toBe(400);
+      expect(
+        (await s.api("/api/control/collab/runs/nope/log?file=../etc")).status,
+      ).toBe(400);
     } finally {
       s.stop();
     }
   });
+});
+
+test("music metadata routes require the node owner and persist through the real API", async () => {
+  expect(
+    (await fetch(`${srv.base}/api/music/archive?account=test`)).status,
+  ).toBe(401);
+  expect(
+    (await fetch(`${srv.base}/api/music/recordings?account=test`)).status,
+  ).toBe(401);
+  expect(
+    (await fetch(`${srv.base}/api/music/recordings`, { method: "PUT" })).status,
+  ).toBe(401);
+  const record = {
+    account: "test",
+    key: "test:listen:one",
+    kind: "listen",
+    at: Date.now(),
+    data: { uri: "spotify:track:test" },
+  };
+  expect(
+    (
+      await srv.api("/api/music/archive", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(record),
+      })
+    ).status,
+  ).toBe(200);
+  const saved = await (await srv.api("/api/music/archive?account=test")).json();
+  expect(saved.records[0].data.uri).toBe("spotify:track:test");
+  expect(
+    (await srv.api("/api/music/archive?account=test", { method: "DELETE" }))
+      .status,
+  ).toBe(200);
 });
