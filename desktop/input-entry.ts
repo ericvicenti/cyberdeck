@@ -1,3 +1,4 @@
+import "../ui/public/input-mode.js";
 import { installTVInput } from "../ui/lib/tv/runtime";
 installTVInput({
   kiosk: true,
