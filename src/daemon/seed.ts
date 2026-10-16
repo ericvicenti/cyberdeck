@@ -783,7 +783,7 @@ export class SeedBridge {
     const out: LoginStatus = { loginId: r.loginId, status: r.status, ...(r.secretName ? { secretName: r.secretName } : {}), ...(r.error ? { error: r.error } : {}) };
     if (r.status === "completed" && r.secretName) {
       const type = this.#state.login?.providerType ?? "openai";
-      await this.action({ _: "SetModelProvider", provider: { name: this.config.modelProvider, type, authMode: "subscription", secretRefs: { oauth: r.secretName } } });
+      await this.action({ _: "SetModelProvider", name: this.config.modelProvider, provider: { name: this.config.modelProvider, type, authMode: "subscription", secretRefs: { oauth: r.secretName } } });
       out.provider = this.config.modelProvider;
       this.#state.login = undefined;
       this.#save();

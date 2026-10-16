@@ -132,7 +132,8 @@ function fakeAgents(opts: { voice: boolean }) {
         case "ListModelProviders": return ok({ _: "ListModelProvidersResponse", providers: [...providers.values()] });
         case "SetModelProvider": {
           const p = a.provider;
-          if (!p?.name || !p.type) return err(400, "Provider name and type are required");
+          if (typeof a.name !== "string" || !a.name) return err(400, "Provider name is required");
+          if (!p?.type) return err(400, "Provider name and type are required");
           if (p.authMode === "subscription" && !p.secretRefs?.oauth) return err(400, "subscription providers need secretRefs.oauth");
           providers.set(p.name, { name: p.name, type: p.type, authMode: p.authMode ?? "api-key", authStatus: "ok" });
           return ok({ _: "SetModelProviderResponse", provider: providers.get(p.name) });
