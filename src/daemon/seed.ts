@@ -42,7 +42,7 @@ export type SeedStatus = {
 
 export type DogfoodStatus = { triggerId: string; name: string; enabled: boolean; lastFiredAt?: number; lastError?: string; nextSummary?: string };
 export type DogfoodOptions = { timezone?: string; timeOfDay?: string };
-type TriggerInfo = { id: string; name: string; enabled: boolean; source: any; lastFiredAt?: number; lastError?: string; createdAt?: number };
+type TriggerInfo = { id: string; name: string; enabled: boolean; source: any; prompt?: string | unknown[]; lastFiredAt?: number; lastError?: string; createdAt?: number };
 
 /** Cartesia voice id + speaking rate, as the Casework host keeps it in companion.json (`profile`). */
 export type VoiceProfile = { voice: string; speed: number };
@@ -84,7 +84,7 @@ const VOICE_ID_RE = /^[a-zA-Z0-9-]{1,100}$/;
 const MCP_SERVER_NAME = "cyberdeck";
 export const DOGFOOD_TRIGGER_NAME = "cyberdeck-fleet-checkin";
 export const DOGFOOD_PROMPT =
-  "Daily fleet check-in. Use your cyberdeck tools only (no guessing): call cyberdeck__fleet_status and cyberdeck__services (probe: true) for every host, then cyberdeck__repos and cyberdeck__todo. Write ONE note with cyberdeck__note, under 400 characters, in this shape: 'fleet check-in: <hosts up/down>, <services down or all up>, <repos with unpushed work>, <oldest TODO item worth attention>'. If a tool fails, say which in the note. Do not start any other work.";
+  "Daily fleet check-in. Use your cyberdeck tools only (no guessing), always with brief: true: call cyberdeck__fleet_status, cyberdeck__services (probe: true), cyberdeck__repos (kind: 'unpushed') and cyberdeck__todo. Then call cyberdeck__note exactly once with ONE line under 400 characters in this shape: 'fleet check-in: <hosts up/down>, <services down or all up>, <repos with unpushed work>, <oldest TODO item worth attention>'. Nobody reads your final answer: the note is the only output of this run, and the run has failed if cyberdeck__note was not called. If a tool fails, say which in the note. Do not start any other work.";
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /** Human summary of a schedule source, like the agents server's own trigger pages. */
@@ -403,9 +403,10 @@ export class SeedBridge {
 
   /**
    * Make sure the daily fleet check-in schedule trigger exists on the agent (idempotent: reused by
-   * name). The agent runs it with the cyberdeck MCP tools and leaves one note in the Deck inbox.
+   * name, and its prompt is rewritten when it differs from DOGFOOD_PROMPT). The agent runs it with the
+   * cyberdeck MCP tools and leaves one note in the Deck inbox.
    */
-  async dogfood(opts: DogfoodOptions = {}): Promise<DogfoodStatus & { created: boolean }> {
+  async dogfood(opts: DogfoodOptions = {}): Promise<DogfoodStatus & { created: boolean; updated: boolean }> {
     const agentId = this.#state.agentId;
     if (!agentId) throw new SeedError("no agent set up: run `cyberdeck seed setup`");
     const timeOfDay = opts.timeOfDay?.trim() || "07:00";
@@ -414,6 +415,13 @@ export class SeedBridge {
     const existing = await this.#findDogfoodTrigger(agentId);
     let trigger = existing;
     let created = false;
+    let updated = false;
+    if (trigger && typeof trigger.prompt === "string" && trigger.prompt !== DOGFOOD_PROMPT) {
+      // The prompt ships with Cyberdeck: a trigger made by an older build gets the current wording.
+      const res = await this.action<{ trigger?: TriggerInfo }>({ _: "UpdateAgentTrigger", triggerId: trigger.id, patch: { prompt: DOGFOOD_PROMPT } });
+      trigger = { ...trigger, ...(res.trigger ?? {}), prompt: DOGFOOD_PROMPT };
+      updated = true;
+    }
     if (!trigger) {
       const res = await this.action<{ trigger: TriggerInfo }>({
         _: "CreateAgentTrigger",
@@ -432,7 +440,7 @@ export class SeedBridge {
     if (this.#state.dogfoodTriggerId !== trigger.id) { this.#state.dogfoodTriggerId = trigger.id; this.#save(); }
     const value = this.#toDogfood(trigger);
     this.#dogfood = { value, checkedAt: Date.now(), agentId };
-    return { ...value, created };
+    return { ...value, created, updated };
   }
 
   /** The shape the Casework app and `/api/state` expect. */
@@ -456,6 +464,8 @@ export class SeedBridge {
     const mcp: SetupResult["mcp"] = { name: MCP_SERVER_NAME, url: this.mcpUrl, state: mcpRes?.server?.status?.state, error: mcpRes?.server?.status?.error, tools: Array.isArray(mcpRes?.server?.tools) ? mcpRes!.server!.tools!.length : undefined };
     this.#state.mcpRegisteredAt = Date.now();
     this.#state.mcpTools = (await this.#ownTools().catch(() => [])).join(",") || undefined;
+    // Persist now: the agent step below can fail (no model provider yet on a fresh identity) and the MCP record is already on the server.
+    this.#save();
     if (mcp.state === "error") warnings.push(`MCP discovery failed: ${mcp.error ?? "unknown"} (the server record is saved; it retries on the next connect)`);
 
     // 2. The agent: keep, adopt the Casework Companion, or create.
@@ -483,6 +493,9 @@ export class SeedBridge {
       const created = await this.action<{ agentId: string }>({
         _: "CreateAgent",
         definition: { name, systemPrompt: fleetPrompt(name), modelProvider: this.config.modelProvider, model: this.config.model, mcpServers: [MCP_SERVER_NAME] },
+      }).catch((e: unknown) => {
+        if (e instanceof SeedError && /provider not found/i.test(e.message)) throw new SeedError(`${e.message}: this identity has no model provider named "${this.config.modelProvider}" on ${this.config.agentsUrl}. Run \`cyberdeck seed login\` (Sign in with ChatGPT), then \`cyberdeck seed setup\` again; the MCP server is already registered.`, e.status, e.code);
+        throw e;
       });
       this.#state.agentId = created.agentId;
       this.#state.sessionId = undefined;
@@ -778,7 +791,7 @@ export class SeedBridge {
     const out: LoginStatus = { loginId: r.loginId, status: r.status, ...(r.secretName ? { secretName: r.secretName } : {}), ...(r.error ? { error: r.error } : {}) };
     if (r.status === "completed" && r.secretName) {
       const type = this.#state.login?.providerType ?? "openai";
-      await this.action({ _: "SetModelProvider", provider: { name: this.config.modelProvider, type, authMode: "subscription", secretRefs: { oauth: r.secretName } } });
+      await this.action({ _: "SetModelProvider", name: this.config.modelProvider, provider: { name: this.config.modelProvider, type, authMode: "subscription", secretRefs: { oauth: r.secretName } } });
       out.provider = this.config.modelProvider;
       this.#state.login = undefined;
       this.#save();

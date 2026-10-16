@@ -188,7 +188,7 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
 
   server.tool(
     "todo",
-    "The running handoff (handoff/TODO.md): dated entries of unfinished work across every host and repo, grouped by section. `query` filters entries by substring.",
+    "The running handoff (handoff/TODO.md): dated entries of unfinished work across every host and repo, grouped by section. `query` filters entries by substring. The brief names the newest and the oldest entry.",
     { query: z.string().optional().describe("Case-insensitive substring to keep only matching entries"), brief: BRIEF },
     async ({ query, brief }) => {
       const blocked = needDeck(); if (blocked) return blocked;
@@ -196,11 +196,14 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
       const q = query?.toLowerCase();
       const todo = q ? { sections: all.sections.map((s) => ({ ...s, entries: s.entries.filter((e) => e.text.toLowerCase().includes(q)) })).filter((s) => s.entries.length) } : all;
       const entries = todo.sections.flatMap((s) => s.entries);
-      const newest = [...entries].sort((a, b) => b.date.localeCompare(a.date))[0];
+      const byDate = [...entries].sort((a, b) => b.date.localeCompare(a.date));
+      const newest = byDate[0];
+      const oldest = byDate[byDate.length - 1];
+      // The oldest entry is the one the owner keeps asking about ("what has been waiting longest?"): say it too.
       const sentence = entries.length
-        ? `${plural(entries.length, "handoff entry", "handoff entries")}${q ? ` mention "${query}"` : ""} in ${plural(todo.sections.length, "section")}; the newest, from ${newest.date}, says: ${plain(newest.text)}`
+        ? `${plural(entries.length, "handoff entry", "handoff entries")}${q ? ` mention "${query}"` : ""} in ${plural(todo.sections.length, "section")}; the newest, from ${newest.date}, says: ${plain(newest.text)}${oldest !== newest ? `; the oldest, from ${oldest.date}, says: ${plain(oldest.text)}` : ""}`
         : `The handoff list has no entries${q ? ` mentioning "${query}"` : ""}.`;
-      return spoken(sentence, todo, brief, { entries: entries.length, sections: todo.sections.length });
+      return spoken(sentence, todo, brief, { entries: entries.length, sections: todo.sections.length, ...(newest ? { newest: newest.date, oldest: oldest.date } : {}) });
     }
   );
 
@@ -243,15 +246,16 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
 
   server.tool(
     "repos",
-    "Git repos this node (or a paired node) indexed under its roots, with risk: at-risk = work that exists nowhere else (remote-less or unpushed), attention = dirty/stashed/behind, safe. `ahead` counts commits on any local branch that no remote has.",
+    "Git repos this node (or a paired node) indexed under its roots, with risk: at-risk = work that exists nowhere else (remote-less or unpushed), attention = dirty/stashed/behind, safe. `ahead` counts commits on any local branch that no remote has. `kind` narrows to unpushed, remote-less or dirty repos; the brief says how many of each.",
     {
       risk: z.enum(["at-risk", "attention", "safe", "all"]).default("at-risk").describe("Which risk class to list; default at-risk"),
+      kind: z.enum(["any", "unpushed", "remote-less", "dirty"]).default("any").describe("unpushed = local commits no remote has; remote-less = no remote at all; dirty = uncommitted or untracked files"),
       node: z.string().optional().describe("Name of a paired node to ask instead of this one"),
       query: z.string().optional().describe("Substring of the repo path"),
       limit: z.number().int().min(1).max(REPOS_MAX_LIMIT).default(REPOS_DEFAULT_LIMIT),
       brief: BRIEF,
     },
-    async ({ risk, node, query, limit, brief }) => {
+    async ({ risk, kind, node, query, limit, brief }) => {
       let rows: RepoOut[];
       if (node && node.toLowerCase() !== cfg.nodeName.toLowerCase()) {
         const peer = peers().find((n) => n.name.toLowerCase() === node.toLowerCase());
@@ -267,10 +271,21 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
         rows = (db.query("SELECT * FROM repos ORDER BY path").all() as RepoRow[]).map(parseRepo);
       }
       const q = query?.toLowerCase();
-      const filtered = rows.filter((r) => (risk === "all" || r.risk === risk) && (!q || r.path.toLowerCase().includes(q)));
+      const isUnpushed = (r: RepoOut) => (r.ahead ?? 0) > 0;
+      const isRemoteless = (r: RepoOut) => !(Array.isArray(r.remotes) && r.remotes.length);
+      const isDirty = (r: RepoOut) => (r.dirty_files ?? 0) + (r.untracked_files ?? 0) > 0;
+      const ofKind = (r: RepoOut) => kind === "any" || (kind === "unpushed" ? isUnpushed(r) : kind === "remote-less" ? isRemoteless(r) : isDirty(r));
+      const filtered = rows.filter((r) => (risk === "all" || r.risk === risk) && ofKind(r) && (!q || r.path.toLowerCase().includes(q)));
       const label = risk === "all" ? "indexed repos" : risk === "at-risk" ? "repos at risk" : risk === "attention" ? "repos needing attention" : "safe repos";
-      const sentence = `${node ?? cfg.nodeName} has ${filtered.length} ${label}${q ? ` matching "${query}"` : ""}${filtered.length ? `, such as ${listOf(filtered.slice(0, 3).map((r) => r.name), 3)}` : ""}.`;
-      return spoken(sentence, { node: node ?? cfg.nodeName, risk, total: filtered.length, items: filtered.slice(0, limit) }, brief, { node: node ?? cfg.nodeName, risk, total: filtered.length });
+      const kindLabel = kind === "any" ? "" : kind === "unpushed" ? " with unpushed commits" : kind === "remote-less" ? " with no remote" : " with uncommitted work";
+      const unpushed = filtered.filter(isUnpushed);
+      const remoteless = filtered.filter(isRemoteless);
+      // The at-risk brief breaks the set down: the owner wants to know what is unpushed vs what has no remote at all, by name.
+      const breakdown = kind === "any" && (unpushed.length || remoteless.length)
+        ? [unpushed.length ? `${unpushed.length} with unpushed commits (${listOf(unpushed.map((r) => r.name), 4)})` : "", remoteless.length ? `${remoteless.length} with no remote (${listOf(remoteless.map((r) => r.name), 4)})` : ""].filter(Boolean).join(", ")
+        : "";
+      const sentence = `${node ?? cfg.nodeName} has ${filtered.length} ${label}${kindLabel}${q ? ` matching "${query}"` : ""}${breakdown ? `: ${breakdown}` : filtered.length ? `, such as ${listOf(filtered.slice(0, 3).map((r) => r.name), 3)}` : ""}.`;
+      return spoken(sentence, { node: node ?? cfg.nodeName, risk, kind, total: filtered.length, unpushed: unpushed.length, remoteless: remoteless.length, items: filtered.slice(0, limit) }, brief, { node: node ?? cfg.nodeName, risk, kind, total: filtered.length, unpushed: unpushed.length, remoteless: remoteless.length });
     }
   );
 

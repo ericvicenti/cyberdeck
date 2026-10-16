@@ -1,5 +1,9 @@
 # Casework Desk as a Cyberdeck client
 
+A standalone macOS client is in [`desktop/macos`](../desktop/macos/README.md): fullscreen native
+launcher, controller navigation, native Afterglow playback and local ARM64 retro games. Web-only
+apps use an explicit compatibility view. The sections below describe the separate iOS client.
+
 Casework Desk is Eric's server-driven Expo app for iPad and iPhone (source: `~/Code/remote-control`,
 TestFlight 1.0.0 (2)). It trusts one "workflow server" that supplies screens (TSX experiences),
 receives device events and uploads, and can invoke native actions. Every Cyberdeck node is such a
@@ -92,8 +96,13 @@ credential stays on the node. Without a bridge the tab says so and every other t
 The app's AI call button talks to a Seed agent through this node (full design in `docs/VOICE.md`).
 The flow is the one the shipped app already implements: `GET /api/voice/config` → when `provider`
 is `livekit`, `POST /api/voice/livekit` → join the returned LiveKit room with the mic on and send
-"Hi" on the `lk.chat` topic. Both routes, plus `/api/voice/status`, `/api/voice/transcript` and
-`/api/voice/session/reset`, are open to the pairing key; `/api/voice/setup` needs the node token.
+"Hi" on the `lk.chat` topic. The Talk tab offers hands-free and push-to-talk (hold TALK to open the mic,
+`call.mute` on press-in / press-out), and the screen's tab row shows the call state on the Talk tab from any tab
+(docs/VOICE.md, "Hands-free and push-to-talk"). There is no separate web build of the app: the browser client is
+the Cyberdeck Desk (`#/desk`, docs/VOICE.md, "The web Casework client is this Desk"). Both routes, plus `/api/voice/status`, `/api/voice/transcript` and
+`/api/voice/session/reset`, are open to the pairing key; `/api/voice/setup` needs the node token. A
+node without a Seed bridge relays these routes to the paired node that has one (docs/VOICE.md,
+"Nodes without voice"), so the app places calls whichever node it is paired with.
 `voice.configured` on `/api/state` and in the `welcome` frame reports whether calls work (identity
 loaded, agents server up with voice, agent set up by `cyberdeck seed setup`); when it is false the
 `reason` says what is missing. Device-to-console WebRTC calls are answered by the Kitchen sink console (above).

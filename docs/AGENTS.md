@@ -34,11 +34,11 @@ MCP server, and grants it to the voice agent; see `docs/VOICE.md`).
 | `fleet_status` | every host in the manifest with tailnet liveness, the Deck repo's sync state, open handoff count (`deck status`) | no |
 | `hosts` | the manifest: kind, OS, ssh alias, tailnet name, roles, agents, Cyberdeck URL, expected services | no |
 | `projects` | the project tree; with `dir`, the project owning that directory | no |
-| `todo` | `handoff/TODO.md` by section; `query` filters entries | no |
+| `todo` | `handoff/TODO.md` by section; `query` filters entries; the brief names the newest and the oldest entry | no |
 | `handoff` | the per-agent `handoff/<host>-<agent>.md` notes | no |
 | `sessions` | search the cross-host cc/cx session index (`query`, `host`, `tool`) | no |
 | `sessions_search` | words matched across title, folder, project, branch and id (`query`, `host`, `tool`, `limit` ≤ 50, default 8), newest first, each with `spoken` and a `resume` hint (`command` on its host; for other hosts `ssh -t <alias> …` and `deck sessions pull <id>`), plus a `brief` | no |
-| `repos` | indexed repos with risk; `risk` (default `at-risk`), `node` (a paired node by name, fetched over the fleet token), `query`, `limit` | no |
+| `repos` | indexed repos with risk; `risk` (default `at-risk`), `kind` (`unpushed` / `remote-less` / `dirty`), `node` (a paired node by name, fetched over the fleet token), `query`, `limit`; the at-risk brief counts and names the unpushed and the remote-less ones | no |
 | `repos_detail` | one indexed repo read live with git (`repo` = folder name, path or part of one; `node` = a paired node, via its `GET /api/repos/detail`): branch, upstream, ahead/behind, dirty files (first 30), stashes, last commit, local branches no remote has, and a spoken `brief` | no |
 | `services` | last service probe; `probe: true` runs one now (up to 60 s) | no |
 | `service_logs` | recent log lines of one manifest service on its host (`host`, `name`, `lines` ≤ 500): journal, launchd stdout/stderr files, docker logs | no |
