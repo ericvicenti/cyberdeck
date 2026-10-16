@@ -55,6 +55,9 @@ export interface CyberdeckConfig {
   backup?: { targets: string[] };
   /** Seed agents bridge (voice): which agents server to sign into and as whom. See docs/VOICE.md. */
   seed?: Partial<SeedConfig>;
+  /** The MCP server (docs/AGENTS.md). `nodeTools: false` withholds the shell / file / deck_context tools
+   *  that give a Seed agent the same reach on this machine as cc and cx have (default on). */
+  mcp?: { nodeTools?: boolean };
 }
 
 /** Resolved Seed bridge settings: defaults, then `config.seed`, then the CYBERDECK_SEED_* env overrides. */
@@ -69,15 +72,35 @@ export interface SeedConfig {
   /** Model used when setup has to create the "Cyberdeck" agent. */
   modelProvider: string;
   model: string;
+  /** Reasoning level the harness agent runs at (a level the model supports; "" leaves the provider default). */
+  reasoningLevel: string;
+  /** A node identity for machines without a Seed vault: 32 bytes of hex, created by `cyberdeck seed keygen`.
+   *  Used when the file exists and CYBERDECK_SEED_KEY_SEED is unset; the vault account `identity` otherwise. */
+  keyFile: string;
+  /** Extra memory-pack sources synced into the agents' ~/memory/fleet/notes (directories of markdown files). */
+  memoryDirs: string[];
 }
 
-export const SEED_DEFAULTS: SeedConfig = { agentsUrl: "http://127.0.0.1:3053", identity: "main", modelProvider: "OpenAI", model: "gpt-6-sol" };
+export const SEED_DEFAULTS: SeedConfig = {
+  agentsUrl: "http://127.0.0.1:3053", identity: "main", modelProvider: "OpenAI", model: "gpt-6-sol", reasoningLevel: "medium",
+  keyFile: join(CYBERDECK_HOME, "seed-key"),
+  memoryDirs: [],
+};
 
-export function seedConfig(cfg: Pick<CyberdeckConfig, "seed">, env: NodeJS.ProcessEnv = process.env): SeedConfig {
-  const fromFile = Object.fromEntries(Object.entries(cfg.seed ?? {}).filter(([, v]) => v !== undefined && v !== null && v !== ""));
-  const out: SeedConfig = { ...SEED_DEFAULTS, ...fromFile };
+/** Claude Code's auto-memory directory for a working directory (`~/.claude/projects/<cwd slug>/memory`). */
+export function claudeMemoryDir(cwd: string): string {
+  return join(homedir(), ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"), "memory");
+}
+
+export function seedConfig(cfg: Pick<CyberdeckConfig, "seed"> & { roots?: string[] }, env: NodeJS.ProcessEnv = process.env): SeedConfig {
+  // Empty strings are "unset" except reasoningLevel, where "" deliberately means the provider default.
+  const fromFile = Object.fromEntries(Object.entries(cfg.seed ?? {}).filter(([k, v]) => v !== undefined && v !== null && (v !== "" || k === "reasoningLevel")));
+  const root = cfg.roots?.[0] ?? join(homedir(), "Code");
+  const out: SeedConfig = { ...SEED_DEFAULTS, memoryDirs: [claudeMemoryDir(root)], ...fromFile };
   if (env.CYBERDECK_SEED_AGENTS_URL) out.agentsUrl = env.CYBERDECK_SEED_AGENTS_URL;
   if (env.CYBERDECK_SEED_IDENTITY) out.identity = env.CYBERDECK_SEED_IDENTITY;
+  if (env.CYBERDECK_SEED_MODEL) out.model = env.CYBERDECK_SEED_MODEL;
+  if (env.CYBERDECK_SEED_REASONING !== undefined) out.reasoningLevel = env.CYBERDECK_SEED_REASONING;
   out.agentsUrl = out.agentsUrl.replace(/\/+$/, "");
   return out;
 }

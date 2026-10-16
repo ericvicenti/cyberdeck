@@ -45,8 +45,12 @@ Cyberdeck manages itself.
 The prompt bar at the bottom of every view starts a **Seed agents** conversation by default. It
 chooses a reachable fleet node with a configured Seed server and signing identity; Yacht already
 hosts one. A query creates a durable session on that server, opens its replies in Sessions, and
-supports follow-up messages, history, stop, rename and deletion. Queries use a separate Cyberdeck
-Queries agent so voice calls and their short spoken-reply instructions remain independent.
+supports follow-up messages, history, stop, rename and deletion. Queries go to a separate harness
+agent (`Cyberdeck` on the server) that Cyberdeck configures like the terminal agents: a system
+prompt carrying this node's `~/Code/AGENTS.md` and `Deck/AGENTS.md`, a memory pack with Claude
+Code's project notes, the configured model and reasoning level, and MCP tools that reach the
+machine (shell, files, `deck_context`) besides the deck tools. The voice companion keeps its spoken
+persona. `cyberdeck seed sync` reapplies all of it; see docs/AGENTS.md "The harness".
 
 Use `seed:`, `cc:`, `cx:` or `$` to choose Seed, Claude Code, Codex or a shell explicitly. The agent
 chip and default-preference control offer the same choices (shell is per query). `@node` pins the

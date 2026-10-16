@@ -43,7 +43,12 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
     setTimeout(() => {
       bridge.refreshMcp()
         .then((r) => { if (r === "refreshed") console.log("seed: MCP tool list changed; re-registered with the agents server"); })
-        .catch((err) => console.error("seed: MCP refresh failed:", err instanceof Error ? err.message : err));
+        .catch((err) => console.error("seed: MCP refresh failed:", err instanceof Error ? err.message : err))
+        // Then the harness: a deploy may have changed the prompt, the pack sources, or the model.
+        .then(() => bridge.queryReady())
+        .then((ready) => (ready ? bridge.syncHarness() : null))
+        .then((r) => { if (r) for (const a of r.agents) if (a.definition.length || a.memory.written || a.memory.deleted) console.log(`seed: harness sync ${a.role} ${a.agentId}: ${a.definition.join(",") || "definition unchanged"}; memory ${a.memory.written} written, ${a.memory.deleted} deleted`); })
+        .catch((err) => console.error("seed: harness sync failed:", err instanceof Error ? err.message : err));
     }, 5000).unref?.();
   }
   app.get("/api/voice/config", async (c) => {
@@ -112,6 +117,38 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
   });
 
   // Registers this daemon's MCP server with the agents server and picks (or creates) the agent.
+  // The harness: prompt + memory pack + definition of the agents, from this node's files.
+  app.get("/api/voice/harness", async (c) => {
+    try { return c.json(await bridge.harnessStatus()); }
+    catch (e) { return c.json(errorBody(e), errorStatus(e)); }
+  });
+  app.get("/api/voice/harness/prompt", (c) => c.text(bridge.harnessPromptText()));
+  app.post("/api/voice/harness/sync", async (c) => {
+    if (!deps.isFullAuth(c)) return c.json({ error: "full authentication required" }, 403);
+    const body = await c.req.json().catch(() => ({}));
+    try { return c.json(await bridge.syncHarness({ voice: body?.voice === true, force: body?.force === true })); }
+    catch (e) { console.error("seed: harness sync failed:", e instanceof Error ? e.message : e); return c.json(errorBody(e), errorStatus(e)); }
+  });
+  // Node identity and provider sign-in (machines without a Seed vault, docs/VOICE.md).
+  app.post("/api/voice/keygen", async (c) => {
+    if (!deps.isFullAuth(c)) return c.json({ error: "full authentication required" }, 403);
+    const body = await c.req.json().catch(() => ({}));
+    try { const r = bridge.keygen({ force: body?.force === true }); return c.json({ ...r, ...(await bridge.status()).identity }); }
+    catch (e) { return c.json(errorBody(e), 500); }
+  });
+  app.get("/api/voice/providers", async (c) => {
+    try { return c.json({ providers: await bridge.providers() }); }
+    catch (e) { return c.json(errorBody(e), errorStatus(e)); }
+  });
+  app.post("/api/voice/login", async (c) => {
+    if (!deps.isFullAuth(c)) return c.json({ error: "full authentication required" }, 403);
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      if (typeof body?.code === "string" && body.code.trim()) return c.json(await bridge.loginSubmit(body.code, typeof body.loginId === "string" ? body.loginId : undefined));
+      if (body?.status === true) return c.json(await bridge.loginStatus(typeof body.loginId === "string" ? body.loginId : undefined));
+      return c.json(await bridge.loginStart(typeof body?.providerType === "string" ? body.providerType : undefined));
+    } catch (e) { return c.json(errorBody(e), errorStatus(e)); }
+  });
   app.post("/api/voice/setup", async (c) => {
     if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);
     const body = await c.req.json().catch(() => ({}));
