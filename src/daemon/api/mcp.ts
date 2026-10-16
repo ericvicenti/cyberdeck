@@ -23,6 +23,7 @@ import { peerFetch, type NodeRow } from "./fleet";
 import { runScan, isScanRunning } from "../indexer/scan";
 import { resolveService, serviceLogs, restartService, restartBudget, type ManifestHost, type ServiceTarget } from "../servicectl";
 import { matchRepo, repoDetail, type RepoDetail } from "../repodetail";
+import { registerNodeTools } from "./mcp-node";
 
 export const MCP_PATH = "/api/mcp";
 export const MCP_SERVER_NAME = "cyberdeck";
@@ -47,6 +48,12 @@ you can say as-is). \`sessions_search\` finds a past cc/cx session and tells the
 \`collab_run\`, and read its result with \`run_log\`. When \`services\` shows something down, read
 \`service_logs\` first and say what you found; call \`services_restart\` only after the owner agrees. \`todo_add\` / \`todo_done\` keep the handoff list current (confirm before removing), \`handoff_note\` records what you did on a host, and \`note\` drops a line into the owner's inbox that
 every agent reads at session start. All times are ISO 8601 or Unix milliseconds.
+
+On this node the server also carries the reach a terminal coding agent has: \`shell\` (a command through the owner's
+login shell on this node, or on another fleet host with \`host\`), \`read_file\`, \`write_file\`, \`edit_file\`, \`list_dir\`
+and \`grep\` on this node's filesystem, and \`deck_context\` (the \`deck context\` briefing cc and cx run first; start
+there). Results are bounded to about 6 KB: read in pieces (\`offset\`), ask for the tail or head, and page through an
+\`outputFile\` with \`read_file\` rather than re-running a command. Writes and commands are audited.
 
 Every tool takes \`brief: true\`: then it answers with one spoken sentence instead of the data (say it as-is), with the
 key numbers as structured content. Use it on a voice call unless the owner asks for details; without it, object
@@ -540,6 +547,16 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
     }
   );
 
+  if (cfg.mcp?.nodeTools !== false) {
+    registerNodeTools(server, cfg, control, {
+      hosts: () => (control.fleetDir() ? control.cached<ManifestHost[]>("hosts", ["hosts", "--json"], []) : Promise.resolve([])),
+      deckContext: async (dir) => {
+        if (!control.fleetDir()) return null;
+        const r = await control.cli(dir ? ["context", dir] : ["context"]);
+        return r ? { code: r.code, out: r.out, err: r.err } : { code: 1, out: "", err: "deck CLI did not answer" };
+      },
+    });
+  }
   return server;
 }
 

@@ -30,7 +30,7 @@ import { registerCaseworkRoutes } from "./api/casework";
 import { registerVoiceRoutes } from "./api/voice";
 import { SeedBridge, SeedError } from "./seed";
 import { nodeStatus } from "./status";
-import { registerSessionRoutes } from "./api/sessions";
+import { registerSessionRoutes, parseLastJson } from "./api/sessions";
 import { registerNetworkRoutes } from "./api/network";
 import { registerDashboardRoutes } from "./api/dashboard";
 import { registerBrowserRoutes } from "./api/browser";
@@ -228,7 +228,7 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   registerCmuxRoutes(app);
   const isFullAuth = (c: { req: { raw: Request } }) => { const m = authByReq.get(c.req.raw)?.method; return m === "token" || m === "tailscale"; };
   // Seed agents bridge: voice calls from the Casework app / web Desk go to a Seed agent (docs/VOICE.md).
-  const seed = new SeedBridge({ config: seedConfig(cfg), port: cfg.port, token, home: opts.seed?.home, companionFile: opts.seed?.companionFile, runtimeFile: opts.seed?.runtimeFile });
+  const seed = new SeedBridge({ config: seedConfig(cfg), port: cfg.port, token, home: opts.seed?.home, companionFile: opts.seed?.companionFile, runtimeFile: opts.seed?.runtimeFile, roots: cfg.roots, fleetDir: cfg.fleetDir, nodeTools: cfg.mcp?.nodeTools !== false });
   casework = registerCaseworkRoutes(app, { token, nodeName: cfg.nodeName, kiosk: cfg.kiosk?.enabled, upgradeWebSocket, isFullAuth, experiencesDir: opts.caseworkExperiencesDir, key: opts.caseworkKey, voice: () => seed.voiceSummary(), secureOrigin: () => ts.serveOrigin(cfg.port), seedBridge: cfg.casework });
   registerDesktopRoutes(app, cfg, upgradeWebSocket, isFullAuth);
   registerVoiceRoutes(app, seed, { isFullAuth, serveOrigin: (port) => ts.serveOrigin(port) });
@@ -243,7 +243,10 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   const sessions = new SessionManager(db);
   sessions.recover().catch((err) => console.error("session recovery failed:", err));
   setUpdateGuard(() => { const n = sessions.fragileCount(); return n ? `${n} live session(s) would be killed` : null; });
-  registerSessionRoutes(app, sessions, upgradeWebSocket, (c) => Boolean(authByReq.get(c.req.raw)), seed);
+  registerSessionRoutes(app, sessions, upgradeWebSocket, (c) => Boolean(authByReq.get(c.req.raw)), seed, {
+    nodeName: cfg.nodeName,
+    project: async (dir) => { if (!control.fleetDir()) return null; const r = await control.cli(["projects", "--for", dir, "--json"]); return r ? parseLastJson(r.out) : null; },
+  });
 
   // Remote browser (persistent headless Chromium per profile) + the Cloud AI archive that drives it.
   registerBrowserRoutes(app, browsers, upgradeWebSocket, (c) => Boolean(authByReq.get(c.req.raw)));

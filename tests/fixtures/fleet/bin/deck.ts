@@ -15,6 +15,8 @@ const out: Record<string, unknown> = {
   "collab runs": [],
   services: { probedAt: "2026-10-07T00:00:00Z", rows: [{ host: "test-node", service: "x", type: "launchd", state: "active", ok: true }, { host: "other", service: "web-api", type: "systemd", state: "inactive", ok: false }, { host: "other", service: "db", type: "docker", state: "running", ok: true }] },
 };
+if (cmd === "context") { console.log(`host: test-node   cwd: ${sub ?? "~/Code"}   project: demo (Demo)\n\nhandoff (1 entry):\n- 2026-10-07 **Demo** thing\n\ninbox: empty`); process.exit(0); }
+if (cmd === "projects" && sub === "--for") { console.log(JSON.stringify(process.argv[4]?.includes("demo") ? (out.projects as unknown[])[0] : null)); process.exit(0); }
 const key = cmd === "collab" ? `collab ${sub}` : cmd;
 if (cmd === "collab" && sub === "add") { console.log("t2"); process.exit(0); }
 if (cmd === "todo" && (sub === "add" || sub === "done") || cmd === "handoff" && sub === "note") {
