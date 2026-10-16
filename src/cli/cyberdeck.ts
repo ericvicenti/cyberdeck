@@ -157,12 +157,19 @@ switch (cmd) {
       console.log(`${r.created ? "created" : "already present"}: ${r.name} (${r.triggerId}) ${r.enabled ? "enabled" : "disabled"}, ${r.nextSummary ?? ""}`);
       if (r.lastFiredAt) console.log(`last fired: ${when(r.lastFiredAt)}`);
       if (r.lastError) console.log(`last error: ${r.lastError}`);
+    } else if (sub === "prompt") {
+      // The agent's system prompt vs the fleet persona Cyberdeck ships; --apply writes the persona.
+      const r = await api("/api/voice/prompt", flags.includes("--apply") ? { method: "POST" } : {}).catch(fail);
+      console.log(`agent: ${r.name ?? "?"} (${r.agentId})`);
+      if (r.applied) console.log("prompt: fleet persona applied (the next session uses it; `cyberdeck seed reset-session` starts one)");
+      else if (!r.changed) console.log("prompt: already the fleet persona");
+      else { console.log("prompt: differs from the fleet persona; run `cyberdeck seed prompt --apply` to replace it. Current:"); console.log(r.current.trim() ? r.current : "(empty)"); }
     } else if (sub === "transcript") {
       const r = await api(`/api/voice/transcript?limit=${encodeURIComponent(flags[0] ?? "20")}`).catch(fail);
       for (const m of r.messages ?? []) console.log(`[${new Date(m.at).toLocaleTimeString()}] ${m.role}: ${m.text}`);
       if (!r.messages?.length) console.log("(no messages)");
     } else {
-      console.log("usage: cyberdeck seed status | setup [--new] [--no-adopt] [--name <agent>] | reset-session | call | transcript [n] | dogfood [--tz <zone>] [--at HH:MM]");
+      console.log("usage: cyberdeck seed status | setup [--new] [--no-adopt] [--name <agent>] | reset-session | call | transcript [n] | dogfood [--tz <zone>] [--at HH:MM] | prompt [--apply]");
       process.exit(1);
     }
     break;
@@ -186,6 +193,6 @@ usage: cyberdeck <command>
   update     pull own source, rebuild, restart
   serve      expose the UI as https://<node>.<tailnet> via tailscale serve (serve off: stop)
   mcp        connection details for MCP clients such as Seed Agents (--json)
-  seed       voice bridge to the Seed agents server: status | setup [--new] | reset-session | call | transcript | dogfood
+  seed       voice bridge to the Seed agents server: status | setup [--new] | reset-session | call | transcript | dogfood | prompt [--apply]
   whoami     how the local daemon sees this caller`);
 }

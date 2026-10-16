@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, navigate } from "../lib/api";
 import { CaseworkConsole, inCasework, openNative, type CaseworkApp } from "./CaseworkConsole";
+import { AfterglowFrame } from "./AfterglowFrame";
 type Application = { id: string; name: string; description: string; url: string };
 /** `casework.apps` are the example apps that run natively in the Casework Desk app (the kitchen sink). */
 type Listing = { applications: Application[]; casework?: { apps: CaseworkApp[]; devices: { id: string }[]; kiosk: boolean } };
@@ -26,6 +27,7 @@ export function Applications({ params, onLocked }: { params: URLSearchParams; on
     </div>
     <div className="min-h-0 flex-1"><CaseworkConsole app={example} onLocked={onLocked} /></div>
   </section>;
+  if (app?.id === "afterglow") return <AfterglowFrame key={app.url} url={app.url} params={params} name={app.name} />;
   if (app) return <section className="flex h-full flex-col" aria-label={app.name}>
     <div className="flex shrink-0 items-center gap-4 border-b border-zinc-800 px-4 py-2 text-sm">
       <button onClick={() => navigate("applications")} className="text-cyan-300">← Applications</button>

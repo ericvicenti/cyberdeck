@@ -1,11 +1,21 @@
 // The MCP server at /api/mcp, driven by the same client library Seed Agents uses.
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { join } from "path";
+import { mkdtempSync, readFileSync, existsSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { startTestServer, testConfig, TEST_TOKEN, type TestServer } from "./helpers";
 
 const FLEET_STUB = join(import.meta.dir, "fixtures", "fleet");
+const SCRATCH = mkdtempSync(join(tmpdir(), "cd-servicectl-"));
+const SSH_LOG = join(SCRATCH, "ssh.log");
+process.env.CYBERDECK_AUDIT_LOG = join(SCRATCH, "audit.log");
+process.env.CYBERDECK_SSH = join(import.meta.dir, "fixtures", "ssh-stub.sh");
+process.env.SSH_STUB_LOG = SSH_LOG;
+process.env.CYBERDECK_SERVICECTL_SETTLE_MS = "0";
+const DECK_LOG = join(SCRATCH, "deck.log");
+process.env.DECK_STUB_LOG = DECK_LOG;
 
 let srv: TestServer;
 let bare: TestServer;
@@ -23,15 +33,26 @@ async function call(client: Client, name: string, args: Record<string, unknown> 
 }
 const parsed = (r: ToolResult) => JSON.parse(r.content[0]?.text ?? "null");
 
+const LIVE_REPO = join(SCRATCH, "Livedemo");
 beforeAll(() => {
+  const git = (...a: string[]) => {
+    const r = Bun.spawnSync(["git", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd: SCRATCH });
+    if (r.exitCode !== 0) throw new Error(`git ${a.join(" ")}: ${r.stderr}`);
+  };
+  git("init", "-q", "-b", "main", LIVE_REPO);
+  writeFileSync(join(LIVE_REPO, "a.txt"), "1\n");
+  git("-C", LIVE_REPO, "add", ".");
+  git("-C", LIVE_REPO, "commit", "-qm", "first");
+  writeFileSync(join(LIVE_REPO, "b.txt"), "x\n");
   srv = startTestServer(testConfig({ fleetDir: FLEET_STUB, nodeName: "test-node" }));
   srv.db.query(
     `INSERT INTO repos (path, name, head_branch, dirty_files, remotes, risk, risk_reasons, scanned_at)
      VALUES ('/home/x/Code/lonely', 'lonely', 'main', 2, '[]', 'at-risk', '["no remote"]', 1),
-            ('/home/x/Code/fine', 'fine', 'main', 0, '["origin"]', 'safe', '[]', 1)`
+            ('/home/x/Code/fine', 'fine', 'main', 0, '["origin"]', 'safe', '[]', 1),
+            ('${LIVE_REPO}', 'Livedemo', 'main', 1, '[]', 'at-risk', '["no remote"]', 1)`
   ).run();
   bare = startTestServer(testConfig({ fleetDir: null, nodeName: "bare" }));
-});
+}, 60_000);
 afterAll(() => {
   srv.stop();
   bare.stop();
@@ -71,7 +92,7 @@ describe("mcp tools", () => {
     const client = await connect(srv.base);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["collab_add", "collab_run", "collab_tasks", "fleet_status", "handoff", "hosts", "note", "projects", "repos", "run_log", "scan", "services", "sessions", "status", "todo"]);
+    expect(names).toEqual(["collab_add", "collab_run", "collab_tasks", "fleet_status", "handoff", "handoff_note", "hosts", "note", "projects", "repos", "repos_detail", "run_log", "scan", "service_logs", "services", "services_restart", "sessions", "sessions_search", "status", "todo", "todo_add", "todo_done"]);
     for (const t of tools) {
       expect(t.name).toMatch(/^[a-z0-9_]{1,40}$/);
       expect(t.description?.length ?? 0).toBeGreaterThan(20);
@@ -83,8 +104,8 @@ describe("mcp tools", () => {
     const client = await connect(srv.base);
     const r = parsed(await call(client, "status"));
     expect(r.node.nodeName).toBe("test-node");
-    expect(r.node.repos).toBe(2);
-    expect(r.node.atRisk).toBe(1);
+    expect(r.node.repos).toBe(3);
+    expect(r.node.atRisk).toBe(2);
     expect(r.peers).toEqual([]);
     await client.close();
   });
@@ -92,11 +113,11 @@ describe("mcp tools", () => {
   test("repos defaults to at-risk, filters and limits, and carries structured content", async () => {
     const client = await connect(srv.base);
     const atRisk = await call(client, "repos");
-    expect(parsed(atRisk).items.map((r: any) => r.name)).toEqual(["lonely"]);
-    expect(parsed(atRisk).items[0].risk_reasons).toEqual(["no remote"]);
-    expect((atRisk.structuredContent as any).total).toBe(1);
+    expect(parsed(atRisk).items.map((r: any) => r.name).sort()).toEqual(["Livedemo", "lonely"]);
+    expect(parsed(atRisk).items.find((r: any) => r.name === "lonely").risk_reasons).toEqual(["no remote"]);
+    expect((atRisk.structuredContent as any).total).toBe(2);
     const all = parsed(await call(client, "repos", { risk: "all", limit: 1 }));
-    expect(all.total).toBe(2);
+    expect(all.total).toBe(3);
     expect(all.items.length).toBe(1);
     const byQuery = parsed(await call(client, "repos", { risk: "all", query: "FINE" }));
     expect(byQuery.items.map((r: any) => r.name)).toEqual(["fine"]);
@@ -123,6 +144,42 @@ describe("mcp tools", () => {
     await client.close();
   });
 
+  test("repos_detail reads an indexed repo live, by folder name; refuses unknown ones", async () => {
+    const client = await connect(srv.base);
+    const r = await call(client, "repos_detail", { repo: "livedemo" });
+    const d = parsed(r);
+    expect(d.node).toBe("test-node");
+    expect(d.brief).toBe("Livedemo is on main with 1 uncommitted file, no remote at all.");
+    expect(d.dirty.files).toEqual([{ status: "untracked", path: "b.txt" }]);
+    expect(d.lastCommit.subject).toBe("first");
+    const missing = await call(client, "repos_detail", { repo: "/etc" });
+    expect(missing.isError).toBe(true);
+    expect(missing.content[0].text).toContain("No indexed repo");
+    const ghost = await call(client, "repos_detail", { repo: "lonely" });
+    expect(ghost.isError).toBe(true); // indexed, but the directory is gone
+    expect((await call(client, "repos_detail", { repo: "x", node: "nowhere" })).content[0].text).toContain("No paired node");
+    await client.close();
+  }, 30_000);
+
+  test("GET /api/repos/detail serves a peer's repos_detail and only for indexed repos", async () => {
+    const ok = await srv.api(`/api/repos/detail?repo=${encodeURIComponent(LIVE_REPO)}`);
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).branch).toBe("main");
+    const no = await srv.api("/api/repos/detail?repo=/no/such-repo-zz");
+    expect(no.status).toBe(404);
+    expect((await no.json()).error).toContain("No indexed repo");
+  }, 30_000);
+
+  test("sessions_search returns resume hints and a brief", async () => {
+    const client = await connect(srv.base);
+    const r = parsed(await call(client, "sessions_search", { query: "abc" }));
+    expect(r.total).toBe(1);
+    expect(r.items[0].resume).toEqual({ host: "test-node", command: "cd /tmp && claude --resume abc" });
+    expect(r.brief).toStartWith("One session matches; the newest is Claude Code on test-node");
+    expect(parsed(await call(client, "sessions_search", { tool: "cx" })).total).toBe(0);
+    await client.close();
+  });
+
   test("services returns the probe (fresh when asked)", async () => {
     const client = await connect(srv.base);
     const fresh = parsed(await call(client, "services", { probe: true }));
@@ -132,10 +189,74 @@ describe("mcp tools", () => {
     await client.close();
   });
 
+  test("service_logs and services_restart only reach manifest services", async () => {
+    const client = await connect(srv.base);
+    const refusals: [string, Record<string, unknown>, string][] = [
+      ["service_logs", { host: "nowhere", name: "x" }, "No host"],
+      ["service_logs", { host: "other", name: "rm -rf /" }, "Its services: web-api, db"],
+      ["service_logs", { host: "test-node", name: "cyberdeck" }, "http probe"],
+      ["service_logs", { host: "phone", name: "app" }, "no ssh alias"],
+      ["services_restart", { host: "test-node", name: "sh.cyberdeck.daemon" }, "cut the call off"],
+    ];
+    for (const [tool, args, msg] of refusals) {
+      const r = await call(client, tool, args);
+      expect(r.isError).toBe(true);
+      expect(r.content[0].text).toContain(msg);
+    }
+    expect(existsSync(SSH_LOG)).toBe(false);
+    await client.close();
+  });
+
+  test("service_logs reads a remote service over ssh with a quoted, bounded command", async () => {
+    const client = await connect(srv.base);
+    const r = parsed(await call(client, "service_logs", { host: "OTHER", name: "web-api", lines: 25 }));
+    expect(r).toMatchObject({ host: "other", service: "web-api", type: "systemd", lines: 25, ok: true });
+    expect(r.output).toContain("stub log line from other-alias");
+    const log = readFileSync(SSH_LOG, "utf8");
+    expect(log).toContain("BatchMode=yes other-alias bash -s");
+    expect(log).toContain("journalctl --no-pager -u 'web-api' -n 25");
+    expect(log).toContain("sudo -n journalctl");
+    await client.close();
+  });
+
+  test("services_restart restarts, re-checks, audits, and stops after three in the window", async () => {
+    const client = await connect(srv.base);
+    const r = parsed(await call(client, "services_restart", { host: "other", name: "db", reason: "test" }));
+    expect(r).toMatchObject({ host: "other", service: "db", type: "docker", ok: true, state: "active", attempts: 1 });
+    expect(readFileSync(SSH_LOG, "utf8")).toContain("docker restart 'db'");
+    const audit = readFileSync(process.env.CYBERDECK_AUDIT_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(audit.at(-1)).toMatchObject({ action: "service-restart", by: "mcp: test", host: "other", service: "db", ok: true });
+    await call(client, "services_restart", { host: "other", name: "db" });
+    await call(client, "services_restart", { host: "other", name: "db" });
+    const fourth = await call(client, "services_restart", { host: "other", name: "db" });
+    expect(fourth.isError).toBe(true);
+    expect(fourth.content[0].text).toContain("3 times");
+    await client.close();
+  });
+
+  test("todo_add, todo_done and handoff_note write through the deck CLI", async () => {
+    const client = await connect(srv.base);
+    const added = parsed(await call(client, "todo_add", { text: "**Voice** check the backups", section: "Open" }));
+    expect(added).toMatchObject({ ok: true, section: "Open" });
+    const done = parsed(await call(client, "todo_done", { match: "Demo" }));
+    expect(done).toMatchObject({ ok: true, removed: "- 2026-10-07 **Demo** thing" });
+    const miss = await call(client, "todo_done", { match: "nothing like it" });
+    expect(miss.isError).toBe(true);
+    expect(miss.content[0].text).toContain("no entry contains");
+    expect(parsed(await call(client, "handoff_note", { host: "OTHER", text: "restarted db" }))).toMatchObject({ ok: true, file: "handoff/other-seed.md" });
+    const bad = await call(client, "handoff_note", { host: "nowhere", text: "x y z" });
+    expect(bad.isError).toBe(true);
+    const calls = readFileSync(DECK_LOG, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(calls[0]).toEqual(["todo", "add", "--section", "Open", expect.stringMatching(/^\*\*Voice\*\* check the backups \(seed@[a-z0-9-]+\)$/)]);
+    expect(calls[1]).toEqual(["todo", "done", "Demo"]);
+    expect(calls[3]).toEqual(["handoff", "note", "other", "seed", "restarted db"]);
+    await client.close();
+  });
+
   test("run_log refuses unknown files and reports empty logs", async () => {
     const client = await connect(srv.base);
     const r = parsed(await call(client, "run_log", { id: "nope" }));
-    expect(r).toEqual({ id: "nope", file: "result.md", text: "", size: 0 });
+    expect(r).toEqual({ brief: "result.md of run nope is empty so far.", id: "nope", file: "result.md", text: "", size: 0 });
     const bad = await call(client, "run_log", { id: "../etc", file: "result.md" });
     expect(bad.isError).toBe(true);
     await client.close();
@@ -148,6 +269,74 @@ describe("mcp tools", () => {
     const r = await call(client, "todo");
     expect(r.isError).toBe(true);
     expect(r.content[0].text).toContain("no Deck checkout");
+    await client.close();
+  });
+});
+
+describe("mcp brief mode", () => {
+  const sentence = (r: ToolResult) => {
+    const t = r.content[0]?.text ?? "";
+    expect(r.isError).toBeFalsy();
+    expect(t).not.toContain("\n");
+    expect(t.startsWith("{")).toBe(false);
+    expect(t.length).toBeGreaterThan(10);
+    expect(t.length).toBeLessThan(400);
+    expect((r.structuredContent as any).brief).toBe(t);
+    return t;
+  };
+
+  test("every tool accepts brief", async () => {
+    const client = await connect(srv.base);
+    const { tools } = await client.listTools();
+    for (const t of tools) expect((t.inputSchema as any).properties?.brief?.type, t.name).toBe("boolean");
+    await client.close();
+  });
+
+  test("read tools answer with one spoken sentence and the key numbers", async () => {
+    const client = await connect(srv.base);
+    expect(sentence(await call(client, "status", { brief: true }))).toContain("test-node runs Cyberdeck");
+    const fleet = await call(client, "fleet_status", { brief: true });
+    expect(sentence(fleet)).toContain("2 of 2 hosts online");
+    expect((fleet.structuredContent as any).hostsOnline).toBe(2);
+    expect(sentence(await call(client, "hosts", { brief: true }))).toBe("The fleet manifest lists 3 hosts: test-node (laptop), other (server), phone (phone).");
+    expect(sentence(await call(client, "projects", { brief: true }))).toBe("1 project, 1 active: Demo.");
+    expect(sentence(await call(client, "todo", { brief: true }))).toBe("1 handoff entry in 1 section; the newest, from 2026-10-07, says: Demo thing");
+    expect(sentence(await call(client, "todo", { brief: true, query: "nothing-like-this" }))).toContain("no entries");
+    expect(sentence(await call(client, "handoff", { brief: true }))).toBe("1 agent note: cc on test-node.");
+    expect(sentence(await call(client, "sessions", { brief: true }))).toMatch(/^1 session; the newest is (Claude Code|Codex) on /);
+    const repos = await call(client, "repos", { brief: true });
+    expect(sentence(repos)).toBe("test-node has 2 repos at risk, such as lonely, Livedemo.");
+    expect((repos.structuredContent as any).total).toBe(2);
+    expect(sentence(await call(client, "repos_detail", { repo: "Livedemo", brief: true }))).toContain("Livedemo");
+    expect(sentence(await call(client, "sessions_search", { query: "zzz-none", brief: true }))).toContain("No cc or cx sessions match");
+    const services = await call(client, "services", { probe: true, brief: true });
+    expect(sentence(services)).toContain("3 services checked, 1 down: web-api on other.");
+    expect((services.structuredContent as any).down).toEqual(["web-api on other"]);
+    expect(sentence(await call(client, "collab_tasks", { brief: true }))).toContain("collab task");
+    expect(sentence(await call(client, "scan", { brief: true }))).toMatch(/^(Rescan started on test-node|test-node is already scanning)/);
+    await client.close();
+  });
+
+  test("full answers still carry the data, with the sentence first", async () => {
+    const client = await connect(srv.base);
+    const status = parsed(await call(client, "status"));
+    expect(Object.keys(status)[0]).toBe("brief");
+    expect(status.node.nodeName).toBe("test-node");
+    expect(parsed(await call(client, "hosts")).length).toBe(3);
+    const services = parsed(await call(client, "services"));
+    expect(services.brief).toContain("1 down");
+    expect(services.rows.length).toBe(3);
+    await client.close();
+  });
+
+  test("write tools say what they did", async () => {
+    const client = await connect(srv.base);
+    expect(sentence(await call(client, "todo_add", { text: "**Brief** check", brief: true }))).toBe("Added to the handoff list under Open: Brief check");
+    expect(sentence(await call(client, "todo_done", { match: "Demo", brief: true }))).toBe("Removed from the handoff list: 2026-10-07 Demo thing");
+    expect(sentence(await call(client, "handoff_note", { host: "other", text: "checked", brief: true }))).toBe("Recorded on other's handoff note (handoff/other-seed.md).");
+    expect(sentence(await call(client, "note", { text: "hello **there**", brief: true }))).toBe("Noted in the inbox: hello there");
+    const logs = await call(client, "service_logs", { host: "test-node", name: "x", lines: 5, brief: true });
+    expect(sentence(logs)).toMatch(/^(The last 5 lines of x on test-node end with: |x on test-node has no log lines\.|Could not read the log of x on test-node)/);
     await client.close();
   });
 });

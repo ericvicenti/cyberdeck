@@ -37,8 +37,15 @@ MCP server, and grants it to the voice agent; see `docs/VOICE.md`).
 | `todo` | `handoff/TODO.md` by section; `query` filters entries | no |
 | `handoff` | the per-agent `handoff/<host>-<agent>.md` notes | no |
 | `sessions` | search the cross-host cc/cx session index (`query`, `host`, `tool`) | no |
+| `sessions_search` | words matched across title, folder, project, branch and id (`query`, `host`, `tool`, `limit` ≤ 50, default 8), newest first, each with `spoken` and a `resume` hint (`command` on its host; for other hosts `ssh -t <alias> …` and `deck sessions pull <id>`), plus a `brief` | no |
 | `repos` | indexed repos with risk; `risk` (default `at-risk`), `node` (a paired node by name, fetched over the fleet token), `query`, `limit` | no |
+| `repos_detail` | one indexed repo read live with git (`repo` = folder name, path or part of one; `node` = a paired node, via its `GET /api/repos/detail`): branch, upstream, ahead/behind, dirty files (first 30), stashes, last commit, local branches no remote has, and a spoken `brief` | no |
 | `services` | last service probe; `probe: true` runs one now (up to 60 s) | no |
+| `service_logs` | recent log lines of one manifest service on its host (`host`, `name`, `lines` ≤ 500): journal, launchd stdout/stderr files, docker logs | no |
+| `services_restart` | restart one manifest service on its host (`host`, `name`, `reason`), re-check its state, retry once; ≤ 3 per service per 30 min; refuses this node's own daemon; audited | yes (restarts a service) |
+| `todo_add` | add a dated entry to `handoff/TODO.md` (`text`, optional `section` prefix; default the first section), signed `(seed@<node>)` | yes (Deck repo) |
+| `todo_done` | remove the one `handoff/TODO.md` entry containing `match`; refuses none/several and lists the candidates | yes (Deck repo) |
+| `handoff_note` | prepend a dated line to `handoff/<host>-seed.md` (`host`, `text`); `handoff` returns it next to the cc/cx notes | yes (Deck repo) |
 | `collab_tasks` | the collab queue and its runs | no |
 | `collab_add` | queue a task for cc/cx on a host (`title`, `project`, `host`, `worker`, `body`); returns the id | yes (Deck repo) |
 | `collab_run` | start a queued task on this node, detached; refuses while a run is active | yes (spawns agents) |
@@ -46,7 +53,11 @@ MCP server, and grants it to the voice agent; see `docs/VOICE.md`).
 | `note` | append a dated line to `notes/inbox.md` | yes (Deck repo) |
 | `scan` | rescan this node's roots now | no (indexer) |
 
-Every result is JSON text plus the same object as `structuredContent`. On a node without a
+Every result is JSON text plus the same object as `structuredContent`. Object results start with
+a `brief` sentence a voice agent can read as-is. **Every tool also takes `brief: true`** (voice
+mode): the text is then just that one spoken sentence (what was found, the counts, the names that
+matter) and `structuredContent` carries the sentence plus the key numbers, so a call on a live
+call costs one short turn instead of a page of JSON. On a node without a
 Deck checkout (`fleetDir` unset: the Linux servers today) the deck-backed tools answer with a
 clear error and `status`, `repos`, `scan` still work.
 
@@ -61,6 +72,14 @@ A Seed agent that enables an MCP server gets a grant as strong as `execute` on t
 terminal access: an agent can learn what every machine is doing, queue work for a laptop agent,
 and read the result, but it cannot read arbitrary files, run commands, or touch the terminal
 sessions. Those stay with the humans and the laptop agents. Add tools at that altitude.
+
+`service_logs` and `services_restart` are the one place the agent touches a machine, and they stay
+inside that rule: the target must be a service the fleet manifest lists for that host (`deck hosts
+--json`), the command is a fixed one per service type (`src/shared/services.ts`, the same builders the
+Services view's Logs/Restart buttons use; names quoted, `sudo -n` so nothing prompts), and it runs
+through `bash -s` locally or `ssh -o BatchMode=yes <alias>` (`src/daemon/servicectl.ts`). Restarts
+re-check the state after each attempt (two at most), are limited to three per service per 30
+minutes, and each writes a JSON line to `~/.cyberdeck/audit.log`.
 
 ## Connecting a Seed agent
 

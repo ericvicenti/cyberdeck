@@ -103,6 +103,10 @@ Setup (`POST /api/voice/setup`, node token only) does, in order:
 3. `CreateSession` for the agent (title "Cyberdeck voice"). The companion's own session is not
    reused: Cyberdeck's calls get their own transcript.
 
+The agents server keeps the tool list it discovered when the MCP server was registered, so 5 s after boot the
+daemon compares its own `tools/list` with the fingerprint in `seed.json` (`mcpTools`) and re-sends `SetMcpServer`
+when they differ (`SeedBridge.refreshMcp`): a deploy that adds a tool reaches the companion without a manual setup.
+
 Re-running setup is idempotent for the MCP registration and keeps the agent and session. Rotating
 the node token (`~/.cyberdeck/token`) requires a re-run so the secret on the agents server follows.
 
@@ -116,6 +120,8 @@ the node token (`~/.cyberdeck/token`) requires a re-run so the secret on the age
 | `POST /api/voice/session/reset` | pairing | `{sessionId, previous?, room?}`: a new session for the next call; body `{room?}` names a live call's LiveKit room, which the voice runtime is then switched to the new session (`room: {name, switched, error?}`), so the caller keeps talking |
 | `GET /api/voice/transcript?limit=` | pairing | `{supported: true, sessionId?, messages: [{seq, role, text, at}], hasMoreBefore}`: user/assistant text of the current session (`GetSession`'s tail, cheap) |
 | `POST /api/voice/dogfood` | node token | `{triggerId, name, enabled, lastFiredAt?, lastError?, nextSummary?, created}`: the daily fleet check-in trigger (below); body `{timezone?, timeOfDay?}` |
+| `GET /api/voice/prompt` | node token | `{agentId, name?, current, desired, changed, applied: false}`: the agent's system prompt next to the fleet persona Cyberdeck ships (`fleetPrompt` in `src/daemon/seed.ts`) |
+| `POST /api/voice/prompt` | node token | the same, after writing the persona to the agent when it differs (`applied: true`); the next session uses it |
 | `POST /api/voice/setup` | node token | the setup result above (`{agent: {id, name?, origin: kept\|adopted\|created}, sessionId, mcp: {name, url, state, tools?, error?}, warnings}`); body `{new?, adopt?, name?}` |
 
 `status` also carries `dogfood: {triggerId, name, enabled, lastFiredAt?, lastError?, nextSummary?}`
@@ -137,6 +143,7 @@ cyberdeck seed reset-session   # next call starts a fresh session
 cyberdeck seed call            # smoke test: mint a room and print it (token withheld, profile result included); nothing joins it
 cyberdeck seed transcript [n]  # last n user/assistant messages
 cyberdeck seed dogfood [--tz Europe/Madrid] [--at 07:00]   # daily fleet check-in trigger (idempotent)
+cyberdeck seed prompt [--apply]  # the agent's system prompt vs the fleet persona; --apply writes the persona
 ```
 
 ## Voice profile
@@ -209,6 +216,15 @@ other page advertises `/manifest.webmanifest` (Cyberdeck). The Home page's pairi
 Scan it, sign in (on the tailnet the Tailscale identity is enough), then Share → Add to Home Screen.
 There is no service worker on purpose: the UI must never be served stale after a fleet deploy.
 
+## Fleet / Services / Agents glance
+
+Under the TALK button the Desk shows the same overview the agent reads through its MCP tools
+(`GET /api/control/overview`, allowed for the Casework pairing key; refreshed every 60 s), in three tabs
+that mirror the iPad screen's Fleet and Agents tabs: hosts (down first), services that are down or unknown,
+and live collab tasks plus recent runs. Each tab's chip counts what needs a look, rows open the full view,
+and a "try asking" line suggests the question to put to the agent (`ui/lib/glance.ts`, tests
+`tests/glance.test.ts`). A node without a fleet dir says so instead.
+
 ## Not done
 
 - **Voice profile editing**: Cyberdeck applies the profile but has no UI or route to change it; the
@@ -220,3 +236,12 @@ There is no service worker on purpose: the UI must never be served stale after a
   events arrive on the client (the Desk shows them live and reloads the durable tail when the call
   ends), not through this daemon.
 - No web Desk UI section here: the UI half lives in `ui/` and talks to the same routes.
+
+## The fleet persona
+
+An agent Cyberdeck creates gets `fleetPrompt(name)` as its system prompt; an adopted companion keeps
+whatever prompt it had until `cyberdeck seed prompt --apply` replaces it (never silently: the owner may
+have tuned the agent on the server). The persona makes the agent speak for a voice channel (answer first,
+one or two sentences, no markdown), work from the cyberdeck tools with `brief: true` instead of guessing,
+say what it checked, ask before restarts and collab runs, and leave a trace with `handoff_note`, `note`
+and `todo_add`. Apply, then `cyberdeck seed reset-session` so the next call starts on the new prompt.

@@ -38,6 +38,14 @@ const errorStatus = (e: unknown): 502 | 503 => (e instanceof SeedError && e.stat
 const errorBody = (e: unknown) => ({ error: e instanceof Error ? e.message : String(e) });
 
 export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDeps) {
+  // A deploy may have added MCP tools; the agents server only sees them after a re-registration.
+  if (process.env.NODE_ENV !== "test") {
+    setTimeout(() => {
+      bridge.refreshMcp()
+        .then((r) => { if (r === "refreshed") console.log("seed: MCP tool list changed; re-registered with the agents server"); })
+        .catch((err) => console.error("seed: MCP refresh failed:", err instanceof Error ? err.message : err));
+    }, 5000).unref?.();
+  }
   app.get("/api/voice/config", async (c) => {
     const s = await bridge.status();
     return c.json({
@@ -86,6 +94,19 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
       return c.json(await bridge.dogfood({ timezone: typeof body?.timezone === "string" ? body.timezone : undefined, timeOfDay: typeof body?.timeOfDay === "string" ? body.timeOfDay : undefined }));
     } catch (e) {
       console.error("voice: dogfood failed:", e instanceof Error ? e.message : e);
+      return c.json(errorBody(e), errorStatus(e));
+    }
+  });
+
+  // The companion's system prompt against the fleet persona; POST writes it. Node token only.
+  app.get("/api/voice/prompt", async (c) => {
+    if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);
+    try { return c.json(await bridge.prompt(false)); } catch (e) { return c.json(errorBody(e), errorStatus(e)); }
+  });
+  app.post("/api/voice/prompt", async (c) => {
+    if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);
+    try { return c.json(await bridge.prompt(true)); } catch (e) {
+      console.error("voice: prompt failed:", e instanceof Error ? e.message : e);
       return c.json(errorBody(e), errorStatus(e));
     }
   });

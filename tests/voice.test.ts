@@ -4,7 +4,8 @@
 import { chromium } from "playwright";
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { Database } from "bun:sqlite";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 import * as blobs from "@seed-hypermedia/client/blobs";
 import * as cbor from "@seed-hypermedia/client/cbor";
@@ -14,7 +15,7 @@ import { seedConfig } from "../src/daemon/config";
 import { caseworkAllows } from "../src/daemon/api/casework";
 import { secureCallUrl } from "../src/daemon/api/voice";
 import { Tailscale } from "../src/daemon/tailscale";
-import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME } from "../src/daemon/seed";
+import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME, fleetPrompt } from "../src/daemon/seed";
 import { testConfig, TEST_TOKEN, tmpHomeDir } from "./helpers";
 
 // Deterministic signer; the bridge builds the keypair from this instead of opening the Seed vault.
@@ -283,6 +284,26 @@ describe("configured node", () => {
     const s = await (await req(a, KEY, "/api/voice/status")).json();
     expect(s.profile).toEqual({ voice: "v", speed: 1, runtimeToken: true, source: join(a.home, "companion.json") });
   });
+  test("after a restart the bridge looks the agent's name up once instead of showing only its id", async () => {
+    const restarted = new SeedBridge({ config: seedConfig({ seed: { agentsUrl: voiced.url } }), port: 4777, token: TEST_TOKEN, home: a.home });
+    const before = voiced.actions.filter((x) => x._ === "GetAgent").length;
+    expect((await restarted.status()).agent).toEqual({ id: COMPANION_ID, name: "Casework Companion" });
+    expect((await restarted.status()).agent?.name).toBe("Casework Companion");
+    expect(voiced.actions.filter((x) => x._ === "GetAgent").length).toBe(before + 1);
+  });
+  test("a changed MCP tool list re-registers the server once; an unchanged one does nothing", async () => {
+    const bridge = new SeedBridge({ config: seedConfig({ seed: { agentsUrl: voiced.url } }), port: 4777, token: TEST_TOKEN, home: a.home });
+    const sets = () => voiced.actions.filter((x) => x._ === "SetMcpServer").length;
+    const before = sets();
+    expect(await bridge.refreshMcp(["status", "todo_add"])).toBe("refreshed");
+    expect(await bridge.refreshMcp(["todo_add", "status"])).toBe("unchanged");
+    expect(sets()).toBe(before + 1);
+    expect(JSON.parse(readFileSync(join(a.home, "seed.json"), "utf8")).mcpTools).toBe("status,todo_add");
+    expect(await bridge.refreshMcp(["status", "todo_add", "todo_done"])).toBe("refreshed");
+    expect(sets()).toBe(before + 2);
+    const fresh = new SeedBridge({ config: seedConfig({ seed: { agentsUrl: voiced.url } }), port: 4777, token: TEST_TOKEN, home: mkdtempSync(join(tmpdir(), "cd-seed-")) });
+    expect(await fresh.refreshMcp(["status"])).toBe("skipped");
+  });
   test("livekit with the pairing key returns url/token/room and records the call", async () => {
     const before = voiced.actions.length;
     const r = await req(a, KEY, "/api/voice/livekit", { method: "POST" });
@@ -359,6 +380,22 @@ describe("configured node", () => {
     expect(s.dogfood).toMatchObject({ triggerId: j1.triggerId, name: DOGFOOD_TRIGGER_NAME, enabled: true, nextSummary: "daily at 07:00 Europe/Madrid" });
     expect((await req(a, TEST_TOKEN, "/api/voice/dogfood", { method: "POST", body: JSON.stringify({ timeOfDay: "7am" }) })).status).toBe(502);
   });
+  test("prompt compares the companion's system prompt with the fleet persona and applies it only on POST", async () => {
+    expect((await req(a, KEY, "/api/voice/prompt")).status).toBe(403);
+    const before = await (await req(a, TEST_TOKEN, "/api/voice/prompt")).json();
+    expect(before).toMatchObject({ agentId: COMPANION_ID, name: "Casework Companion", changed: true, applied: false });
+    expect(before.desired).toBe(fleetPrompt("Casework Companion"));
+    expect(before.desired).toContain("wait for a yes");
+    expect(voiced.agents.get(COMPANION_ID)!.systemPrompt).toBe(before.current);
+
+    const applied = await (await req(a, TEST_TOKEN, "/api/voice/prompt", { method: "POST" })).json();
+    expect(applied).toMatchObject({ changed: true, applied: true });
+    expect(voiced.agents.get(COMPANION_ID)!.systemPrompt).toBe(before.desired);
+    expect(voiced.agents.get(COMPANION_ID)!.mcpServers).toContain("cyberdeck");
+    const again = await (await req(a, TEST_TOKEN, "/api/voice/prompt", { method: "POST" })).json();
+    expect(again).toMatchObject({ changed: false, applied: false });
+  });
+
   test("calls follow a continued session and reset mints a new one", async () => {
     const current = JSON.parse(readFileSync(join(a.home, "seed.json"), "utf8")).sessionId as string;
     voiced.sessions.set("session-next", { agentId: COMPANION_ID });

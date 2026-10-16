@@ -128,6 +128,11 @@ test("desk view: talk button and the not-configured card render", async () => {
   expect(await page.textContent('[data-testid="voice-state"]')).toContain("tap to talk");
   expect(await page.textContent('[data-testid="voice-status"]')).toContain("e2e-node");
   expect(await page.textContent('[data-testid="voice-transcript"]')).toContain("transcript");
+  // the Fleet / Services / Agents glance sits under the TALK button; this node has no fleet dir and says so
+  await page.waitForFunction(() => document.querySelector('[data-testid="glance-empty"]')?.textContent?.includes("No fleet dir"));
+  await page.click('[data-testid="glance-tab-services"]');
+  expect(await page.getAttribute('[data-testid="glance-tab-services"]', "aria-selected")).toBe("true");
+  expect(await page.isVisible('[data-testid="glance-services"]')).toBe(true);
   // "Add to Home Screen" from here installs the Desk (its own manifest + icon), and the manifest is served
   expect(await page.getAttribute('link[rel="manifest"]', "href")).toBe("/desk.webmanifest");
   expect(await page.getAttribute('meta[name="apple-mobile-web-app-title"]', "content")).toBe("Desk");
@@ -135,7 +140,7 @@ test("desk view: talk button and the not-configured card render", async () => {
   expect(m.start_url).toBe("/#/desk");
   await page.goto(`${BASE}/#/services`);
   await page.waitForFunction(() => document.querySelector('link[rel="manifest"]')?.getAttribute("href") === "/manifest.webmanifest");
-});
+}, 20000);
 
 test("desk view: a paired node with voice takes the call when this one has none", async () => {
   // the agents server lives on one machine; the Desk finds it through the fleet and proxies there

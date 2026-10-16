@@ -636,7 +636,8 @@ hashes but scans must be fast (300 project dirs ≈ minutes, not hours).
 | POST | `/api/cloud/:provider/sync` | | Pulls every conversation through the logged-in browser profile into `<fleetDir>/cloud/<provider>/<id>.md` + `cloud/index-<provider>.jsonl` (runs in the background; also every 6 h) |
 | GET | `/api/cloud/:provider/conversations` | `?q=` | Archived conversations (index rows, same shape as the Deck session index plus `url`) |
 | GET | `/api/cloud/:provider/conversations/:id` | | `{frontmatter, markdown}` of one archived conversation |
-| POST | `/api/mcp` | JSON-RPC (MCP Streamable HTTP, stateless; GET/DELETE answer 405) | the MCP tool server for Seed Agents and other MCP clients: `status`, `fleet_status`, `hosts`, `projects`, `todo`, `handoff`, `sessions`, `repos`, `services`, `collab_tasks`, `collab_add`, `collab_run`, `run_log`, `note`, `scan` (docs/AGENTS.md); same auth as every `/api` route |
+| POST | `/api/mcp` | JSON-RPC (MCP Streamable HTTP, stateless; GET/DELETE answer 405) | the MCP tool server for Seed Agents and other MCP clients: `status`, `fleet_status`, `hosts`, `projects`, `todo`, `handoff`, `sessions`, `sessions_search`, `repos`, `repos_detail`, `services`, `service_logs`, `services_restart`, `collab_tasks`, `collab_add`, `collab_run`, `run_log`, `note`, `todo_add`, `todo_done`, `handoff_note`, `scan` (docs/AGENTS.md); same auth as every `/api` route |
+| GET | `/api/repos/detail` | `?repo=` (folder name, path or part of one; only indexed repos) | live git detail of one repo, the body of the MCP `repos_detail` tool (a peer's tool calls this); 404 `{error, candidates}` when nothing or several match |
 | GET | `/api/roots` | — | scan roots with last-scan summaries |
 | POST | `/api/roots` | `{path}` | adds root (also persisted to config) |
 | POST | `/api/roots/:id/scan` | `{full?: bool}` | `{jobId}` |

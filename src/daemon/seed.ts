@@ -11,7 +11,7 @@ import type { SessionInfo } from "./sessions";
 import { CYBERDECK_HOME, type SeedConfig } from "./config";
 
 /** Persisted in `${CYBERDECK_HOME}/seed.json`. */
-export type SeedState = { queryAgentId?: string; agentId?: string; sessionId?: string; mcpRegisteredAt?: number; lastCallAt?: number; dogfoodTriggerId?: string };
+export type SeedState = { queryAgentId?: string; agentId?: string; sessionId?: string; mcpRegisteredAt?: number; mcpTools?: string; lastCallAt?: number; dogfoodTriggerId?: string };
 
 export type SeedHealth = { ok: boolean; voice?: boolean; protocol?: number; version?: string; error?: string; checkedAt: number };
 
@@ -126,10 +126,21 @@ function omitUndefined<T>(value: T): T {
   return value;
 }
 
-const systemPrompt = (name: string) =>
-  `You are ${name}, Eric's fleet companion. People reach you by voice through Cyberdeck (the fleet-and-data daemon on Eric's machines) from the Casework iPad app or the web Desk, so your replies are spoken aloud: answer in one or two short sentences, lead with the answer, and skip markdown, lists and code.
+/**
+ * The companion's system prompt: a fleet persona for a voice channel. Applied to the agent
+ * Cyberdeck creates, and to an adopted companion with `cyberdeck seed prompt --apply`
+ * (never silently: the owner may have tuned the agent by hand on the server).
+ */
+export const fleetPrompt = (name: string) =>
+  `You are ${name}, Eric's fleet companion: the voice of Cyberdeck, the daemon on each of Eric's machines (the laptops yacht and starlight, the servers enuc, sentinel, iris and botical, the phone). Eric reaches you by voice from the Casework app on the iPad or the web Desk, so everything you say is read aloud: lead with the answer, one or two short sentences, plain words, no markdown, lists, code or URLs unless he asks for them.
 
-You have the cyberdeck tools: status of this node and its paired nodes, the fleet manifest (hosts, services), the project tree, the handoff TODO, the cross-host coding-agent session index, repo risk, service probes, the collab queue (queue a task for a laptop agent, start a queued task, read a run's log), notes to the inbox, and a rescan. Reach for them before guessing; say when something is not known. Confirm before queueing or starting work.`;
+Work from facts, not memory: call your cyberdeck tools before answering and never guess at the state of a machine, a service or a repo. Pass brief true on every call and read the sentence it returns; ask for the full data only when Eric wants details. Say in a few words what you checked ("I probed the services and read the log on enuc") and name the host and the service when something is down. Keep numbers few and sayable.
+
+Before anything that changes a machine or the shared handoff (restarting a service, queueing or starting a collab task, removing a handoff entry) say what you are about to do and wait for a yes. Reading status, logs, notes, repos and sessions needs no confirmation. Leave a trace: handoff_note for what you did on a host, note for something Eric should see later, todo_add for work someone has to pick up.
+
+When a tool fails, say which one and what it said, retry at most once, and offer the next step. When you do not know, say so plainly.`;
+
+export type PromptResult = { agentId: string; name?: string; current: string; desired: string; changed: boolean; applied: boolean };
 
 export class SeedBridge {
   readonly config: SeedConfig;
@@ -147,6 +158,7 @@ export class SeedBridge {
   #healthInFlight: Promise<SeedHealth> | null = null;
   #dogfood: { value: DogfoodStatus | undefined; checkedAt: number; agentId: string } | null = null;
   #agentName: string | undefined;
+  #agentNameTriedAt = 0;
   #querySetup: Promise<string> | null = null;
 
   constructor(opts: SeedBridgeOptions) {
@@ -272,6 +284,13 @@ export class SeedBridge {
 
   async status(): Promise<SeedStatus> {
     const [signer, health] = await Promise.all([this.signer(), this.health()]);
+    // The name is learned at setup; after a daemon restart, ask the agents server once (best effort).
+    if (signer && health.ok && this.#state.agentId && !this.#agentName && Date.now() - this.#agentNameTriedAt > 5 * 60_000) {
+      this.#agentNameTriedAt = Date.now();
+      await this.action<{ agent: { definition: { name?: unknown } } }>({ _: "GetAgent", agentId: this.#state.agentId })
+        .then((r) => { if (typeof r.agent?.definition?.name === "string") this.#agentName = r.agent.definition.name; })
+        .catch(() => {});
+    }
     const s: SeedStatus = {
       configured: false,
       agentsUrl: this.config.agentsUrl,
@@ -375,6 +394,7 @@ export class SeedBridge {
     });
     const mcp: SetupResult["mcp"] = { name: MCP_SERVER_NAME, url: this.mcpUrl, state: mcpRes?.server?.status?.state, error: mcpRes?.server?.status?.error, tools: Array.isArray(mcpRes?.server?.tools) ? mcpRes!.server!.tools!.length : undefined };
     this.#state.mcpRegisteredAt = Date.now();
+    this.#state.mcpTools = (await this.#ownTools().catch(() => [])).join(",") || undefined;
     if (mcp.state === "error") warnings.push(`MCP discovery failed: ${mcp.error ?? "unknown"} (the server record is saved; it retries on the next connect)`);
 
     // 2. The agent: keep, adopt the Casework Companion, or create.
@@ -401,7 +421,7 @@ export class SeedBridge {
     if (!agent) {
       const created = await this.action<{ agentId: string }>({
         _: "CreateAgent",
-        definition: { name, systemPrompt: systemPrompt(name), modelProvider: this.config.modelProvider, model: this.config.model, mcpServers: [MCP_SERVER_NAME] },
+        definition: { name, systemPrompt: fleetPrompt(name), modelProvider: this.config.modelProvider, model: this.config.model, mcpServers: [MCP_SERVER_NAME] },
       });
       this.#state.agentId = created.agentId;
       this.#state.sessionId = undefined;
@@ -413,6 +433,50 @@ export class SeedBridge {
     // 3. A session for the calls.
     const sessionId = await this.ensureSession();
     return { agent, sessionId, mcp, warnings };
+  }
+
+  /** This daemon's MCP tool names, from its own `tools/list`. */
+  async #ownTools(): Promise<string[]> {
+    const res = await fetch(this.mcpUrl, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.#token}`, "content-type": "application/json", accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const j = (await res.json()) as { result?: { tools?: { name: string }[] } };
+    return (j.result?.tools ?? []).map((t) => t.name).sort();
+  }
+
+  /** The agents server keeps the tool list it discovered at registration, so a deploy that adds or
+   *  changes tools re-registers the MCP server (same config, fresh discovery) once the list differs. */
+  /** The companion's system prompt next to the fleet persona; with `apply`, the persona is written to the agent. */
+  async prompt(apply = false): Promise<PromptResult> {
+    if (!this.#state.agentId) throw new SeedError("no agent set up yet: run `cyberdeck seed setup`", 409);
+    const agentId = this.#state.agentId;
+    const res = await this.action<{ agent: { definition: Record<string, unknown> & { name?: string; systemPrompt?: string } } }>({ _: "GetAgent", agentId });
+    const definition = res.agent.definition;
+    const name = typeof definition.name === "string" ? definition.name : undefined;
+    if (name) this.#agentName = name;
+    const current = typeof definition.systemPrompt === "string" ? definition.systemPrompt : "";
+    const desired = fleetPrompt(name ?? "Cyberdeck");
+    const changed = current !== desired;
+    let applied = false;
+    if (apply && changed) {
+      await this.action({ _: "UpdateAgent", agentId, definition: { ...definition, systemPrompt: desired } });
+      applied = true;
+    }
+    return { agentId, name, current, desired, changed, applied };
+  }
+
+  async refreshMcp(names?: string[]): Promise<"skipped" | "unchanged" | "refreshed"> {
+    if (!this.#state.mcpRegisteredAt) return "skipped";
+    const fp = (names ?? (await this.#ownTools())).slice().sort().join(",");
+    if (!fp || fp === this.#state.mcpTools) return "unchanged";
+    await this.action({ _: "SetMcpServer", name: MCP_SERVER_NAME, config: { url: this.mcpUrl, transport: "http", secretRefs: { Authorization: MCP_SECRET_NAME } } });
+    this.#state.mcpTools = fp;
+    this.#state.mcpRegisteredAt = Date.now();
+    this.#save();
+    return "refreshed";
   }
 
   /** Make sure `agentId` exists and lists the cyberdeck MCP server; returns the agent's name. */

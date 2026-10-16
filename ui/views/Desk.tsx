@@ -1,11 +1,14 @@
 // Desk: talk to the node's Seed agent from a phone. One big TALK button that
 // breathes with the call, the running transcript, and a status strip for the
-// agents bridge (health, agent, session, node). When the daemon says voice is
+// agents bridge (health, agent, session, node), and the Fleet / Services / Agents glance
+// (what the agent sees through its MCP tools, at a look). When the daemon says voice is
 // not configured, the card explains why and offers the one-time setup.
 import { useEffect, useRef, useState } from "react";
-import { api, post, ApiError } from "../lib/api";
+import { api, post, navigate, ApiError } from "../lib/api";
 import { useVoice, voiceApi, micAllowedHere, type TranscriptLine, type AgentState, type VoicePhase } from "../lib/voice";
 import { MicIcon } from "../lib/icons";
+import { type Overview, isoAgo } from "../lib/control";
+import { glance, glanceAsk, glanceBadge, GLANCE_TABS, type GlanceTab, type NodeSeen } from "../lib/glance";
 
 type VoiceStatus = {
   configured: boolean;
@@ -244,6 +247,8 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
             </div>
             {configured && note && <p className="mt-2 text-[11px] text-zinc-400" data-testid="voice-note">{note}</p>}
           </section>
+
+          <GlancePanel onLocked={onLocked} />
         </div>
 
         <section className="hud-card flex min-h-[200px] flex-col p-3 md:h-[calc(100dvh-7rem)] md:min-h-0" data-testid="voice-transcript">
@@ -265,5 +270,103 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
         </section>
       </div>
     </div>
+  );
+}
+
+const BADGE_TONE = { bad: "neon-red", warn: "neon-amber", ok: "text-zinc-500" } as const;
+
+/** Fleet / Services / Agents under the TALK button: the overview the agent reads, at a glance. */
+function GlancePanel({ onLocked }: { onLocked: () => void }) {
+  const [tab, setTab] = useState<GlanceTab>(() => (localStorage.getItem("cyberdeck-desk-glance") as GlanceTab | null) ?? "fleet");
+  const [ov, setOv] = useState<Overview | null>(null);
+  const [nodes, setNodes] = useState<NodeSeen[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const [o, n] = await Promise.all([
+          api<Overview>("/api/control/overview"),
+          api<{ self: { name: string }; nodes: NodeSeen[] }>("/api/fleet/nodes").catch(() => null),
+        ]);
+        if (alive) { setOv(o); setNodes(n ? [{ name: n.self.name, online: true }, ...n.nodes] : []); setErr(null); }
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) onLocked();
+        else if (alive) setErr(e instanceof ApiError && e.status === 404 ? "No fleet dir on this node." : String(e instanceof Error ? e.message : e));
+      }
+    };
+    void load();
+    const iv = setInterval(load, 60_000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
+  const pick = (t: GlanceTab) => { setTab(t); localStorage.setItem("cyberdeck-desk-glance", t); };
+  const g = ov ? glance(ov, nodes) : null;
+  const go = (view: string, params: Record<string, string> = {}) => () => navigate(view, params);
+  const row = "flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-[12px] hover:bg-zinc-800/60";
+
+  return (
+    <section className="hud-card p-3" data-testid="desk-glance">
+      <div className="flex flex-wrap gap-1.5" role="tablist">
+        {GLANCE_TABS.map(([key, label]) => {
+          const b = g ? glanceBadge(g, key) : null;
+          return (
+            <button key={key} role="tab" aria-selected={tab === key} onClick={() => pick(key)} data-testid={`glance-tab-${key}`} className={`hud-chip ${tab === key ? "neon" : "text-zinc-400 hover:text-zinc-200"}`}>
+              {label}
+              {b && <span className={`font-mono ${BADGE_TONE[b.tone]}`}>{b.n}</span>}
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-2 flex flex-col" data-testid={`glance-${tab}`}>
+        {!g && <p className="text-[11px] text-zinc-500" data-testid="glance-empty">{err ?? "loading…"}</p>}
+        {g && tab === "fleet" && (
+          <>
+            <p className="mb-1 text-[11px] text-zinc-500">{g.hosts.up} up · {g.hosts.down} down · {g.hosts.unknown} unknown{g.handoffOpen != null ? ` · ${g.handoffOpen} handoff open` : ""}</p>
+            {g.hosts.rows.map((h) => (
+              <button key={h.name} onClick={go("services", { host: h.name })} className={row}>
+                <span className={`led ${h.online === true ? "led-on" : h.online === false ? "led-err" : "led-off"}`} />
+                <span className="w-24 shrink-0 truncate text-zinc-200">{h.name}</span>
+                <span className="truncate text-zinc-500">{h.cyberdeck ? `${h.cyberdeck.repos} repos · ${h.cyberdeck.atRisk} at risk` : `${h.kind} · ${h.os}`}</span>
+              </button>
+            ))}
+          </>
+        )}
+        {g && tab === "services" && (!g.services ? <p className="text-[11px] text-zinc-500">Not probed yet.</p> : (
+          <>
+            <p className="mb-1 text-[11px] text-zinc-500">{g.services.up}/{g.services.total} up{g.services.unknown.length ? ` · ${g.services.unknown.length} unknown` : ""} · probed {isoAgo(g.services.probedAt)}</p>
+            {[...g.services.down, ...g.services.unknown].map((r) => (
+              <button key={`${r.host}/${r.service}`} onClick={go("services", { host: r.host, svc: r.service })} className={row}>
+                <span className={`led ${r.ok === false ? "led-err" : "led-off"}`} />
+                <span className="truncate text-zinc-200">{r.host} · {r.service}</span>
+                <span className="ml-auto shrink-0 font-mono text-[11px] text-zinc-500">{r.state}</span>
+              </button>
+            ))}
+            {!g.services.down.length && !g.services.unknown.length && <p className="text-[12px] neon-green">all services up</p>}
+          </>
+        ))}
+        {g && tab === "agents" && (
+          <>
+            <p className="mb-1 text-[11px] text-zinc-500">{g.agents.active.length} live task{g.agents.active.length === 1 ? "" : "s"} · {g.agents.open} open · auto {g.agents.auto ? "on" : "off"}</p>
+            {g.agents.active.slice(0, 8).map((t) => (
+              <button key={t.id} onClick={go("agents")} className={row}>
+                <span className={`w-14 shrink-0 font-mono text-[10px] uppercase ${t.status === "running" ? "neon" : t.status === "review" ? "neon-amber" : t.status === "blocked" ? "neon-red" : "text-zinc-400"}`}>{t.status}</span>
+                <span className="truncate text-zinc-200">{t.id} · {t.title}</span>
+                <span className="ml-auto shrink-0 text-[11px] text-zinc-500">{t.host}</span>
+              </button>
+            ))}
+            {g.agents.runs.length > 0 && <div className="hud-label mt-2 text-zinc-500">recent runs</div>}
+            {g.agents.runs.map((r) => (
+              <button key={r.id} onClick={go("agents")} className={row}>
+                <span className={`led ${r.status === "running" ? "led-run" : r.status === "done" ? "led-on" : r.status === "failed" ? "led-err" : "led-off"}`} />
+                <span className="truncate text-zinc-200">{r.title}</span>
+                <span className="ml-auto shrink-0 text-[11px] text-zinc-500">{r.verdict ?? r.status} · {isoAgo(r.startedAt)}</span>
+              </button>
+            ))}
+            {!g.agents.active.length && !g.agents.runs.length && <p className="text-[12px] text-zinc-500">no tasks or runs</p>}
+          </>
+        )}
+        {g && <p className="mt-2 text-[11px] text-zinc-500" data-testid="glance-ask">try asking: <span className="text-zinc-300">“{glanceAsk(g, tab)}”</span></p>}
+      </div>
+    </section>
   );
 }
