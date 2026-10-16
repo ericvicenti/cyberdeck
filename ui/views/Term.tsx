@@ -225,7 +225,7 @@ export function Term({ params, onLocked }: { params: URLSearchParams; onLocked?:
       {!adding && current && current.tool !== "seed" && (
         <TermPane key={`${current.node}:${current.id}`} session={current} onStatus={(s) => setStatuses((m) => (m[current.id] === s ? m : { ...m, [current.id]: s }))} onRemove={() => close(current)} />
       )}
-      {!adding && !current && sessions && active && !active.startsWith("seed-") && <div className="p-6 text-xs text-zinc-500">No session {active} on {nodeName}. Pick one above.</div>}
+      {!adding && !current && sessions && sessions.length > 0 && active && !active.startsWith("seed-") && <div className="p-6 text-xs text-zinc-500">No session {active} on {nodeName}. Pick one above.</div>}
     </div>
   );
 }
