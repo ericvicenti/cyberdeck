@@ -148,6 +148,13 @@ private app while keeping Cyberdeck navigation. Configure applications in
 These URLs belong to the browser's machine: enuc's local tunnel is available on its
 physical desktop; a remote controller sees that desktop rather than loading the app locally.
 
+Embedded Afterglow mirrors its nested route into Cyberdeck as the encoded `route` parameter,
+for example `#/applications?app=afterglow&route=title%2Fseries%2Ftt123%3Fseason%3D2`.
+Refresh and Back/Forward restore that location; using Back after visiting another application
+returns to the same Afterglow route. In-app URL changes do not remount the iframe. The bridge accepts messages only from
+the configured frame and exact origin; it passes only Cyberdeck's origin to Afterglow, never a
+token or the outer URL. Afterglow remains responsible for its standalone fragment history.
+
 `desktop/kiosk.ts` owns a fullscreen Chromium window in `~/.cyberdeck/kiosk-profile`,
 independent of the daemon. `desktop/install-linux-kiosk.sh` creates GNOME autostart and
 `cyberdeck-kiosk.service`; run with `CYBERDECK_KIOSK_URL=http://enuc.tail0bb35a.ts.net:4777`.
