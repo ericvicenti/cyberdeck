@@ -139,6 +139,32 @@ In any browser, **Applications → Kitchen sink** is its console: send the app t
 its tabs, scan a QR with its camera, watch its motion, uploads and events arrive, and place or answer
 calls. Details: `docs/CASEWORK.md`.
 
+### Full host desktop
+
+Open **Desktop** (`#/desktop`) and select a host in the top-right node selector. **Connect**
+shows its physical desktop with mouse, keyboard, touch, fullscreen and a text-entry field.
+Disconnecting or changing hosts closes the control connection and leaves the desktop running.
+The older kiosk remote still controls only Chromium; Desktop reaches the host's other apps too.
+
+On GNOME/Wayland (enuc), enable **Settings → System → Remote Desktop → Desktop Sharing**
+and run `desktop/install-remote-desktop.sh`. It builds the pinned Apache Guacamole 1.6.0
+RDP gateway with the upstream GUACAMOLE-2328 compatibility fix for FreeRDP 3.31+, binds it only to `127.0.0.1:4822`, and reuses the existing GNOME credentials in
+`~/.cyberdeck/desktop-rdp.json` (mode 600). It does not create a virtual desktop or change
+GNOME's listener settings. The user service is `cyberdeck-desktop.service`.
+
+On macOS, enable **System Settings → General → Sharing → Screen Sharing**, allow your
+Mac user, and set `"desktop": { "enabled": true, "backend": "vnc" }` in
+`~/.cyberdeck/config.json`, then restart Cyberdeck. Sign in with the Mac username/password
+in the Desktop page. Credentials are used only for that connection, never saved. Use
+Cyberdeck's private HTTPS address or localhost (SSH tunnel); Mac authentication requires a
+secure browser context. Each host connects to its own loopback desktop service, including
+when selected through another Cyberdeck node.
+
+Both `/api/desktop/status` and `/api/desktop/stream` require full owner authentication;
+Casework pairing keys cannot access them. The fleet WebSocket relay preserves binary VNC
+frames. RDP credentials and targets stay server-side; clients cannot select arbitrary hosts
+or ports. Desktop is disabled until configured. No new public ports are opened.
+
 ### Enuc desktop and buoy remote
 
 Enuc opens the full Cyberdeck Home at login. **Applications → Afterglow** embeds the
@@ -147,6 +173,13 @@ private app while keeping Cyberdeck navigation. Configure applications in
 "description": "Films and series", "url": "http://127.0.0.1:13031/" }], "kiosk": { "enabled": true } }`.
 These URLs belong to the browser's machine: enuc's local tunnel is available on its
 physical desktop; a remote controller sees that desktop rather than loading the app locally.
+
+Embedded Afterglow mirrors its nested route into Cyberdeck as the encoded `route` parameter,
+for example `#/applications?app=afterglow&route=title%2Fseries%2Ftt123%3Fseason%3D2`.
+Refresh and Back/Forward restore that location; using Back after visiting another application
+returns to the same Afterglow route. In-app URL changes do not remount the iframe. The bridge accepts messages only from
+the configured frame and exact origin; it passes only Cyberdeck's origin to Afterglow, never a
+token or the outer URL. Afterglow remains responsible for its standalone fragment history.
 
 `desktop/kiosk.ts` owns a fullscreen Chromium window in `~/.cyberdeck/kiosk-profile`,
 independent of the daemon. `desktop/install-linux-kiosk.sh` creates GNOME autostart and

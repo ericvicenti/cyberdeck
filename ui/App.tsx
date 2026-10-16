@@ -1,4 +1,4 @@
-import { Desktop } from "./views/Desktop";
+
 import { lazy, Suspense } from "react";
 import { refreshRouteTitle, routeHash } from "./lib/navigation";
 import { useEffect, useLayoutEffect, useState } from "react";
@@ -25,6 +25,7 @@ import { PromptBar } from "./components/PromptBar";
 import { applyInstallTarget } from "./lib/pwa";
 
 // Seed's agents UI is a large bundle of its own; load it when the view opens.
+const Desktop = lazy(() => import("./views/Desktop").then((m) => ({ default: m.Desktop })));
 const SeedAgents = lazy(() => import("./views/SeedAgents"));
 
 const NAV = [
@@ -112,7 +113,7 @@ export function App() {
     <>
       {!knownRoute && <section className="p-6"><h1 className="text-xl">Page not found</h1><p className="my-3">No Cyberdeck view named “{route.view}”.</p><button onClick={() => navigate("fleet")}>Go home</button></section>}
       {route.view === "controls" && <Controls />}
-      {route.view === "desktop" && <Desktop key={`desktop-${nodeGen}-${nodeId}`} />}
+      {route.view === "desktop" && <Suspense fallback={<div className="p-6">Loading desktop…</div>}><Desktop key={`desktop-${nodeGen}-${nodeId}`} /></Suspense>}
       {route.view === "fleet" && <Home onLocked={lock} key={`fleet-${nodeGen}`} />}
       {route.view === "applications" && <Applications params={route.params} onLocked={lock} />}
       {route.view === "desk" && <Desk onLocked={lock} key={`desk-${nodeGen}-${nodeId}`} />}

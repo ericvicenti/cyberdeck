@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError, navigate } from "../lib/api";
 import { GamesSection } from "./Games";
 import { CaseworkConsole, inCasework, openNative, type CaseworkApp } from "./CaseworkConsole";
+import { AfterglowFrame } from "./AfterglowFrame";
 type Application = { id: string; name: string; description: string; url: string };
 /** The app Back returns from; its card takes focus again on the list. */
 let lastApp = "";

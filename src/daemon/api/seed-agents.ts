@@ -131,7 +131,8 @@ export function registerSeedAgentsRoutes(app: Hono, seed: SeedBridge, deps: Deps
     return c.json({ sig: Buffer.from(sig).toString("base64") });
   });
 
-  // Frames are binary DAG-CBOR both ways, including when relayed through a paired node.
+  // Preserve signed DAG-CBOR subscriptions upstream and JSON events downstream,
+  // including when relayed through a paired node.
   const socket = (remote: boolean) => deps.upgradeWebSocket((c: any) => {
       const node = remote ? deps.getNode(c.req.param("node")) : null;
       let upstream: WebSocket | null = null;
