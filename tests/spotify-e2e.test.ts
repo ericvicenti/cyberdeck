@@ -29,7 +29,7 @@ async function setup(width = 1280) {
   });
   return { page, errors };
 }
-async function login(page: Page, options: { wrongState?: boolean; denied?: boolean } = {}) {
+async function login(page: Page, options: { wrongState?: boolean; denied?: boolean; hash?: string } = {}) {
   let tokenCalls = 0;
   await page.route("https://accounts.spotify.com/api/token", async route => {
     tokenCalls++;
@@ -46,11 +46,11 @@ async function login(page: Page, options: { wrongState?: boolean; denied?: boole
     const args = new URLSearchParams({ state: options.wrongState ? "incorrect" : q.get("state")!, ...(options.denied ? { error: "access_denied" } : { code: "test-code" }) });
     return route.fulfill({ status: 302, headers: { location: base + "/?" + args } });
   });
-  await page.goto(base + "/#/spotify");
+  await page.goto(base + "/" + (options.hash || "#/spotify"));
   await page.getByText("Advanced: custom Cyberdeck player", { exact: true }).click();
   await page.getByLabel("Spotify Client ID", { exact: true }).fill(clientId);
   await page.getByRole("button", { name: "Connect Spotify", exact: true }).click();
-  await page.waitForURL(base + "/#/spotify");
+  await page.waitForURL(base + "/" + (options.wrongState ? "#/spotify" : options.hash || "#/spotify"));
   return () => tokenCalls;
 }
 async function mockSpotify(page: Page) {
@@ -172,3 +172,66 @@ test("expired token refresh is single-flight and SDK failure retains Connect con
     await page.screenshot({ path: "/tmp/cyberdeck-spotify-connected-mobile.png", fullPage: true });
   } finally { await page.close(); }
 }, 15000);
+
+async function navigationFixture(page: Page) {
+  const requests = await mockSpotify(page);
+  await page.addInitScript(() => sessionStorage.setItem("cyberdeck-spotify-tokens", JSON.stringify({access_token:"test-access",refresh_token:"test-refresh",expires:Date.now()+3600000,clientId:"a".repeat(32)})));
+  await page.route("https://api.spotify.com/v1/me/playlists?**", route => {
+    const second = new URL(route.request().url()).searchParams.get("offset") === "50";
+    return route.fulfill({json:{items:[{id:second?"second":"first",uri:"spotify:playlist:test",name:second?"Second playlist":"First playlist",images:[]}],next:second?null:"next"}});
+  });
+  return requests;
+}
+test("Spotify search and playlist pages restore across direct links, reload, new tabs and Back/Forward", async () => {
+  const {page,errors}=await setup();
+  const requests=await navigationFixture(page);
+  try {
+    const direct=base+"/#/spotify?playlists=2&q=Focus";
+    await page.goto(direct);await page.getByText("Second playlist",{exact:true}).waitFor();await page.getByText("Test song",{exact:true}).last().waitFor();
+    expect(await page.getByRole("textbox",{name:"Search Spotify",exact:true}).inputValue()).toBe("Focus");
+    expect(await page.title()).toBe("Focus · Playlists 2 · Spotify · Cyberdeck");
+    await page.reload();await page.getByText("Second playlist",{exact:true}).waitFor();
+    const other=await setup();await navigationFixture(other.page);await other.page.goto(direct);await other.page.getByText("Second playlist",{exact:true}).waitFor();expect(await other.page.title()).toBe(await page.title());await other.page.close();
+    await page.getByRole("textbox",{name:"Search Spotify",exact:true}).fill("Later");await page.getByRole("button",{name:"Search",exact:true}).click();
+    await page.waitForURL("**q=Later");await page.goBack();await page.waitForURL("**q=Focus");
+    expect(await page.getByRole("textbox",{name:"Search Spotify",exact:true}).inputValue()).toBe("Focus");
+    await page.goForward();await page.waitForURL("**q=Later");
+    await page.goto(base+"/#/spotify");await page.getByText("First playlist",{exact:true}).waitFor();await page.getByRole("button",{name:"More playlists"}).click();
+    await page.getByText("Second playlist",{exact:true}).waitFor();expect(new URL(page.url()).hash).toBe("#/spotify?playlists=2");
+    await page.goBack();await page.getByRole("button",{name:"More playlists"}).waitFor();expect(await page.getByText("Second playlist",{exact:true}).count()).toBe(0);
+    expect(requests.filter(r=>r.method!=="GET")).toEqual([]);expect(errors).toEqual([]);
+  } finally {await page.close();}
+},30000);
+test("Spotify ignores late search results, cleans titles, canonicalizes bad URLs and preserves its player", async () => {
+  const {page,errors}=await setup();const requests=await navigationFixture(page);
+  let release: (()=>void)|undefined;let arrived=false;
+  await page.route("https://api.spotify.com/v1/search?**",async route=>{
+    const q=new URL(route.request().url()).searchParams.get("q");
+    if(q==="Slow") {arrived=true;await new Promise<void>(r=>release=r);}
+    await route.fulfill({json:{tracks:{items:[{...track,id:q,name:q+" result"}]}}});
+  });
+  try {
+    await page.goto(base+"/#/spotify?q=Slow");await page.waitForFunction(()=>document.title==="Slow · Spotify · Cyberdeck");
+    for(let n=0;n<100&&!arrived;n++) await new Promise(r=>setTimeout(r,10));expect(arrived).toBe(true);
+    await page.evaluate(()=>location.hash="#/spotify?q=Fast");await page.getByText("Fast result",{exact:true}).waitFor();release!();
+    await page.waitForTimeout(100);expect(await page.getByText("Slow result",{exact:true}).count()).toBe(0);
+    await page.getByRole("button",{name:"Enable browser playback"}).click();await page.getByText("Browser ready",{exact:true}).waitFor();
+    await page.getByTestId("nav-files").click();await page.waitForFunction(()=>document.title.endsWith("Files · Cyberdeck"));
+    expect(await page.evaluate(()=>(window as any).sdkDisconnects)).toBe(0);
+    await page.goBack();await page.getByText("Fast result",{exact:true}).waitFor();expect(await page.evaluate(()=>(window as any).sdkDisconnects)).toBe(0);
+    await page.evaluate(()=>location.hash="#/spotify?playlists=oops&q=%20Focus%20");await page.waitForURL("**/#/spotify?q=Focus");
+    await page.evaluate(()=>location.hash="#/spotify?q=spotify%3Atrack%3Aabc");await page.getByText("spotify:track:abc result",{exact:true}).waitFor();
+    expect(requests.filter(r=>r.method!=="GET")).toEqual([]);expect(errors).toEqual([]);
+  } finally {release?.();await page.close();}
+},30000);
+test("Spotify sign-in restores the requested view and strips callback credentials", async () => {
+  const {page,errors}=await setup();const requests=await mockSpotify(page);
+  try {
+    await login(page,{hash:"#/spotify?playlists=2&q=Focus"});
+    await page.getByRole("button",{name:"Disconnect",exact:true}).waitFor();
+    await page.getByRole("heading",{name:"Search results",exact:true}).waitFor();
+    expect(new URL(page.url()).search).toBe("");expect(await page.title()).toBe("Focus · Playlists 2 · Spotify · Cyberdeck");
+    expect(await page.evaluate(()=>sessionStorage.getItem("cyberdeck-spotify-pending"))).toBeNull();
+    expect(requests.filter(r=>r.method!=="GET")).toEqual([]);expect(errors).toEqual([]);
+  } finally {await page.close();}
+},30000);

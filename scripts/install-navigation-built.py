@@ -18,8 +18,14 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
 
 
+def content_file(path):
+    # macOS tar may materialize AppleDouble resource forks. They are metadata,
+    # not compiler inputs or served assets, and BSD tar may consume them again.
+    return path.is_file() and not any(part.startswith("._") for part in path.parts)
+
+
 def inputs(root):
-    paths = [p for name in ('ui', 'src') for p in (root / name).rglob('*') if p.is_file()]
+    paths = [p for name in ('ui', 'src') for p in (root / name).rglob('*') if content_file(p)]
     paths += [root / name for name in ('package.json', 'bun.lock', 'tsconfig.json', 'vite.config.ts') if (root / name).is_file()]
     return {str(p.relative_to(root)): digest(p) for p in sorted(paths)}
 
@@ -33,7 +39,7 @@ def validate_paths(paths):
 
 def copy_assets(source, destination):
     for path in source.rglob('*'):
-        if path.is_file() and path.relative_to(source).as_posix() != 'index.html':
+        if content_file(path) and path.relative_to(source).as_posix() != 'index.html':
             target = destination / path.relative_to(source)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, target)
@@ -94,7 +100,7 @@ def main():
     if digest(package / 'ui/index.html') != record['installedIndex']:
         raise RuntimeError('Build entrypoint hash mismatch')
     # Verify the complete served artifact, including every dynamic chunk.
-    assets = {str(p.relative_to(package / 'ui')): digest(p) for p in (package / 'ui').rglob('*') if p.is_file()}
+    assets = {str(p.relative_to(package / 'ui')): digest(p) for p in (package / 'ui').rglob('*') if content_file(p)}
     if assets != record['assets']:
         raise RuntimeError('Build assets changed after verification')
     if inputs(target) != record['beforeInputs']:

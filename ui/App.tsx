@@ -180,7 +180,7 @@ export function App() {
           ))}
         </aside>
 
-        <main className="min-w-0 flex-1 overflow-hidden">{view}{spotifyOpened && <Spotify visible={route.view === "spotify"} />}</main>
+        <main className="min-w-0 flex-1 overflow-hidden">{view}{spotifyOpened && <Spotify visible={route.view === "spotify"} params={route.view === "spotify" ? route.params : undefined} />}</main>
       </div>
 
       {/* sticky prompt bar: start sessions from anywhere; live sessions strip */}

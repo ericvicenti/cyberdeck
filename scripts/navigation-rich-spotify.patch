@@ -1,0 +1,611 @@
+--- a/ui/views/Spotify.tsx
++++ b/ui/views/Spotify.tsx
+@@ -25,6 +25,12 @@
+   readSpotifyArchive,
+   saveSpotifyRecord,
+ } from "../lib/spotify-storage";
++import { readRoute, routeHash, useRouteTitle, writeRoute } from "../lib/navigation";
++import {
++  spotifyLocation,
++  spotifyRouteParams,
++  type SpotifyLocation,
++} from "../lib/spotify-navigation";
+ import {
+   MusicIcon,
+   PauseIcon,
+@@ -66,7 +72,13 @@
+   !!t?.id && !!t.uri && !t.is_local && t.type !== "episode";
+ 
+ /** Cyberdeck's persistent custom music surface; stays mounted while navigating the deck. */
+-export function Spotify({ visible }: { visible: boolean }) {
++export function Spotify({
++  visible,
++  params,
++}: {
++  visible: boolean;
++  params: URLSearchParams;
++}) {
+   const [connected, setConnected] = useState(spotifyConnected);
+   const clientId = spotifyClientId();
+   const [error, setError] = useState("");
+@@ -86,6 +98,7 @@
+   const [playlistNext, setPlaylistNext] = useState<string | null>(null);
+   const [query, setQuery] = useState("");
+   const [shelf, setShelf] = useState<Shelf>(emptyShelf);
++  const [resolvedRouteKey, setResolvedRouteKey] = useState("");
+   const [back, setBack] = useState<Shelf[]>([]);
+   const [devices, setDevices] = useState<SpotifyDevice[]>([]);
+   const [selected, setSelected] = useState("");
+@@ -110,6 +123,8 @@
+   const sdkGeneration = useRef(0);
+   const accountGeneration = useRef(0);
+   const viewGeneration = useRef(0);
++  const routeGeneration = useRef(0);
++  const immersiveClosing = useRef(false);
+   const accountRef = useRef("");
+   const lastListen = useRef("");
+   const archiveWrites = useRef(Promise.resolve());
+@@ -121,6 +136,45 @@
+   } catch (e) {
+     originError = (e as Error).message;
+   }
++  const routeKey = params.toString();
++  const currentLocation = spotifyLocation(params).location;
++  const navigateMusic = (
++    next: Pick<SpotifyLocation, "shelf"> &
++      Partial<
++        Pick<
++          SpotifyLocation,
++          "id" | "query" | "page" | "immersive" | "radio"
++        >
++      >,
++    mode: "push" | "replace" = "push",
++  ) =>
++    writeRoute(
++      "spotify",
++      spotifyRouteParams(readRoute().params, next),
++      mode,
++    );
++  const navigateEntity = (entity: Card) =>
++    navigateMusic({ shelf: entity.kind, id: entity.id });
++  const navigateCollection = (kind: string) =>
++    navigateMusic({ shelf: kind as SpotifyLocation["shelf"] });
++  const navigateSearch = (value = query.trim(), radio = false) =>
++    navigateMusic({ shelf: "search", query: value, radio });
++  const closeImmersive = () => {
++    if (immersiveClosing.current) return;
++    immersiveClosing.current = true;
++    setImmersive(false);
++    const next = spotifyRouteParams(readRoute().params, {
++      shelf: currentLocation.shelf,
++      id: currentLocation.id,
++      query: currentLocation.query,
++      page: currentLocation.page,
++      radio: currentLocation.radio,
++    });
++    const nextHash = routeHash("spotify", next);
++    if (history.state?.cyberdeckSpotifyImmersiveFrom === nextHash)
++      history.back();
++    else writeRoute("spotify", next, "replace");
++  };
+ 
+   const report = (e: unknown) => {
+     if (alive.current) {
+@@ -300,13 +354,13 @@
+   useEffect(() => {
+     const escape = (e: KeyboardEvent) => {
+       if (e.key === "Escape") {
+-        setImmersive(false);
++        if (immersive) closeImmersive();
+         setAddTrack(null);
+         setCreateOpen(false);
+       }
+     };
+     const fullscreen = () => {
+-      if (!document.fullscreenElement) setImmersive(false);
++      if (!document.fullscreenElement && immersive) closeImmersive();
+     };
+     document.addEventListener("keydown", escape);
+     document.addEventListener("fullscreenchange", fullscreen);
+@@ -314,7 +368,7 @@
+       document.removeEventListener("keydown", escape);
+       document.removeEventListener("fullscreenchange", fullscreen);
+     };
+-  }, []);
++  }, [immersive, routeKey]);
+   useEffect(() => {
+     if (!visible) {
+       setVideoActive(false);
+@@ -514,7 +568,10 @@
+     await spotifyApi(`/me/player/${path}?${q}`, method);
+     await refreshPlayback();
+   };
+-  const show = async (load: () => Promise<Shelf>, replace = false) => {
++  const show = async (
++    load: () => Promise<Shelf>,
++    replace = false,
++  ): Promise<Shelf | undefined> => {
+     const version = ++viewGeneration.current;
+     setLoading(true);
+     setError("");
+@@ -525,13 +582,14 @@
+       if (!replace) setBack((old) => [...old, shelf]);
+       setShelf(next);
+       content.current?.scrollTo({ top: 0 });
++      return next;
+     } catch (e) {
+       if (version === viewGeneration.current) report(e);
+     } finally {
+       if (version === viewGeneration.current) setLoading(false);
+     }
+   };
+-  const openEntity = (entity: Card) =>
++  const openEntity = (entity: Card, replace = false) =>
+     show(async () => {
+       if (entity.kind === "artist") {
+         const [artist, albums] = await Promise.all([
+@@ -586,7 +644,7 @@
+         cards: [],
+         next: page?.next,
+       };
+-    });
++    }, replace);
+   const loadArchive = async () => {
+     await archiveWrites.current;
+     try {
+@@ -598,7 +656,7 @@
+       return readSpotifyArchive(account, true);
+     }
+   };
+-  const collection = (kind: string) =>
++  const collection = (kind: string, replace = false) =>
+     show(async () => {
+       if (kind === "history") {
+         const records = await loadArchive();
+@@ -671,8 +729,8 @@
+         cards: data.artists.items.map((a) => ({ ...a, kind: "artist" })),
+         next: data.artists.next,
+       };
+-    });
+-  const search = (q = query.trim(), radio = false) =>
++    }, replace);
++  const search = (q = query.trim(), radio = false, replace = false) =>
+     show(async () => {
+       const params = new URLSearchParams({
+         q,
+@@ -711,14 +769,14 @@
+             .map((p) => ({ ...p!, kind: "playlist" as const })),
+         ],
+       };
+-    });
+-  const more = async () => {
+-    if (!shelf.next) return;
++    }, replace);
++  const loadMore = async (current: Shelf): Promise<Shelf> => {
++    if (!current.next) return current;
+     const version = viewGeneration.current;
+-    const data = await readApi<any>(spotifyPagePath(shelf.next));
+-    if (version !== viewGeneration.current) return;
+-    if (shelf.kind === "search") {
+-      const url = new URL(shelf.next);
++    const data = await readApi<any>(spotifyPagePath(current.next));
++    if (version !== viewGeneration.current) return current;
++    if (current.kind === "search") {
++      const url = new URL(current.next);
+       url.searchParams.set(
+         "offset",
+         String(Number(url.searchParams.get("offset") || 0) + 10),
+@@ -729,44 +787,115 @@
+           kind: key.slice(0, -1) as Card["kind"],
+         })),
+       );
+-      setShelf((old) => ({
+-        ...old,
+-        tracks: [...old.tracks, ...(data.tracks?.items || []).filter(playable)],
+-        cards: [...old.cards, ...cards],
++      return {
++        ...current,
++        tracks: [
++          ...current.tracks,
++          ...(data.tracks?.items || []).filter(playable),
++        ],
++        cards: [...current.cards, ...cards],
+         next: Object.values(data).some((page: any) => !!page?.next)
+           ? url.toString()
+           : null,
+-      }));
+-      return;
++      };
+     }
+-    const page = shelf.kind === "artists" ? data.artists : data;
++    const page = current.kind === "artists" ? data.artists : data;
+     const additions: SpotifyTrack[] = ["liked", "recent", "playlist"].includes(
+-      shelf.kind,
++      current.kind,
+     )
+       ? page.items.map((i: PlaylistItem) => i.item ?? i.track).filter(playable)
+-      : shelf.kind === "album"
++      : current.kind === "album"
+         ? page.items
+             .filter(playable)
+-            .map((t: SpotifyTrack) => ({ ...t, album: shelf.entity }))
++            .map((t: SpotifyTrack) => ({ ...t, album: current.entity }))
+         : [];
+     const cards: Card[] =
+-      shelf.kind === "artist"
++      current.kind === "artist"
+         ? page.items.map((a: SpotifyAlbum) => ({ ...a, kind: "album" }))
+-        : shelf.kind === "albums"
++        : current.kind === "albums"
+           ? page.items.map((i: { album: SpotifyAlbum }) => ({
+               ...i.album,
+               kind: "album",
+             }))
+-          : shelf.kind === "artists"
++          : current.kind === "artists"
+             ? page.items.map((a: SpotifyArtist) => ({ ...a, kind: "artist" }))
+             : [];
+-    setShelf((old) => ({
+-      ...old,
+-      tracks: [...old.tracks, ...additions],
+-      cards: [...old.cards, ...cards],
++    return {
++      ...current,
++      tracks: [...current.tracks, ...additions],
++      cards: [...current.cards, ...cards],
+       next: page.next,
+-    }));
++    };
+   };
++  const more = async () => {
++    const version = viewGeneration.current;
++    const next = await loadMore(shelf);
++    if (version !== viewGeneration.current) return;
++    setShelf(next);
++    navigateMusic({
++      shelf: currentLocation.shelf,
++      id: currentLocation.id,
++      query: currentLocation.query,
++      page: currentLocation.page + 1,
++      immersive,
++    });
++  };
++  useEffect(() => {
++    if (!visible) return;
++    const parsed = spotifyLocation(params);
++    if (routeHash("spotify", parsed.canonical) !== location.hash) {
++      writeRoute("spotify", parsed.canonical, "replace");
++      return;
++    }
++    const requested = parsed.location;
++    immersiveClosing.current = false;
++    setQuery(requested.query);
++    setImmersive(requested.immersive);
++    setBack([]);
++    setResolvedRouteKey("");
++    if (!connected || !account) return;
++    const generation = ++routeGeneration.current;
++    const restore = async () => {
++      let next: Shelf | undefined;
++      if (requested.shelf === "home") {
++        viewGeneration.current++;
++        setLoading(false);
++        setShelf(emptyShelf);
++        next = emptyShelf;
++      } else if (["artist", "album", "playlist"].includes(requested.shelf)) {
++        next = await openEntity(
++          {
++            id: requested.id,
++            uri: `spotify:${requested.shelf}:${requested.id}`,
++            name: "",
++            images: [],
++            kind: requested.shelf as Card["kind"],
++          },
++          true,
++        );
++      } else if (requested.shelf === "search") {
++        next = await search(requested.query, requested.radio, true);
++      } else {
++        next = await collection(requested.shelf, true);
++      }
++      if (!next || generation !== routeGeneration.current) return;
++      for (let page = 1; page < requested.page && next.next; page++) {
++        next = await loadMore(next);
++        if (generation !== routeGeneration.current) return;
++      }
++      if (generation !== routeGeneration.current) return;
++      setShelf(next);
++      setResolvedRouteKey(routeKey);
++    };
++    void restore();
++  }, [visible, connected, account, routeKey]);
++  useRouteTitle(
++    visible && resolvedRouteKey === routeKey
++      ? shelf.kind === "home"
++        ? "Spotify"
++        : `${shelf.title} · Spotify`
++      : undefined,
++  );
+   const toggleSave = async (uri: string) => {
+     let wasSaved = saved[uri];
+     if (wasSaved === undefined)
+@@ -921,10 +1050,24 @@
+   const fullscreen = async () => {
+     setVideoActive(false);
+     if (immersive) {
++      closeImmersive();
+       setImmersive(false);
+       if (document.fullscreenElement === root.current)
+         await document.exitFullscreen();
+     } else {
++      const next = spotifyRouteParams(readRoute().params, {
++        ...currentLocation,
++        immersive: true,
++      });
++      const hash = routeHash("spotify", next);
++      if (location.hash !== hash) {
++        history.pushState(
++          { cyberdeckSpotifyImmersiveFrom: location.hash },
++          "",
++          hash,
++        );
++        window.dispatchEvent(new HashChangeEvent("hashchange"));
++      }
+       setImmersive(true);
+       if (root.current?.requestFullscreen)
+         try {
+@@ -942,7 +1085,7 @@
+           className="music-text"
+           onClick={() => {
+             setImmersive(false);
+-            void openEntity({ ...a, kind: "artist" });
++            navigateEntity({ ...a, kind: "artist" });
+           }}
+         >
+           {a.name}
+@@ -985,7 +1128,7 @@
+             className="music-thumb"
+             aria-label={`Open album ${t.album?.name || t.name}`}
+             disabled={!t.album?.id}
+-            onClick={() => void openEntity({ ...t.album, kind: "album" })}
++            onClick={() => navigateEntity({ ...t.album, kind: "album" })}
+           >
+             {t.album?.images?.[0] ? (
+               <img src={t.album.images[0].url} alt="" />
+@@ -1027,7 +1170,7 @@
+               <button onClick={() => setAddTrack(t)}>Add to playlist</button>
+               <button
+                 onClick={() =>
+-                  void search(
++                  navigateSearch(
+                     `${t.name} ${t.artists[0]?.name || ""} radio`,
+                     true,
+                   )
+@@ -1090,7 +1233,7 @@
+           key={`${c.uri}:${i}`}
+           aria-label={`Open ${c.kind} ${c.name}`}
+           className={`music-card ${c.kind === "artist" ? "music-artist" : ""}`}
+-          onClick={() => void openEntity(c)}
++          onClick={() => navigateEntity(c)}
+         >
+           <div className="music-card-art">
+             {c.images?.[0] ? (
+@@ -1244,11 +1387,7 @@
+                     key={kind}
+                     aria-current={shelf.kind === kind ? "page" : undefined}
+                     disabled={!account}
+-                    onClick={() =>
+-                      kind === "home"
+-                        ? void show(async () => emptyShelf)
+-                        : void collection(kind)
+-                    }
++                    onClick={() => navigateCollection(kind)}
+                   >
+                     {label}
+                     <span aria-hidden="true">→</span>
+@@ -1272,7 +1411,7 @@
+                 {playlists.map((p) => (
+                   <button
+                     key={p.id}
+-                    onClick={() => void openEntity({ ...p, kind: "playlist" })}
++                    onClick={() => navigateEntity({ ...p, kind: "playlist" })}
+                   >
+                     {p.name}
+                   </button>
+@@ -1305,14 +1444,14 @@
+                     const [, kind, id] = uri.split(":");
+                     if (kind === "track") void run(() => playUri(uri));
+                     else
+-                      void openEntity({
++                      navigateEntity({
+                         id: id!,
+                         uri,
+                         name: "",
+                         images: [],
+                         kind: kind as Card["kind"],
+                       });
+-                  } else void search();
++                  } else navigateSearch();
+                 }}
+               >
+                 <span aria-hidden="true">⌕</span>
+@@ -1330,16 +1469,11 @@
+                 </button>
+               </form>
+               <div className="music-shelf-heading">
+-                {back.length > 0 && (
++                {shelf.kind !== "home" && (
+                   <button
+                     className="music-button"
+                     aria-label="Back in music"
+-                    onClick={() => {
+-                      viewGeneration.current++;
+-                      setLoading(false);
+-                      setShelf(back[back.length - 1]!);
+-                      setBack((old) => old.slice(0, -1));
+-                    }}
++                    onClick={() => navigateMusic({ shelf: "home" })}
+                   >
+                     ←
+                   </button>
+@@ -1409,7 +1543,7 @@
+                           <button
+                             className="music-button"
+                             onClick={() =>
+-                              void search(`${shelf.title} radio`, true)
++                              navigateSearch(`${shelf.title} radio`, true)
+                             }
+                           >
+                             Radio mixes
+@@ -1448,7 +1582,7 @@
+                           </p>
+                           <button
+                             className="music-button music-primary"
+-                            onClick={() => void collection("recent")}
++                            onClick={() => navigateCollection("recent")}
+                           >
+                             Pick up where you left off
+                           </button>
+@@ -1722,7 +1856,7 @@
+                     onClick={() => {
+                       setImmersive(false);
+                       if (track?.album)
+-                        void openEntity({ ...track.album, kind: "album" });
++                        navigateEntity({ ...track.album, kind: "album" });
+                     }}
+                   >
+                     {track?.album?.name}
+@@ -1863,7 +1997,7 @@
+                 aria-label="Show queue"
+                 onClick={() => {
+                   setImmersive(false);
+-                  void collection("queue");
++                  navigateCollection("queue");
+                 }}
+               >
+                 Queue
+@@ -1996,7 +2130,7 @@
+                         "POST",
+                         { name: playlistName.trim(), public: false },
+                       );
+-                      await openEntity({ ...p, kind: "playlist" });
++                      navigateEntity({ ...p, kind: "playlist" });
+                     }
+                     await loadPlaylists();
+                     setCreateOpen(false);
+--- a/ui/App.tsx
++++ b/ui/App.tsx
+@@ -171,7 +171,7 @@
+           ))}
+         </aside>
+ 
+-        <main className="min-w-0 flex-1 overflow-hidden">{view}{spotifyOpened && <Spotify visible={route.view === "spotify"} />}</main>
++        <main className="min-w-0 flex-1 overflow-hidden">{view}{spotifyOpened && <Spotify visible={route.view === "spotify"} params={route.params} />}</main>
+       </div>
+ 
+       {/* sticky prompt bar: start sessions from anywhere; live sessions strip */}
+--- a/ui/lib/navigation.ts
++++ b/ui/lib/navigation.ts
+@@ -85,7 +85,8 @@
+     : route.view === "term" ? p.get("session")
+     : route.view === "cmux" ? p.get("surface")
+     : route.view === "agents" ? p.get("run") || p.get("task")
+-    : route.view === "cloud" ? p.get("conversation") || p.get("profile") : null;
++    : route.view === "cloud" ? p.get("conversation") || p.get("profile")
++    : route.view === "spotify" ? p.get("id") || p.get("shelf") : null;
+   if (detail) title = `${detail} · ${title}`;
+   if (route.view === "applications" && p.get("app")) {
+     title = p.get("app") === "vimm" ? `${p.get("tab") === "steam" ? "PC games · " : ""}The Vault` : p.get("app") === "afterglow" ? "Afterglow" : `${p.get("app")} · Applications`;
+--- a/ui/lib/spotify-navigation.ts
++++ b/ui/lib/spotify-navigation.ts
+@@ -0,0 +1,90 @@
++export const SPOTIFY_COLLECTIONS = [
++  "home",
++  "liked",
++  "albums",
++  "artists",
++  "recent",
++  "queue",
++  "history",
++  "search",
++] as const;
++export const SPOTIFY_ENTITIES = ["artist", "album", "playlist"] as const;
++
++export type SpotifyShelf =
++  | (typeof SPOTIFY_COLLECTIONS)[number]
++  | (typeof SPOTIFY_ENTITIES)[number];
++
++export type SpotifyLocation = {
++  shelf: SpotifyShelf;
++  id: string;
++  query: string;
++  page: number;
++  immersive: boolean;
++  radio: boolean;
++};
++
++/** Parse and canonicalize only the URL state owned by the listening room. */
++export function spotifyLocation(params: URLSearchParams): {
++  location: SpotifyLocation;
++  canonical: URLSearchParams;
++} {
++  const canonical = new URLSearchParams(params);
++  const rawShelf = canonical.get("shelf") || "home";
++  const shelf = [...SPOTIFY_COLLECTIONS, ...SPOTIFY_ENTITIES].includes(
++    rawShelf as SpotifyShelf,
++  )
++    ? (rawShelf as SpotifyShelf)
++    : "home";
++  const entity = SPOTIFY_ENTITIES.includes(shelf as (typeof SPOTIFY_ENTITIES)[number]);
++  const id = entity ? (canonical.get("id") || "").trim() : "";
++  const query = shelf === "search" ? (canonical.get("q") || "").trim() : "";
++  const rawPage = Number(canonical.get("page") || "1");
++  const page = Number.isInteger(rawPage) && rawPage >= 1 && rawPage <= 20 ? rawPage : 1;
++  const immersive = canonical.get("immersive") === "1";
++  const resolvedShelf: SpotifyShelf = (entity && !id) || (shelf === "search" && !query) ? "home" : shelf;
++  const radio = resolvedShelf === "search" && canonical.get("radio") === "1";
++
++  canonical.delete("shelf");
++  canonical.delete("id");
++  canonical.delete("q");
++  canonical.delete("page");
++  canonical.delete("immersive");
++  canonical.delete("radio");
++  if (resolvedShelf !== "home") canonical.set("shelf", resolvedShelf);
++  if (id && resolvedShelf === shelf) canonical.set("id", id);
++  if (query && resolvedShelf === "search") canonical.set("q", query);
++  if (page > 1 && resolvedShelf !== "home") canonical.set("page", String(page));
++  if (immersive) canonical.set("immersive", "1");
++  if (radio) canonical.set("radio", "1");
++  canonical.sort();
++
++  return {
++    location: {
++      shelf: resolvedShelf,
++      id: resolvedShelf === shelf ? id : "",
++      query: resolvedShelf === "search" ? query : "",
++      page: resolvedShelf === "home" ? 1 : page,
++      immersive,
++      radio,
++    },
++    canonical,
++  };
++}
++
++export function spotifyRouteParams(
++  current: URLSearchParams,
++  next: Pick<SpotifyLocation, "shelf"> &
++    Partial<Pick<SpotifyLocation, "id" | "query" | "page" | "immersive" | "radio">>,
++) {
++  const params = new URLSearchParams(current);
++  for (const key of ["shelf", "id", "q", "page", "immersive", "radio"])
++    params.delete(key);
++  if (next.shelf !== "home") params.set("shelf", next.shelf);
++  if (next.id) params.set("id", next.id);
++  if (next.query) params.set("q", next.query.trim());
++  if ((next.page || 1) > 1) params.set("page", String(next.page));
++  if (next.immersive) params.set("immersive", "1");
++  if (next.radio && next.shelf === "search") params.set("radio", "1");
++  params.sort();
++  return params;
++}

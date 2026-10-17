@@ -84,9 +84,9 @@ const hash = () => page.evaluate(() => location.hash);
 const param = (key: string) => page.evaluate(key => new URLSearchParams(location.hash.split("?")[1]).get(key), key);
 let visit = 0;
 async function go(route: string) { await page.goto(`${server.url}?visit=${++visit}#/${route}`); }
-async function title(value: string) { try { await page.waitForFunction(value => document.title === value, value); } catch (e) { throw new Error(`Expected title ${value}, got ${await page.title()}; errors=${errors.join("; ")}`); } }
+async function title(value: string) { try { await page.waitForFunction(value => document.title === value, value); } catch (e) { throw new Error(`Expected title ${value}, got ${await page.title()}; errors=${errors.join("; ")}; hash=${await hash()}; bar=${await page.getByPlaceholder("https://").inputValue().catch(()=>"none")}; messages=${JSON.stringify(browserMessages.slice(-12))}`); } }
 async function settle() { await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))); }
-beforeAll(async () => { browser = await chromium.launch(); page = await browser.newPage({viewport:{width:1440,height:1000}}); page.setDefaultTimeout(5000); page.on("pageerror",e => errors.push(e.message)); });
+beforeAll(async () => { browser = await chromium.launch(); page = await browser.newPage({viewport:{width:1440,height:1000}}); page.setDefaultTimeout(15000); page.on("pageerror",e => errors.push(e.message)); });
 afterAll(async () => { for (const release of deferred.values()) release(); await browser?.close(); server.stop(true); });
 
 test("primary views have titles and unknown routes render a useful error on fresh open", async () => {

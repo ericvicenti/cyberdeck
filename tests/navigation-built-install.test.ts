@@ -49,3 +49,12 @@ test("prebuilt rollback refuses a newer UI deployment", () => {
     expect(f.read("src/dist/ui/index.html")).toBe("newer deployment");expect(f.read("src/ui/view.ts")).toBe("new view");
   } finally {f.cleanup();}
 });
+
+test("AppleDouble metadata can be materialized or consumed by macOS tar", () => {
+  const f=fixture();try {
+    f.put("src/ui/._view.ts", "resource fork");f.put("pkg/ui/assets/._new.js", "resource fork");
+    const result=f.install();expect(result.exitCode).toBe(0);
+    expect(f.read("src/ui/._view.ts")).toBe("resource fork");
+    expect(f.read("src/dist/ui/index.html")).toBe("new index");
+  } finally {f.cleanup();}
+});

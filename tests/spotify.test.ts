@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { pkceChallenge, spotifyRedirect, spotifyUri } from "../ui/lib/spotify";
+import { pkceChallenge, spotifyRedirect, spotifyUri, spotifyReturnHash } from "../ui/lib/spotify";
 
 test("PKCE matches the RFC 7636 S256 test vector", async () => {
   expect(await pkceChallenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")).toBe("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
@@ -15,4 +15,10 @@ test("Spotify links allow only supported content from Spotify", () => {
   expect(spotifyUri("https://open.spotify.com/intl-es/album/abc123")).toBe("spotify:album:abc123");
   expect(spotifyUri("spotify:playlist:abc123")).toBe("spotify:playlist:abc123");
   for (const url of ["https://evil.example/track/abc123", "https://open.spotify.com.evil.example/track/abc", "javascript:alert(1)", "spotify:artist:abc", "search words"]) expect(spotifyUri(url)).toBeNull();
+});
+
+test("OAuth returns only to Spotify view state without credentials or external destinations", () => {
+  expect(spotifyReturnHash("#/spotify?q=Focus&playlists=2&node=peer&access_token=secret&code=secret")).toBe("#/spotify?node=peer&playlists=2&q=Focus");
+  expect(spotifyReturnHash("#/spotify?shelf=album&id=abc&page=2&immersive=1")).toBe("#/spotify?id=abc&immersive=1&page=2&shelf=album");
+  for (const value of ["https://evil.example", "#/files?path=~", "#/spotify-other?q=bad"]) expect(spotifyReturnHash(value)).toBe("#/spotify");
 });

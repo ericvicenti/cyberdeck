@@ -57,7 +57,7 @@ credentials should not be replayed from a link.
 
 | Route / owner | Navigable state | Coverage / remaining work |
 | --- | --- | --- |
-| main / PWA / token and OAuth bootstrap | token entry, OAuth return, install manifest | Existing startup/auth flow retained. Token/codes are credentials, not durable view parameters. Add Spotify return-destination coverage with its newer player. |
+| main / PWA / token and OAuth bootstrap | token entry, OAuth return, install manifest | Spotify OAuth restores a validated, tab-local return fragment after state verification. Callback codes are removed and cannot enter shared URLs; invalid state cannot choose a return destination. |
 | App / api / navigation | primary view, node, not-found, auth, titles | Covered, including legacy `service`→`svc`, Steam app→Vault tab. More parameter validation and every error title remain. |
 | `fleet` / Home | local/fleet overview, node links; pairing and account/reset dialogs; NetworkMap selected endpoints | Overview and node links covered. Pairing/reset/benchmark actions remain transient and must never auto-run. Decide URL representation for NetworkMap endpoint selection. |
 | `controls` / Controls | control diagram, bindings/editor, reset notice | Static route/title covered where installed. Binding changes are settings, not navigation. Keyboard/gamepad mode preferences remain local. |
@@ -68,7 +68,7 @@ credentials should not be replayed from a link.
 | SteamVault / Steam | selected game, PC tab, query; native install/game/session/cloud-save decisions | `steam=<id>` detail added, resolves from serving-node library, restores without Play. Game/cloud decision/quit remain runtime/confirmation actions. Keep background Steam/client/kiosk alive. |
 | GamesSection / Games | installed native games and import form | Part of Applications. Play/import are actions; no automatic execution from links. |
 | CaseworkConsole | selected device, events, camera/media/QR, calls, native scene actions | Selected device is covered by `device=<id>`, including canonical default, reload/history, missing-device error/title and no action replay. Device IDs are serving-node-local. Media preview URL semantics and call/session lifecycle still pending. |
-| `spotify` / Spotify, SpotifyRecordings, SpotifyVisualizer | home/library/liked/recent/search/radio shelves, artist/album/playlist, pagination, saved recording, immersive/visualizer | **Covered on the richer Enuc implementation:** `shelf`, `id`, `q`, `radio`, `page` and `immersive` restore through direct links, reload and history; invalid combinations canonicalize without playback; dynamic shelf/entity titles replace opaque IDs after loading. The player, SDK and audio/archive components stay mounted across hash changes. Saved-recording selection remains runtime-only because selecting it currently starts playback. Yacht/Iris/Sentinel/Botical still have the older player and Starlight is offline; reconcile rather than overwrite them. OAuth state, tokens and playback commands never belong in shareable URLs. |
+| `spotify` / Spotify, SpotifyRecordings, SpotifyVisualizer | shelves, entities, query, pagination, recordings, immersive mode | Compact player (main, Yacht/Iris/Sentinel/Botical/Clipper): submitted `q` and loaded `playlists` page count restore through direct links, reload and history; stale search/page results are ignored. Rich player (Enuc/Starlight): `shelf`, `id`, `q`, `radio`, `page`, `immersive` retain the existing listening room. OAuth returns to requested content in both variants; no link starts playback. SDK/player stays mounted through URL and primary-view changes. Saved-recording detail still requires a separate navigable selection that does not start playback. |
 | `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session, run, server, node | Nested route canonicalization, malformed/unknown path errors, route-based titles, Back/Forward and node-preserving new-window links covered. Human-readable async entity names and full error/lifecycle matrix remain. |
 | `desktop` / Desktop | selected node and connection | Primary route/title and URL-selected node covered; connect/input/credentials remain explicit runtime actions. |
 | `desk` / Desk + voice | voice call, transcript, setup, mute | Static route/title covered. Call and permission actions remain explicit. Verify ongoing call lifecycle across navigation before acceptance. |
@@ -99,9 +99,7 @@ Real sandboxed daemon regression: `bun test tests/e2e.test.ts` (includes generat
 shell/files and isolates daemon home; does not control installed sessions).
 Cloud archive/browser history and rolling-protocol regressions are in
 `bun test tests/cloud.test.ts tests/navigation-browser.test.ts`.
-Listening-room URL parsing and real-browser restoration are in
-`bun test tests/spotify-navigation.test.ts` and the `canonical music links`
-case in `tests/spotify-e2e.test.ts`.
+Compact Spotify URL/OAuth regression: `bun test tests/spotify.test.ts tests/spotify-e2e.test.ts --timeout 30000`. Rich-player checks use the captured host build and the 2026-10-16 listening-room fixture suite (see the run report). `scripts/navigation-rich-spotify.patch` preserves the owned rich-player delta separately because that larger player is not yet on main.
 Auth/session regressions: `bun test tests/auth.test.ts tests/sessions.test.ts`.
 Installer conflict/rollback checks: `bun test tests/navigation-install.test.ts`.
 Live read-only checks: `CYBERDECK_TEST_ORIGIN=<private-origin> bun scripts/check-navigation-live.ts`.
@@ -131,3 +129,5 @@ The 2026-10-17 keyboard regression is covered by `tests/input-mode.test.ts`,
 Files deep search in `tests/navigation-browser.test.ts`, CodeMirror save in
 `tests/e2e.test.ts`, and real published Seed UI submission in `tests/voice.test.ts`.
 Those browser suites use isolated fake services and generated local fixtures.
+
+Mac tar resource forks (`._*`) are metadata, not build inputs. The prebuilt installer ignores them while fingerprinting every content input and served asset; it still refuses genuine added/changed files. Browser suites should run separately from fleet builds (`bun test tests --timeout 30000`) to avoid startup timeouts on the shared Mac.
