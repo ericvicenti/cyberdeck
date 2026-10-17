@@ -609,3 +609,23 @@
 +  params.sort();
 +  return params;
 +}
+--- a/ui/views/Spotify.tsx
++++ b/ui/views/Spotify.tsx
+@@ -841,7 +841,7 @@
+     });
+   };
+   useEffect(() => {
+-    if (!visible) return;
++    if (!visible || location.hash !== routeHash("spotify", params)) return;
+     const parsed = spotifyLocation(params);
+     if (routeHash("spotify", parsed.canonical) !== location.hash) {
+       writeRoute("spotify", parsed.canonical, "replace");
+@@ -890,7 +890,7 @@
+     void restore();
+   }, [visible, connected, account, routeKey]);
+   useRouteTitle(
+-    visible && resolvedRouteKey === routeKey
++    visible && location.hash === routeHash("spotify", params) && resolvedRouteKey === routeKey
+       ? shelf.kind === "home"
+         ? "Spotify"
+         : `${shelf.title} · Spotify`

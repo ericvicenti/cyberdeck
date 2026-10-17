@@ -194,6 +194,7 @@ test("Spotify search and playlist pages restore across direct links, reload, new
     const other=await setup();await navigationFixture(other.page);await other.page.goto(direct);await other.page.getByText("Second playlist",{exact:true}).waitFor();expect(await other.page.title()).toBe(await page.title());await other.page.close();
     await page.getByRole("textbox",{name:"Search Spotify",exact:true}).fill("Later");await page.getByRole("button",{name:"Search",exact:true}).click();
     await page.waitForURL("**q=Later");await page.goBack();await page.waitForURL("**q=Focus");
+    await page.waitForFunction(()=>(document.querySelector('input[aria-label="Search Spotify"]') as HTMLInputElement)?.value === "Focus");
     expect(await page.getByRole("textbox",{name:"Search Spotify",exact:true}).inputValue()).toBe("Focus");
     await page.goForward();await page.waitForURL("**q=Later");
     await page.goto(base+"/#/spotify");await page.getByText("First playlist",{exact:true}).waitFor();await page.getByRole("button",{name:"More playlists"}).click();

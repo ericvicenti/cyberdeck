@@ -47,6 +47,29 @@ try {
   await page.evaluate(()=>location.hash="#/navigation-test-missing");
   await page.getByRole("heading",{name:"Page not found"}).waitFor();
   await page.waitForFunction(()=>document.title==="Page not found · Cyberdeck");
+  await page.goto(origin+"/#/desk?tab=services");
+  await page.getByTestId("glance-services").waitFor();
+  await page.waitForFunction(()=>document.title==="Services · Desk · Cyberdeck");
+  await page.getByTestId("voice-transcript").evaluate(node=>node.setAttribute("data-navigation-proof","preserved"));
+  await page.getByTestId("glance-tab-agents").click();await page.getByTestId("glance-agents").waitFor();
+  await page.goBack();await page.getByTestId("glance-services").waitFor();
+  if (await page.getByTestId("voice-transcript").getAttribute("data-navigation-proof")!=="preserved") throw new Error("Desk tab remounted voice");
+  await page.reload();await page.getByTestId("glance-services").waitFor();
+  const browserSockets: string[]=[];
+  page.on("websocket",ws=>{if(ws.url().includes("/api/browser/")) browserSockets.push(ws.url());});
+  await page.goto(origin+"/#/cloud?profile=chatgpt&url=javascript%3Aalert%281%29");
+  await page.getByRole("alert").filter({hasText:"Invalid browser URL"}).waitFor();
+  await page.waitForFunction(()=>document.title==="Invalid browser URL · Cloud · Cyberdeck");
+  if(browserSockets.length) throw new Error("Invalid Cloud link opened a browser socket");
+  const rich=process.env.CYBERDECK_TEST_RICH_SPOTIFY==="1";
+  const music="#/spotify?q=navigation-proof"+(rich?"&shelf=search":"&playlists=2");
+  await page.goto(origin+"/"+music);await page.getByTestId("spotify-app").waitFor();
+  await page.waitForFunction(()=>document.title.includes("navigation-proof")&&document.title.endsWith("Spotify · Cyberdeck"));
+  await page.getByTestId("spotify-app").evaluate(node=>node.setAttribute("data-navigation-proof","preserved"));
+  await page.getByTestId("nav-files").click();await page.getByTestId("files-table").waitFor();
+  await page.goBack();await page.getByTestId("spotify-app").waitFor();
+  if(await page.getByTestId("spotify-app").getAttribute("data-navigation-proof")!=="preserved") throw new Error("Spotify route remounted player");
+  await page.reload();await page.waitForFunction(()=>document.title.includes("navigation-proof")&&document.title.endsWith("Spotify · Cyberdeck"));
   mkdirSync("/tmp/cyberdeck-navigation",{recursive:true});
   await page.screenshot({path:"/tmp/cyberdeck-navigation/live-"+new URL(origin).hostname+".png"});
   let steamDetails = "not requested";
@@ -64,5 +87,5 @@ try {
     } else steamDetails = "skipped: no available Steam library";
   }
   if (errors.length || mutations.length) throw new Error(JSON.stringify({errors,mutations}));
-  console.log(JSON.stringify({origin,peer,checks:"deep link, reload, filters, Back/Forward, missing application, not-found title",nodeChecks:peer ? "new tab and Back/Forward passed" : "skipped: no online peer",steamDetails,pageErrors:errors,mutations}));
+  console.log(JSON.stringify({origin,peer,checks:"deep link, reload, filters, Back/Forward, missing application, not-found title",additionalChecks:"Desk tabs/title/reload/history/voice subtree, invalid Cloud URL without socket, signed-out Spotify links/title/reload/player persistence",nodeChecks:peer ? "new tab and Back/Forward passed" : "skipped: no online peer",steamDetails,pageErrors:errors,mutations}));
 } finally { await browser.close(); }

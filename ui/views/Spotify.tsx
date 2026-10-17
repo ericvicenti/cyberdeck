@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { connectSpotify, disconnectSpotify, finishSpotifyLogin, loadSpotifySdk, spotifyApi, spotifyClientId, spotifyConnected, spotifyRedirect, spotifyToken, spotifyUri, type SpotifyDevice, type SpotifyPlayback, type SpotifyPlayer, type SpotifyPlaylist, type SpotifyTrack } from "../lib/spotify";
 import { basicSpotifyLocation } from "../lib/basic-spotify-navigation";
-import { updateParams, useRouteTitle, writeRoute } from "../lib/navigation";
+import { routeHash, updateParams, useRouteTitle, writeRoute } from "../lib/navigation";
 import { MusicIcon, PauseIcon, PlayIcon, SkipBackIcon, SkipFwdIcon } from "../lib/icons";
 
 const button = "rounded border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm hover:border-emerald-400 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed";
@@ -12,11 +12,12 @@ const time = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms /
 export function Spotify({ visible, params }: { visible: boolean; params?: URLSearchParams }) {
   const lastParams = useRef(params || new URLSearchParams());
   if (visible && params) lastParams.current = params;
+  const routeKey = routeHash("spotify", lastParams.current);
   const locationState = basicSpotifyLocation(lastParams.current);
   const { q: routeQuery, pages } = locationState;
-  useRouteTitle(visible ? `${routeQuery ? `${routeQuery} · ` : ""}${pages > 1 ? `Playlists ${pages} · ` : ""}Spotify${lastParams.current.get("node") ? ` · ${lastParams.current.get("node")}` : ""}` : undefined);
+  useRouteTitle(visible && location.hash === routeKey ? `${routeQuery ? `${routeQuery} · ` : ""}${pages > 1 ? `Playlists ${pages} · ` : ""}Spotify${lastParams.current.get("node") ? ` · ${lastParams.current.get("node")}` : ""}` : undefined);
   useEffect(() => {
-    if (visible) writeRoute("spotify", locationState.canonical, "replace");
+    if (visible && location.hash === routeKey) writeRoute("spotify", locationState.canonical, "replace");
   }, [visible, params?.toString()]);
   const [connected, setConnected] = useState(spotifyConnected);
   const [clientId, setClientId] = useState(spotifyClientId);

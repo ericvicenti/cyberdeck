@@ -4,6 +4,7 @@
 // (what the agent sees through its MCP tools, at a look). When the daemon says voice is
 // not configured, the card explains why and offers the one-time setup.
 import { useEffect, useRef, useState } from "react";
+import { routeHash, updateParams, useRouteTitle } from "../lib/navigation";
 import { api, post, navigate, ApiError } from "../lib/api";
 import { useVoice, micAllowedHere, type TranscriptLine } from "../lib/voice";
 import { talkFace, isTalkKey, TALK_MODES } from "../lib/talk";
@@ -40,7 +41,13 @@ function healthOf(h: unknown): { ok: boolean | null; label: string } {
   return { ok: null, label: String(h) };
 }
 
-export function Desk({ onLocked }: { onLocked: () => void }) {
+export function Desk({ params, onLocked }: { params: URLSearchParams; onLocked: () => void }) {
+  const requested = params.get("tab");
+  const tab: GlanceTab = requested === "services" || requested === "agents" ? requested : "fleet";
+  useEffect(() => {
+    if (location.hash === routeHash("desk", params) && requested !== null && requested !== "services" && requested !== "agents") updateParams({ tab: null }, "replace");
+  }, [requested]);
+  useRouteTitle(tab === "fleet" ? undefined : `${tab === "services" ? "Services" : "Agents"} · Desk${params.get("node") ? ` · ${params.get("node")}` : ""}`);
   const v = useVoice({ onLocked });
   const [status, setStatus] = useState<VoiceStatus | null>(null);
   const [nodeName, setNodeName] = useState<string>("");
@@ -264,7 +271,7 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
             {configured && note && <p className="mt-2 text-[11px] text-zinc-400" data-testid="voice-note">{note}</p>}
           </section>
 
-          <GlancePanel onLocked={onLocked} />
+          <GlancePanel tab={tab} onLocked={onLocked} />
         </div>
 
         <section className="hud-card flex min-h-[200px] flex-col p-3 md:h-[calc(100dvh-7rem)] md:min-h-0" data-testid="voice-transcript">
@@ -292,8 +299,7 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
 const BADGE_TONE = { bad: "neon-red", warn: "neon-amber", ok: "text-zinc-500" } as const;
 
 /** Fleet / Services / Agents under the TALK button: the overview the agent reads, at a glance. */
-function GlancePanel({ onLocked }: { onLocked: () => void }) {
-  const [tab, setTab] = useState<GlanceTab>(() => (localStorage.getItem("cyberdeck-desk-glance") as GlanceTab | null) ?? "fleet");
+function GlancePanel({ tab, onLocked }: { tab: GlanceTab; onLocked: () => void }) {
   const [ov, setOv] = useState<Overview | null>(null);
   const [nodes, setNodes] = useState<NodeSeen[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -315,7 +321,7 @@ function GlancePanel({ onLocked }: { onLocked: () => void }) {
     const iv = setInterval(load, 60_000);
     return () => { alive = false; clearInterval(iv); };
   }, []);
-  const pick = (t: GlanceTab) => { setTab(t); localStorage.setItem("cyberdeck-desk-glance", t); };
+  const pick = (tab: GlanceTab) => updateParams({ tab: tab === "fleet" ? null : tab });
   const g = ov ? glance(ov, nodes) : null;
   const go = (view: string, params: Record<string, string> = {}) => () => navigate(view, params);
   const row = "flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-[12px] hover:bg-zinc-800/60";

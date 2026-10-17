@@ -9,6 +9,8 @@ const requests: string[] = [], mutations: string[] = [], errors: string[] = [];
 const browserSockets = new Set<any>();
 const browserMessages: any[] = [];
 let locked = false;
+let browserUnavailable = false;
+const browserConnections: string[] = [];
 const deferred = new Map<string, () => void>();
 const projects = ["alpha", "beta"].map(slug => ({ slug, name: slug === "alpha" ? "Alpha project" : "Beta project", status: "active", depth: 0, parent: null, repos: [], hosts: ["Test"], links: [], body: `# ${slug}`, file: `projects/${slug}/index.md` }));
 const runs = ["run-a", "run-b"].map(id => ({ id, task: id === "run-a" ? "T-1" : "T-2", title: id, host: "Test", startedAt: "2026-10-12T00:00:00Z", finishedAt: "2026-10-12T00:01:00Z", status: "done", step: "done", verdict: "pass", dir: `/runs/${id}` }));
@@ -17,7 +19,7 @@ const entry = (name: string, size = 1) => ({ name, size, type: "file", mtime: si
 const session = (id: string) => ({ id, title: `Shell ${id}`, cwd: "/home/test", cmd: null, tool: "shell", prompt: null, runner: "pty", state: "running", createdAt: 1, exitedAt: null, exitCode: null, clients: 0, lastOutputAt: null, bells: 0, busy: false });
 const server = Bun.serve<{legacy:boolean}>({port:0,hostname:"127.0.0.1",async fetch(req, server) {
   const u = new URL(req.url), original = u.pathname;
-  if (/^\/api\/browser\/[^/]+\/stream$/.test(original) && server.upgrade(req,{data:{legacy:original.includes("/claude/")}})) return;
+  if (/^\/api\/browser\/[^/]+\/stream$/.test(original) && server.upgrade(req,{data:{legacy:original.includes("/claude/")}})) { browserConnections.push(original); return; }
   if (original.startsWith("/api/")) {
     requests.push(original + u.search);
     if (req.method !== "GET") { mutations.push(req.method + " " + original); return Response.json({error:"Test forbids mutations"},{status:405}); }
@@ -46,7 +48,7 @@ const server = Bun.serve<{legacy:boolean}>({port:0,hostname:"127.0.0.1",async fe
     if (path === "/api/cmux/screen") return Response.json({text:`screen ${u.searchParams.get("surface")} scrollback=${u.searchParams.get("scrollback")}`});
     if (path === "/api/applications") return Response.json({applications:[]});
     if (path === "/api/sessions") return Response.json({sessions:[session("one"),session("two")]});
-    if (path === "/api/browser/profiles") return Response.json({available:true,profiles:[{name:"chatgpt",open:true,exists:true},{name:"claude",open:false,exists:true},{name:"default",open:false,exists:false}]});
+    if (path === "/api/browser/profiles") return Response.json({available:!browserUnavailable,profiles:[{name:"chatgpt",open:true,exists:true},{name:"claude",open:false,exists:true},{name:"default",open:false,exists:false}]});
     const conv = path.match(/^\/api\/cloud\/(?:chatgpt|claude)\/conversations\/(.+)$/)?.[1];
     if (conv) {
       if (conv === "missing") return Response.json({error:"Not found"},{status:404});
@@ -316,4 +318,40 @@ test("late remote-browser events cannot navigate or retitle a different primary 
   await page.waitForTimeout(350);
   expect(page.url()).toBe(destination); expect(await page.title()).toBe("Data · Cyberdeck");
   expect(errors).toEqual([]); expect(mutations).toEqual([]);
+});
+
+
+test("Desk tabs have canonical links and history without remounting the voice view", async () => {
+  // A fresh context keeps this history-count assertion below Chromium’s entry cap.
+  await page.close(); page = await browser.newPage({viewport:{width:1440,height:1000}}); page.setDefaultTimeout(15000); page.on("pageerror",e=>errors.push(e.message));
+  await page.addInitScript(()=>localStorage.setItem("cyberdeck-desk-glance","agents"));
+  await go("desk");await page.getByTestId("glance-fleet").waitFor();await title("Desk · Cyberdeck");
+  await page.getByTestId("voice-transcript").evaluate(node=>node.setAttribute("data-session-proof","preserved"));
+  const before=await page.evaluate(()=>history.length);
+  await page.getByTestId("glance-tab-services").click();await title("Services · Desk · Cyberdeck");
+  expect(await param("tab")).toBe("services");expect(await page.evaluate(()=>history.length)).toBe(before+1);
+  await page.getByTestId("glance-tab-services").click();expect(await page.evaluate(()=>history.length)).toBe(before+1);
+  await page.getByTestId("glance-tab-agents").click();await page.getByTestId("glance-agents").waitFor();await title("Agents · Desk · Cyberdeck");
+  await page.goBack();await page.getByTestId("glance-services").waitFor();await title("Services · Desk · Cyberdeck");
+  await page.goForward();await page.getByTestId("glance-agents").waitFor();
+  expect(await page.getByTestId("voice-transcript").getAttribute("data-session-proof")).toBe("preserved");
+  await page.reload();await page.getByTestId("glance-agents").waitFor();await title("Agents · Desk · Cyberdeck");
+  const other=await browser.newPage();await other.goto(page.url());await other.getByTestId("glance-agents").waitFor();expect(await other.title()).toBe("Agents · Desk · Cyberdeck");await other.close();
+  await go("desk?tab=invalid");await page.getByTestId("glance-fleet").waitFor();expect(await param("tab")).toBeNull();await title("Desk · Cyberdeck");
+  await go("desk?tab=fleet");await page.getByTestId("glance-fleet").waitFor();expect(await param("tab")).toBeNull();
+  expect(mutations).toEqual([]);
+});
+
+
+test("Cloud invalid URLs, missing profiles and unavailable browsers have honest titles without opening a session", async () => {
+  const before=browserConnections.length;
+  await go("cloud?profile=missing");await page.getByRole("alert").filter({hasText:"Browser profile not found"}).waitFor();await title("Browser profile not found · Cloud · Cyberdeck");
+  await page.reload();await title("Browser profile not found · Cloud · Cyberdeck");
+  await go("cloud?profile=chatgpt&url=javascript%3Aalert%281%29");await title("Invalid browser URL · Cloud · Cyberdeck");
+  await page.getByRole("alert").filter({hasText:"Invalid browser URL"}).waitFor();
+  browserUnavailable=true;
+  try {await go("cloud?profile=chatgpt");await page.getByRole("alert").filter({hasText:"Browser unavailable"}).waitFor();await title("Browser unavailable · Cloud · Cyberdeck");}
+  finally {browserUnavailable=false;}
+  expect(browserConnections.length).toBe(before);
+  await go("files?path=%2Fhome%2Ftest");await title("/home/test · Files · Cyberdeck");expect(mutations).toEqual([]);
 });
