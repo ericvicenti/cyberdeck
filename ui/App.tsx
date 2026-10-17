@@ -135,7 +135,7 @@ export function App() {
         <span className="hidden text-[10px] uppercase tracking-widest text-zinc-600 sm:inline">/ {NAV.find((n) => isActive(n.view))?.label ?? route.view}</span>
         <div className="hidden items-center gap-1.5 pl-3 md:flex" data-testid="hud-chips">
           <span className="hud-chip text-zinc-300"><span className="led led-on" />{nodeId ? activeNodeName() : fleet?.self.name ?? "local"}</span>
-          <span className="hud-chip text-zinc-300"><span className={`led ${onlineCount === (fleet?.nodes.length ?? 0) ? "led-on" : "led-warn"}`} />fleet {onlineCount}/{fleet?.nodes.length ?? 0}</span>
+          <button type="button" data-testid="header-fleet" className="hud-chip text-zinc-300 hover:text-zinc-100" onClick={() => navigate("fleet")} title="Open Fleet overview"><span className={`led ${onlineCount === (fleet?.nodes.length ?? 0) ? "led-on" : "led-warn"}`} />fleet {onlineCount}/{fleet?.nodes.length ?? 0}</button>
           <button className="hud-chip text-zinc-300 hover:text-zinc-100" onClick={() => navigate("agents")}><span className={`led ${hud?.running ? "led-run" : "led-off"}`} />tasks {hud ? `${hud.tasks} open` : "—"}{hud?.running ? ` · ${hud.running} run` : ""}</button>
           <button className={`hud-chip ${hud?.down ? "neon-red" : "text-zinc-300"} hover:text-zinc-100`} onClick={() => navigate("services")}><span className={`led ${hud?.down ? "led-err" : hud?.down === 0 ? "led-on" : "led-off"}`} />svc {hud?.down == null ? "—" : hud.down ? `${hud.down} down` : "ok"}</button>
           {cmuxCount != null && <button className="hud-chip text-zinc-300 hover:text-zinc-100" onClick={() => navigate("cmux")}><span className="led led-on" />cmux {cmuxCount}</button>}

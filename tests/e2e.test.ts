@@ -113,6 +113,13 @@ test("shell renders: title bar, activity bar, home dashboard", async () => {
   expect(await page.isVisible('[data-testid="widget-codex-use-reset"]')).toBe(false);
 });
 
+test("header Fleet chip opens the Fleet overview from Services", async () => {
+  await page.goto(`${BASE}/#/services`);
+  await page.click('[data-testid="header-fleet"]');
+  await waitFor(async () => new URL(page.url()).hash.startsWith("#/fleet"));
+  expect(await page.isVisible('[data-testid="network-map"]')).toBe(true);
+});
+
 test("desk view: talk button and the not-configured card render", async () => {
   // the test daemon has no Seed agents bridge, so voice reports unconfigured
   await page.goto(`${BASE}/#/desk`);
