@@ -357,8 +357,7 @@ export function Home({ onLocked }: { onLocked: () => void }) {
   }, []);
 
   const goto = (id: string, name: string, view: string) => {
-    setActiveNode(id, name);
-    navigate(view);
+    navigate(view, { node: id });
   };
 
   const pair = async () => {

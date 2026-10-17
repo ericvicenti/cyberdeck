@@ -3,8 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import { browserWsUrl } from "../lib/api";
 
-type Props = { profile: string; url?: string; onState?: (s: { url: string; title: string }) => void; className?: string };
+export type RemoteBrowserState = {
+  url: string;
+  title: string;
+  navigation: "initial" | "restore" | "user" | "page";
+};
+type Props = { profile: string; url?: string; onState?: (s: RemoteBrowserState) => void; className?: string };
 type Frame = { data: string; w: number; h: number };
+type BrowserStateMessage = { t: "state"; url: string; title: string; navigationId?: number; navigationProtocol?: number };
+type PendingNavigation = { id: number; navigation: "restore" | "user" };
 
 const KEY_MODS = (e: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) => (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
 // CDP wants the Windows virtual key code for non-printable keys to be recognised by pages.
@@ -15,6 +22,15 @@ export function RemoteBrowser({ profile, url, onState, className = "" }: Props) 
   const wrapRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const sizeRef = useRef({ w: 1280, h: 800 });
+  const stateRef = useRef({ url: "", title: "" });
+  const desiredUrlRef = useRef(url);
+  const onStateRef = useRef(onState);
+  const nextNavigationRef = useRef(0);
+  const pendingRef = useRef<PendingNavigation | null>(null);
+  const readyRef = useRef(false);
+  const acknowledgedProtocolRef = useRef(false);
+  const deliveredRef = useRef(false);
+  const pageStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [status, setStatus] = useState<"connecting" | "live" | "closed" | "error">("connecting");
   const [error, setError] = useState<string | null>(null);
   const [state, setState] = useState({ url: "", title: "" });
@@ -22,7 +38,25 @@ export function RemoteBrowser({ profile, url, onState, className = "" }: Props) 
   const [focused, setFocused] = useState(false);
   const [frames, setFrames] = useState(0);
 
-  const send = (o: unknown) => { const ws = wsRef.current; if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(o)); };
+  desiredUrlRef.current = url;
+  onStateRef.current = onState;
+
+  const send = (o: unknown) => { const ws = wsRef.current; if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify(o)); return true; } return false; };
+  // The daemon echoes navigationId once its command settles. Until that ack,
+  // profile startup and redirect events may paint the URL bar but cannot own
+  // outer history. Old daemons are supported during a rolling fleet update.
+  const navigate = (t: "nav" | "back" | "forward" | "reload", navigation: "restore" | "user", target?: string) => {
+    const id = nextNavigationRef.current >= 0x7fffffff ? 1 : nextNavigationRef.current + 1;
+    const message = { t, ...(target ? { url: target } : {}), navigationId: id };
+    if (!send(message)) return;
+    nextNavigationRef.current = id;
+    pendingRef.current = { id, navigation };
+    if (pageStateTimerRef.current) clearTimeout(pageStateTimerRef.current);
+  };
+  const publish = (value: { url: string; title: string }, navigation: RemoteBrowserState["navigation"]) => {
+    deliveredRef.current = true;
+    onStateRef.current?.({ ...value, navigation });
+  };
 
   // connect
   useEffect(() => {
@@ -30,20 +64,54 @@ export function RemoteBrowser({ profile, url, onState, className = "" }: Props) 
     const ws = new WebSocket(browserWsUrl(profile));
     wsRef.current = ws;
     setStatus("connecting"); setError(null);
-    ws.onopen = () => { if (url) send({ t: "nav", url }); fit(); };
+    ws.onopen = () => { fit(); };
     ws.onmessage = (ev) => {
       let m: any; try { m = JSON.parse(String(ev.data)); } catch { return; }
       if (m.t === "frame") { setStatus("live"); draw(m as Frame); }
-      else if (m.t === "state") { setState({ url: m.url, title: m.title }); setBar((b) => (document.activeElement?.getAttribute("data-urlbar") ? b : m.url)); onState?.({ url: m.url, title: m.title }); }
+      else if (m.t === "state" && typeof m.url === "string" && typeof m.title === "string") {
+        const value = { url: m.url, title: m.title };
+        const message = m as BrowserStateMessage;
+        readyRef.current = true;
+        if (message.navigationProtocol === 1) acknowledgedProtocolRef.current = true;
+        stateRef.current = value;
+        setState(value);
+        setBar((b) => (document.activeElement?.getAttribute("data-urlbar") ? b : value.url));
+        if (message.navigationId !== undefined) {
+          if (pendingRef.current?.id !== message.navigationId) return;
+          const navigation = pendingRef.current.navigation;
+          pendingRef.current = null;
+          publish(value, navigation);
+        } else if (pendingRef.current && !acknowledgedProtocolRef.current) {
+          // Old daemons have no request acknowledgements. Wait for their final
+          // navigation/load state so the new UI remains safe during a rolling update.
+          if (pageStateTimerRef.current) clearTimeout(pageStateTimerRef.current);
+          pageStateTimerRef.current = setTimeout(() => {
+            const pending = pendingRef.current;
+            if (!pending) return;
+            pendingRef.current = null;
+            publish(stateRef.current, pending.navigation);
+          }, 250);
+        } else if (!pendingRef.current && !deliveredRef.current) {
+          const target = desiredUrlRef.current;
+          if (target && target !== value.url) navigate("nav", "restore", target);
+          else publish(value, "initial");
+        } else if (!pendingRef.current) {
+          if (pageStateTimerRef.current) clearTimeout(pageStateTimerRef.current);
+          pageStateTimerRef.current = setTimeout(() => publish(stateRef.current, "page"), 150);
+        }
+      }
       else if (m.t === "error") { setError(m.message); setStatus("error"); }
     };
     ws.onclose = () => { if (alive) setStatus((s) => (s === "error" ? s : "closed")); };
     ws.onerror = () => { if (alive) setStatus("error"); };
-    return () => { alive = false; ws.close(); wsRef.current = null; };
+    return () => { alive = false; readyRef.current = false; if (pageStateTimerRef.current) clearTimeout(pageStateTimerRef.current); ws.close(); wsRef.current = null; };
   }, [profile]);
 
   // navigate when the url prop changes after connect
-  useEffect(() => { if (url) send({ t: "nav", url }); }, [url]);
+  useEffect(() => {
+    if (!url || stateRef.current.url === url || !readyRef.current || wsRef.current?.readyState !== WebSocket.OPEN) return;
+    navigate("nav", "restore", url);
+  }, [url]);
 
   const draw = (f: Frame) => {
     const c = canvasRef.current; if (!c) return;
@@ -90,10 +158,10 @@ export function RemoteBrowser({ profile, url, onState, className = "" }: Props) 
   const led = status === "live" ? "led led-on" : status === "connecting" ? "led led-run" : "led led-err";
   return (
     <div className={`flex flex-col ${className}`}>
-      <form className="flex items-center gap-1 pb-2" onSubmit={(e) => { e.preventDefault(); if (bar.trim()) send({ t: "nav", url: bar.trim() }); canvasRef.current?.focus(); }}>
-        <button type="button" onClick={() => send({ t: "back" })} className="rounded border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800" title="back">←</button>
-        <button type="button" onClick={() => send({ t: "forward" })} className="rounded border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800" title="forward">→</button>
-        <button type="button" onClick={() => send({ t: "reload" })} className="rounded border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800" title="reload">↻</button>
+      <form className="flex items-center gap-1 pb-2" onSubmit={(e) => { e.preventDefault(); if (bar.trim()) navigate("nav", "user", bar.trim()); canvasRef.current?.focus(); }}>
+        <button type="button" onClick={() => navigate("back", "user")} className="rounded border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800" title="back">←</button>
+        <button type="button" onClick={() => navigate("forward", "user")} className="rounded border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800" title="forward">→</button>
+        <button type="button" onClick={() => navigate("reload", "user")} className="rounded border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800" title="reload">↻</button>
         <input value={bar} data-urlbar="1" onChange={(e) => setBar(e.target.value)} onFocus={(e) => e.target.select()} placeholder="https://" className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 outline-none focus:border-cyan-500/60" />
         <span className={led} title={status} />
         <span className="hidden text-[10px] text-zinc-500 sm:inline">{status === "live" ? `${profile} · ${frames} frames` : status}</span>

@@ -1,3 +1,4 @@
+import { updateParams, useRouteTitle } from "../lib/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, post, wsUrl, navigate, activeNode, activeNodeName, ApiError } from "../lib/api";
 import { openTerminal, launchCmd, resumeCmd, shq } from "../lib/terms";
@@ -14,21 +15,26 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
   const [collab, setCollab] = useState<Collab | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const [showHandoff, setShowHandoff] = useState(false);
-  const [runId, setRunId] = useState<string>(params.get("run") ?? "");
+  const showHandoff = params.get("handoff") === "1";
+  const runId = params.get("run") ?? "";
+  const setRunId = (run: string) => updateParams({ run });
   const focusTask = params.get("task") ?? "";
-  const [logFile, setLogFile] = useState<(typeof LOGS)[number]>("worker.log");
+  const logFile = LOGS.find(f => f === params.get("log")) ?? "worker.log";
+  const setLogFile = (log: string) => updateParams({ log: log === "worker.log" ? null : log });
   const [log, setLog] = useState<{ text: string; size: number }>({ text: "", size: 0 });
   const [follow, setFollow] = useState(true);
   const logRef = useRef<HTMLPreElement>(null);
   // sessions
-  const [q, setQ] = useState(params.get("q") ?? "");
-  const [host, setHost] = useState("");
-  const [tool, setTool] = useState("");
+  const q = params.get("q") ?? "", host = params.get("host") ?? "", tool = params.get("tool") ?? "";
+  const setQ = (q: string) => updateParams({ q }, "edit");
+  const setHost = (host: string) => updateParams({ host });
+  const setTool = (tool: string) => updateParams({ tool });
+  const sessionsRequest = useRef(0);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [pulling, setPulling] = useState<string | null>(null);
   // add task form
   const [form, setForm] = useState({ title: "", project: params.get("project") ?? "", host: "", worker: "cx", body: "" });
+  useEffect(() => { setForm(f => ({ ...f, project: params.get("project") ?? "" })); }, [params.get("project")]);
   // launch an agent in a terminal
   const nodes = useFleetNodes();
   const [launch, setLaunch] = useState({ node: activeNode(), cwd: "", tool: "cc" as "cc" | "cx", prompt: "" });
@@ -61,6 +67,7 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
   }, []);
 
   const loadSessions = async () => {
+    const request = ++sessionsRequest.current;
     const p = new URLSearchParams();
     if (q) p.set("q", q);
     if (host) p.set("host", host);
@@ -72,17 +79,18 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
       for (const prov of ["chatgpt", "claude"]) { try { const c = await api<Session[]>(`/api/cloud/${prov}/conversations?q=${encodeURIComponent(q)}`); rows.push(...c.filter((s) => !host || s.host === host)); } catch {} }
       rows.sort((a, b) => b.updated.localeCompare(a.updated));
     }
-    setSessions(rows);
+    if (request === sessionsRequest.current) setSessions(rows);
   };
-  useEffect(() => { const t = setTimeout(loadSessions, 250); return () => clearTimeout(t); }, [q, host, tool, ov?.fleetDir]);
+  useEffect(() => { const t = setTimeout(loadSessions, 250); return () => { clearTimeout(t); sessionsRequest.current++; }; }, [q, host, tool, ov?.fleetDir]);
 
   const runs = collab?.runs ?? [];
-  const run = runs.find((r) => r.id === runId) ?? runs[0];
-  useEffect(() => { if (run && run.id !== runId) setRunId(run.id); }, [run?.id]);
+  const run = runId ? runs.find((r) => r.id === runId) : (focusTask ? runs.find(r => r.task === focusTask) : runs[0]);
+  useEffect(() => { if (run && !runId) updateParams({ run: run.id }, "replace"); }, [run?.id, runId]);
+  useRouteTitle(collab && runId && !run ? "Run not found · Agents" : run ? `${run.id} · ${logFile} · Agents` : undefined);
   useEffect(() => {
     if (!focusTask || !collab) return;
     const r = runs.find((x) => x.task === focusTask);
-    if (r && !params.get("run")) setRunId(r.id);
+    if (r && !params.get("run")) updateParams({ run: r.id }, "replace");
     document.getElementById(`task-${focusTask}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [focusTask, collab?.tasks.length]);
   useEffect(() => {
@@ -116,12 +124,13 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
           </div>
           {msg && <span className="text-[11px] text-zinc-400" data-testid="agents-msg">{msg}</span>}
         </header>
+        {collab && runId && !run && <p role="alert">Run not found: {runId}</p>}
         {err && !ov && <div className="mt-6 hud-card p-6 text-sm text-zinc-400">{err}</div>}
         {ov && (
           <div className="mt-5 space-y-4">
             {/* handoff notes */}
             <div className="hud-card p-4">
-              <button onClick={() => setShowHandoff((v) => !v)} className="hud-label neon flex w-full items-center justify-between text-left">
+              <button onClick={() => updateParams({ handoff: showHandoff ? null : "1" })} className="hud-label neon flex w-full items-center justify-between text-left">
                 <span>Agent handoff notes ({ov.handoff.length})</span>
                 <span className="text-[11px] text-zinc-500">{showHandoff ? "hide" : "show"}</span>
               </button>

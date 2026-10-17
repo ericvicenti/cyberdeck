@@ -61,9 +61,8 @@
   window.addEventListener('keydown', event => {
     if (event.isTrusted === false || event.isComposing) return;
     handoffKeyboard(event); setMode('keyboard');
-    // Text fields always keep native typing, cursor movement and Space/Enter handling.
-    // The TV runtime must not turn those keys into gamepad navigation or playback.
-    if (editable(document.activeElement) && event.key !== 'Escape') event.stopImmediatePropagation();
+    // Keep dispatching: forms, React and editors need Enter and shortcut events.
+    // The TV runtime ignores physical keys in text fields when mode is keyboard.
   }, true);
   window.addEventListener('pointerdown', event => {
     if (event.isTrusted === false) return;

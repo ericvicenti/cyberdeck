@@ -1,14 +1,19 @@
+import { readRoute, updateParams } from "./navigation";
+export { parseHash, navigate, updateParams, routeHash, type Route } from "./navigation";
 export const token = () => localStorage.getItem("cyberdeck-token") ?? "";
 
 // ---- active node: "" = local, otherwise a paired node id. All API helpers
 // route through the local daemon's proxy when a remote node is active. ----
-export const activeNode = (): string => localStorage.getItem("cyberdeck-active-node") ?? "";
-export const activeNodeName = (): string => localStorage.getItem("cyberdeck-active-node-name") ?? "";
+export const activeNode = (): string => readRoute().params.get("node") ?? "";
+const nodeNames = new Map<string, string>();
+export const activeNodeName = (): string => nodeNames.get(activeNode()) ?? activeNode();
+export function rememberNodeNames(nodes: { id: string; name: string }[]) {
+  for (const node of nodes) nodeNames.set(node.id, node.name);
+}
 
 export function setActiveNode(id: string, name: string): void {
-  localStorage.setItem("cyberdeck-active-node", id);
-  localStorage.setItem("cyberdeck-active-node-name", name);
-  window.dispatchEvent(new Event("cyberdeck-node-changed"));
+  nodeNames.set(id, name);
+  updateParams({ node: id });
 }
 
 /** Map "/api/<rest>" onto the active node (via proxy) or leave local. */
@@ -16,7 +21,7 @@ export function scoped(path: string): string {
   const node = activeNode();
   if (!node || !path.startsWith("/api/")) return path;
   if (path.startsWith("/api/fleet") || path.startsWith("/api/nodes/")) return path; // fleet mgmt is always local
-  return `/api/nodes/${node}/proxy/${path.slice("/api/".length)}`;
+  return `/api/nodes/${encodeURIComponent(node)}/proxy/${path.slice("/api/".length)}`;
 }
 
 export class ApiError extends Error {
@@ -60,7 +65,7 @@ export const wsUrl = (path: string, params: Record<string, string> = {}): string
 /** Terminal WS path, node-aware (/api/term locally, /api/nodes/:id/term remotely). */
 export const termWsUrl = (params: Record<string, string> = {}): string => {
   const node = activeNode();
-  const path = node ? `/api/nodes/${node}/term` : "/api/term";
+  const path = node ? `/api/nodes/${encodeURIComponent(node)}/term` : "/api/term";
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const q = new URLSearchParams({ token: token(), ...params });
   return `${proto}://${location.host}${path}?${q}`;
@@ -69,30 +74,13 @@ export const termWsUrl = (params: Record<string, string> = {}): string => {
 /** Remote-browser screencast WS, node-aware (/api/browser/:p/stream locally, /api/nodes/:id/browser/:p/stream remotely). */
 export const browserWsUrl = (profile: string): string => {
   const node = activeNode();
-  const path = node ? `/api/nodes/${node}/browser/${encodeURIComponent(profile)}/stream` : `/api/browser/${encodeURIComponent(profile)}/stream`;
+  const path = node ? `/api/nodes/${encodeURIComponent(node)}/browser/${encodeURIComponent(profile)}/stream` : `/api/browser/${encodeURIComponent(profile)}/stream`;
   const proto = location.protocol === "https:" ? "wss" : "ws";
   return `${proto}://${location.host}${path}?${new URLSearchParams({ token: token() })}`;
 };
 
 export const rawUrl = (path: string, params: Record<string, string> = {}): string =>
   `${scoped(path)}?${new URLSearchParams({ ...params, token: token() })}`;
-
-// ---- tiny hash router: #/route?key=value ----
-export interface Route {
-  view: string;
-  params: URLSearchParams;
-}
-
-export function parseHash(): Route {
-  const h = location.hash.replace(/^#\/?/, "");
-  const [path, query = ""] = h.split("?");
-  return { view: path || "fleet", params: new URLSearchParams(query) };
-}
-
-export function navigate(view: string, params: Record<string, string> = {}): void {
-  const q = new URLSearchParams(params).toString();
-  location.hash = `#/${view}${q ? `?${q}` : ""}`;
-}
 
 // ---- formatting ----
 export function fmtBytes(n: number): string {

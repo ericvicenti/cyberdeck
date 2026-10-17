@@ -409,6 +409,8 @@ test("files: deep search finds nested file", async () => {
 
 test("terminal: runs shell commands end-to-end", async () => {
   await page.goto(`${BASE}/#/term?cwd=${encodeURIComponent(play)}`);
+  await page.getByTestId("term-new-form").waitFor();
+  await page.getByRole("button", { name: "Open", exact: true }).click();
   await page.waitForSelector("text=live");
   await page.click('[data-testid="terminal-host"]');
   await page.keyboard.type("echo e2e_$((6*7))");
@@ -522,7 +524,8 @@ test("fleet: pair a second node via the UI and browse it", async () => {
 
   // switch the whole UI onto the remote node and browse files through the proxy
   await page.selectOption('[data-testid="node-switcher"]', "stw-e2e-two");
-  await gotoFiles(play);
+  await page.goto(`${BASE}/#/files?node=stw-e2e-two&path=${encodeURIComponent(play)}`);
+  await page.getByTestId("row-readme.md").waitFor().catch(async error => { console.log("Peer navigation diagnostic", page.url(), await page.locator("main").innerText()); throw error; });
   expect(await page.isVisible('[data-testid="row-readme.md"]')).toBe(true);
   // status bar shows we are remote
   expect(await page.textContent('[data-testid="statusbar-node"]')).toContain("second-box");

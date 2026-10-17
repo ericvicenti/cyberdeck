@@ -1,3 +1,4 @@
+import { updateParams, useRouteTitle } from "../lib/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, post, rawUrl, navigate, fmtBytes, fmtAgo, fmtMode, fmtOctal, ApiError } from "../lib/api";
 import { ChevronRight, ChevronDown, DotsIcon, FolderIcon } from "../lib/icons";
@@ -270,15 +271,26 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
   const path = params.get("path") ?? "~";
   const [listing, setListing] = useState<Listing | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showHidden, setShowHidden] = useState(false);
-  const [sortKey, setSortKey] = useState<"name" | "size" | "mtime">("name");
-  const [sortDir, setSortDir] = useState<1 | -1>(1);
+  const showHidden = params.get("hidden") === "1";
+  const setShowHidden = (value: boolean) => updateParams({ hidden: value ? "1" : null });
+  const sortKey = ["size", "mtime"].includes(params.get("sort") ?? "") ? params.get("sort")! : "name";
+  const sortDir = params.get("order") === "desc" ? -1 : 1;
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<string | null>(null);
   const [clip, setClip] = useState<Clipboard>(null);
   const [ctx, setCtx] = useState<{ x: number; y: number; entry: Entry | null } | null>(null);
-  const [dialog, setDialog] = useState<Dialog>(null);
-  const [filter, setFilter] = useState("");
+  const [transientDialog, setTransientDialog] = useState<Dialog>(null);
+  const infoName = params.get("info");
+  const infoEntry = listing?.entries.find(e => e.name === infoName);
+  const dialog: Dialog = infoName ? (infoEntry ? { kind: "info", entry: infoEntry } : null) : transientDialog;
+  const setDialog = (value: Dialog) => {
+    if (value?.kind === "info") updateParams({ info: value.entry.name });
+    else { if (infoName) updateParams({ info: null }); setTransientDialog(value); }
+  };
+  const filter = params.get("q") ?? "";
+  const setFilter = (q: string) => updateParams({ q, deep: null }, "edit");
+  const deep = params.get("deep") === "1";
+  useRouteTitle(error ? `Cannot open ${path} · Files` : infoName ? `${listing && !infoEntry ? "File not found" : infoName} · File info` : undefined);
   const [deepResults, setDeepResults] = useState<string[] | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -302,8 +314,6 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
       if (seq !== loadSeq.current) return; // a newer navigation superseded this fetch
       setListing(res);
       setSel(new Set());
-      setDeepResults(null);
-      setFilter("");
     } catch (err) {
       if (seq !== loadSeq.current) return;
       if (err instanceof ApiError && err.status === 401) return onLocked();
@@ -312,7 +322,9 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
   }, [path]);
 
   useEffect(() => {
+    setListing(null);
     load();
+    return () => { loadSeq.current++; };
   }, [load]);
 
   const go = (p: string) => navigate("files", { path: p });
@@ -408,16 +420,16 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
     }
   };
 
-  const doDeepSearch = async () => {
-    try {
-      const res = await api<{ results: string[] }>(
-        `/api/fs/search?dir=${encodeURIComponent(listing!.path)}&q=${encodeURIComponent(filter)}`
-      );
-      setDeepResults(res.results);
-    } catch (err) {
-      toast(String(err instanceof Error ? err.message : err));
-    }
-  };
+  const doDeepSearch = () => updateParams({ deep: "1" });
+  useEffect(() => {
+    setDeepResults(null);
+    if (!deep || !filter) return;
+    let alive = true;
+    api<{ results: string[] }>(`/api/fs/search?dir=${encodeURIComponent(path)}&q=${encodeURIComponent(filter)}`)
+      .then(res => { if (alive) setDeepResults(res.results); })
+      .catch(err => { if (alive) toast(String(err instanceof Error ? err.message : err)); });
+    return () => { alive = false; };
+  }, [deep, path, filter]);
 
   // ----- selection -----
   const clickRow = (e: Entry, ev: React.MouseEvent) => {
@@ -619,17 +631,18 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
         </div>
 
         <div className="flex items-center gap-2">
+          <form onSubmit={(event) => { event.preventDefault(); if (filter) doDeepSearch(); }}>
           <input
             value={filter}
             onChange={(e) => {
               setFilter(e.target.value);
               setDeepResults(null);
             }}
-            onKeyDown={(e) => e.key === "Enter" && filter && doDeepSearch()}
             placeholder="filter · Enter = deep search"
             className="w-32 rounded-lg border border-zinc-800 sm:w-52 bg-zinc-900 px-3 py-1.5 text-xs outline-none focus:border-zinc-600"
             data-testid="files-filter"
           />
+          </form>
           <label className="flex items-center gap-1.5 text-xs text-zinc-400">
             <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} className="accent-emerald-500" data-testid="toggle-hidden" />
             hidden
@@ -700,7 +713,7 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
               <span>
                 {deepResults.length} result{deepResults.length === 1 ? "" : "s"} for “{filter}” under {listing?.path}
               </span>
-              <button className="text-emerald-400 hover:underline" onClick={() => setDeepResults(null)}>
+              <button className="text-emerald-400 hover:underline" onClick={() => updateParams({ deep: null })}>
                 back to listing
               </button>
             </div>
@@ -740,11 +753,7 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
                     onClick={(e) => {
                       e.stopPropagation();
                       if (key === "mode" || key === "owner" || key === "menu") return;
-                      if (sortKey === key) setSortDir(sortDir === 1 ? -1 : 1);
-                      else {
-                        setSortKey(key as any);
-                        setSortDir(1);
-                      }
+                      updateParams({ sort: key === "name" ? null : key, order: sortKey === key && sortDir === 1 ? "desc" : null });
                     }}
                   >
                     {label}
@@ -909,6 +918,7 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
       )}
 
       {/* dialogs */}
+      {infoName && listing && !infoEntry && <Modal title="File not found" onClose={() => setDialog(null)}><p>No file named {infoName} in this directory.</p></Modal>}
       {dialog?.kind === "newFolder" && (
         <NameDialog
           title="New folder"

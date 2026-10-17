@@ -38,8 +38,7 @@ async function keyboardOverlay() {
     document.body.append(overlay);
     overlay.querySelector('#done')!.addEventListener('click',()=>{input.value='typed on pad';overlay.remove();input.focus();input.setSelectionRange(input.value.length,input.value.length)});
     (overlay.querySelector('button') as HTMLElement).focus();
-    // Emulate the legacy TV runtime: it would consume native spaces and arrows if not intercepted.
-    window.addEventListener('keydown',e=>{if([' ','ArrowLeft'].includes(e.key))e.preventDefault()},true);
+    // Physical keys must reach the application after the overlay hands focus back.
   });
 }
 test('first physical key closes virtual keyboard, keeps entered text, and continues native editing', async () => {
@@ -61,7 +60,24 @@ test('document-start kiosk bootstrap keeps physical text editing native', async 
   const errors: string[]=[];page.on('pageerror',e=>errors.push(e.message));
   await page.addInitScript({content:source});
   await page.goto('data:text/html,<input id="text"><p data-controller-only>Gamepad hint</p>');
-  await page.evaluate(()=>window.addEventListener('keydown',e=>{if([' ','ArrowLeft'].includes(e.key))e.preventDefault()},true));
+  await page.evaluate(() => { (window as any).seen = []; document.querySelector("input")!.addEventListener("keydown", e => (window as any).seen.push(e.key)); });
   await page.locator('#text').fill('ready');await page.locator('#text').press('End');await page.keyboard.type(' now');
   expect(await page.locator('#text').inputValue()).toBe('ready now');expect(await mode()).toBe('keyboard');expect(errors).toEqual([]);
+  expect(await page.evaluate(() => (window as any).seen)).toContain(' ');
+});
+
+
+test('physical Enter and editor shortcuts reach application handlers', async () => {
+  await fixture();
+  await page.evaluate(() => {
+    (window as any).seen = [];
+    document.querySelector('input')!.addEventListener('keydown', event => {
+      (window as any).seen.push(event.key);
+      if (event.key === 's' && (event.ctrlKey || event.metaKey)) event.preventDefault();
+    });
+  });
+  await page.locator('#text').focus();
+  await page.keyboard.press('Enter'); await page.keyboard.press('ControlOrMeta+s');
+  expect(await page.evaluate(() => (window as any).seen)).toContain('Enter');
+  expect(await page.evaluate(() => (window as any).seen)).toContain('s');
 });
