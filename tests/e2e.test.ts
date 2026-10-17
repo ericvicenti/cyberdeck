@@ -597,6 +597,10 @@ test("video: non-native format transcodes to HLS via video.js", async () => {
 }, 30000);
 
 test("mobile: dialogs fit the viewport, editor and player usable", async () => {
+  // Keep the mobile case runnable without the earlier desktop playlist test.
+  mkdirSync(join(play, "music"), { recursive: true });
+  writeFileSync(join(play, "music", "01-first.mp3"), "not-really-audio");
+  writeFileSync(join(play, "music", "02-second.mp3"), "not-really-audio");
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   await phone.goto(`${BASE}/#t=${TOKEN}`);
   await phone.waitForSelector('[data-testid="mnav-files"]');
@@ -617,6 +621,7 @@ test("mobile: dialogs fit the viewport, editor and player usable", async () => {
   // audio player stacks playlist below on mobile
   await phone.goto(`${BASE}/#/edit?path=${encodeURIComponent(join(play, "music", "01-first.mp3"))}`);
   await phone.waitForSelector('[data-testid="media-player"]');
+  await phone.waitForSelector('[data-testid="media-playlist"]');
   expect(await phone.isVisible('[data-testid="media-playlist"]')).toBe(true);
   await phone.close();
 }, 30000);
