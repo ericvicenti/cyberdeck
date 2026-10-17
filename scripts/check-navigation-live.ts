@@ -70,6 +70,12 @@ try {
   await page.goBack();await page.getByTestId("spotify-app").waitFor();
   if(await page.getByTestId("spotify-app").getAttribute("data-navigation-proof")!=="preserved") throw new Error("Spotify route remounted player");
   await page.reload();await page.waitForFunction(()=>document.title.includes("navigation-proof")&&document.title.endsWith("Spotify · Cyberdeck"));
+  await page.goto(origin+"/#/agents?run=navigation-proof-missing&log=invalid");
+  await page.waitForFunction(()=>["Run not found · Agents · Cyberdeck","Agents unavailable · Cyberdeck"].includes(document.title));
+  if(new URLSearchParams(new URL(page.url()).hash.split("?")[1]).has("log")) throw new Error("Invalid log was not canonicalized");
+  await page.reload();await page.waitForFunction(()=>["Run not found · Agents · Cyberdeck","Agents unavailable · Cyberdeck"].includes(document.title));
+  await page.goto(origin+"/#/agents?task=navigation-proof-missing");
+  await page.waitForFunction(()=>["Task not found · Agents · Cyberdeck","Agents unavailable · Cyberdeck"].includes(document.title));
   mkdirSync("/tmp/cyberdeck-navigation",{recursive:true});
   await page.screenshot({path:"/tmp/cyberdeck-navigation/live-"+new URL(origin).hostname+".png"});
   let steamDetails = "not requested";
@@ -87,5 +93,5 @@ try {
     } else steamDetails = "skipped: no available Steam library";
   }
   if (errors.length || mutations.length) throw new Error(JSON.stringify({errors,mutations}));
-  console.log(JSON.stringify({origin,peer,checks:"deep link, reload, filters, Back/Forward, missing application, not-found title",additionalChecks:"Desk tabs/title/reload/history/voice subtree, invalid Cloud URL without socket, signed-out Spotify links/title/reload/player persistence",nodeChecks:peer ? "new tab and Back/Forward passed" : "skipped: no online peer",steamDetails,pageErrors:errors,mutations}));
+  console.log(JSON.stringify({origin,peer,checks:"deep link, reload, filters, Back/Forward, missing application, not-found title",additionalChecks:"Desk tabs/title/reload/history/voice subtree, invalid Cloud URL without socket, signed-out Spotify links/title/reload/player persistence, Agents invalid selection/log canonicalization",nodeChecks:peer ? "new tab and Back/Forward passed" : "skipped: no online peer",steamDetails,pageErrors:errors,mutations}));
 } finally { await browser.close(); }

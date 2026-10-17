@@ -1,4 +1,4 @@
-import { updateParams, useRouteTitle } from "../lib/navigation";
+import { routeHash, updateParams, useRouteTitle } from "../lib/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, post, wsUrl, navigate, activeNode, activeNodeName, ApiError } from "../lib/api";
 import { openTerminal, launchCmd, resumeCmd, shq } from "../lib/terms";
@@ -21,7 +21,12 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
   const focusTask = params.get("task") ?? "";
   const logFile = LOGS.find(f => f === params.get("log")) ?? "worker.log";
   const setLogFile = (log: string) => updateParams({ log: log === "worker.log" ? null : log });
-  const [log, setLog] = useState<{ text: string; size: number }>({ text: "", size: 0 });
+  const [logResult, setLogResult] = useState({ key: "", text: "", size: 0, error: "" });
+  const routeKey = routeHash("agents", params);
+  useEffect(() => {
+    const raw = params.get("log");
+    if (location.hash === routeKey && raw !== null && (raw === "worker.log" || !LOGS.some(file => file === raw))) updateParams({ log: null }, "replace");
+  }, [routeKey]);
   const [follow, setFollow] = useState(true);
   const logRef = useRef<HTMLPreElement>(null);
   // sessions
@@ -85,19 +90,23 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
 
   const runs = collab?.runs ?? [];
   const run = runId ? runs.find((r) => r.id === runId) : (focusTask ? runs.find(r => r.task === focusTask) : runs[0]);
-  useEffect(() => { if (run && !runId) updateParams({ run: run.id }, "replace"); }, [run?.id, runId]);
-  useRouteTitle(collab && runId && !run ? "Run not found · Agents" : run ? `${run.id} · ${logFile} · Agents` : undefined);
+  const missingTask = collab && focusTask && !collab.tasks.some(t => t.id === focusTask) && !runs.some(r => r.task === focusTask);
+  const logKey = `${run?.id || ""}:${logFile}`;
+  const log = logResult.key === logKey ? logResult : { key: "", text: "", size: 0, error: "" };
+  useEffect(() => { if (location.hash === routeKey && run && !runId) updateParams({ run: run.id }, "replace"); }, [run?.id, runId, routeKey]);
+  useRouteTitle(location.hash !== routeKey ? undefined : err && !ov ? "Agents unavailable" : missingTask ? "Task not found · Agents" : collab && runId && !run ? "Run not found · Agents" : run ? `${run.id} · ${log.error || logFile} · Agents` : undefined);
   useEffect(() => {
-    if (!focusTask || !collab) return;
+    if (location.hash !== routeKey || !focusTask || !collab) return;
     const r = runs.find((x) => x.task === focusTask);
     if (r && !params.get("run")) updateParams({ run: r.id }, "replace");
     document.getElementById(`task-${focusTask}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [focusTask, collab?.tasks.length]);
   useEffect(() => {
     if (!run) return;
-    let alive = true;
+    let alive = true, request = 0;
     const fetchLog = async () => {
-      try { const l = await api<{ text: string; size: number }>(`/api/control/collab/runs/${run.id}/log?file=${logFile}&tail=60000`); if (alive) setLog(l); } catch {}
+      const current = ++request;
+      try { const l = await api<{ text: string; size: number }>(`/api/control/collab/runs/${run.id}/log?file=${logFile}&tail=60000`); if (alive && current === request) setLogResult({ ...l, key: logKey, error: "" }); } catch (e) { if (alive && current === request) { if (e instanceof ApiError && e.status === 401) onLocked(); setLogResult({ key: logKey, text: "", size: 0, error: e instanceof ApiError && e.status === 404 ? "Log not found" : "Log unavailable" }); } }
     };
     fetchLog();
     const iv = setInterval(fetchLog, run.status === "running" ? 3000 : 30000);
@@ -125,6 +134,7 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
           {msg && <span className="text-[11px] text-zinc-400" data-testid="agents-msg">{msg}</span>}
         </header>
         {collab && runId && !run && <p role="alert">Run not found: {runId}</p>}
+        {missingTask && <p role="alert">Task not found: {focusTask}</p>}
         {err && !ov && <div className="mt-6 hud-card p-6 text-sm text-zinc-400">{err}</div>}
         {ov && (
           <div className="mt-5 space-y-4">
@@ -252,7 +262,7 @@ export function Agents({ params, onLocked }: { params: URLSearchParams; onLocked
                       <label className="ml-2 flex items-center gap-1 text-[10px] text-zinc-500"><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />follow</label>
                       <button onClick={() => openOn(run.host, run.dir, `tail -n 200 -f ${shq(`${run.dir}/${logFile === "result.md" ? "result.md" : logFile}`)}`, `log ${run.task}`)} className="ml-2 rounded border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800" title="tail this log in a terminal on the run's host">Open in terminal</button>
                     </div>
-                    {logFile === "result.md" ? (
+                    {log.error ? <p role="alert" className="mt-2">{log.error}: {logFile}</p> : log.key !== logKey ? <p role="status" className="mt-2">Loading log…</p> : logFile === "result.md" ? (
                       <div className="mt-2 max-h-[380px] overflow-auto rounded-lg bg-zinc-950 p-3"><Markdown text={log.text || "(no result yet)"} /></div>
                     ) : (
                       <pre ref={logRef} className={`mt-2 max-h-[380px] overflow-auto whitespace-pre-wrap break-words rounded-sm border border-sky-500/10 bg-zinc-950 p-3 font-mono text-[11px] leading-snug text-zinc-300 ${run.status === "running" ? "hud-cursor" : ""}`} data-testid="run-log">{log.text || "(empty)"}</pre>

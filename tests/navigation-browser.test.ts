@@ -10,6 +10,7 @@ const browserSockets = new Set<any>();
 const browserMessages: any[] = [];
 let locked = false;
 let browserUnavailable = false;
+let missingLog = false, holdLog = false;
 const browserConnections: string[] = [];
 const deferred = new Map<string, () => void>();
 const projects = ["alpha", "beta"].map(slug => ({ slug, name: slug === "alpha" ? "Alpha project" : "Beta project", status: "active", depth: 0, parent: null, repos: [], hosts: ["Test"], links: [], body: `# ${slug}`, file: `projects/${slug}/index.md` }));
@@ -29,7 +30,11 @@ const server = Bun.serve<{legacy:boolean}>({port:0,hostname:"127.0.0.1",async fe
     if (path === "/api/fleet/nodes") return Response.json({self:{nodeId:"local",name:"Test",urls:[]},nodes:[{id:"peer-a",name:"Peer A",online:true,status:null,url:"http://peer-a.test",last_seen:null},{id:"peer-b",name:"Peer B",online:true,status:null,url:"http://peer-b.test",last_seen:null}]});
     if (path === "/api/control/overview") return Response.json(overview);
     if (path === "/api/control/collab") return Response.json(overview.collab);
-    if (path.startsWith("/api/control/collab/runs/")) return Response.json({text:`${path} ${u.searchParams.get("file")}`,size:50});
+    if (path.startsWith("/api/control/collab/runs/")) {
+      if (missingLog && u.searchParams.get("file") === "result.md") return Response.json({error:"Missing log"},{status:404});
+      if (holdLog && path.includes("/run-a/")) await new Promise<void>(r=>deferred.set("log",r));
+      return Response.json({text:`${path} ${u.searchParams.get("file")}`,size:50});
+    }
     if (path === "/api/control/sessions") {
       if (u.searchParams.get("q") === "slow") await new Promise<void>(r => deferred.set("slow", r));
       return Response.json(u.searchParams.get("q") ? [{host:"Test",tool:"cx",id:"test-session",title:u.searchParams.get("q"),cwd:"/home/test",updated:"2026-10-12",started:"2026-10-12",file:""}] : []);
@@ -354,4 +359,30 @@ test("Cloud invalid URLs, missing profiles and unavailable browsers have honest 
   finally {browserUnavailable=false;}
   expect(browserConnections.length).toBe(before);
   await go("files?path=%2Fhome%2Ftest");await title("/home/test · Files · Cyberdeck");expect(mutations).toEqual([]);
+});
+
+
+test("Agents missing tasks/logs have matching titles and never retain another log", async () => {
+  await go("agents?task=missing");await page.getByRole("alert").filter({hasText:"Task not found"}).waitFor();await title("Task not found · Agents · Cyberdeck");
+  await page.reload();await title("Task not found · Agents · Cyberdeck");
+  await go("agents?run=run-a&log=invalid");await page.getByTestId("run-log").filter({hasText:"worker.log"}).waitFor();expect(await param("log")).toBeNull();
+  missingLog=true;
+  try {
+    await page.getByRole("button",{name:"result.md",exact:true}).click();await page.getByRole("alert").filter({hasText:"Log not found"}).waitFor();await title("run-a · Log not found · Agents · Cyberdeck");
+    expect(await page.getByTestId("run-log").count()).toBe(0);
+    await page.reload();await page.getByRole("alert").filter({hasText:"Log not found"}).waitFor();await title("run-a · Log not found · Agents · Cyberdeck");
+    await page.getByRole("button",{name:"worker.log",exact:true}).click();await page.getByTestId("run-log").filter({hasText:"worker.log"}).waitFor();await title("run-a · worker.log · Agents · Cyberdeck");
+  } finally {missingLog=false;}
+});
+
+test("Agents late log responses cannot overwrite a newer run", async () => {
+  holdLog=true;
+  try {
+    await go("agents?run=run-a");while(!deferred.has("log")) await new Promise(r=>setTimeout(r,10));
+    await page.evaluate(()=>location.hash="#/agents?run=run-b&log=reviewer.log");
+    await page.getByTestId("run-log").filter({hasText:"run-b/log reviewer.log"}).waitFor();
+    deferred.get("log")!();deferred.delete("log");await settle();
+    expect(await page.getByTestId("run-log").textContent()).toContain("run-b/log reviewer.log");await title("run-b · reviewer.log · Agents · Cyberdeck");
+    expect(mutations).toEqual([]);
+  } finally {holdLog=false;deferred.get("log")?.();deferred.delete("log");}
 });
