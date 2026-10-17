@@ -179,13 +179,14 @@ the node token (`~/.cyberdeck/token`) requires a re-run so the secret on the age
 | `POST /api/voice/livekit` | pairing | `{sessionId, url, token, room, identity, expiresAt, profile?}` from `CreateVoiceSession`; `secureUrl?` is the `wss://` twin of a local plain `ws://` url when tailscale serve publishes it; `profile: {voice, speed, applied, error?}` says whether the voice profile below reached the room; `503 {error: 'voice not configured', reason}` when unconfigured; `502 {error}` on a server failure |
 | `GET /api/voice/status` | pairing | `{configured, reason?, agentsUrl, identity: {name, available, principal?, error?}, agent?: {id, name?}, sessionId?, health: {ok, voice, protocol, version, error?, checkedAt}, mcpRegisteredAt?, lastCallAt?, profile?: {voice, speed, runtimeToken, source}}` |
 | `POST /api/voice/session/reset` | pairing | `{sessionId, previous?, room?}`: a new session for the next call; body `{room?}` names a live call's LiveKit room, which the voice runtime is then switched to the new session (`room: {name, switched, error?}`), so the caller keeps talking |
-| `GET /api/voice/transcript?limit=` | pairing | `{supported: true, sessionId?, messages: [{seq, role, text, at}], hasMoreBefore}`: user/assistant text of the current session (`GetSession`'s tail, cheap) |
+| `GET /api/voice/transcript?limit=` | pairing | `{supported: true, sessionId?, messages: [{seq, role, text, at}], hasMoreBefore, notices: [{id, at, text, run?}]}`: user/assistant text of the current session (`GetSession`'s tail, cheap) plus the lines left by the `announce` tool (below) |
 | `POST /api/voice/dogfood` | node token | `{triggerId, name, enabled, lastFiredAt?, lastError?, nextSummary?, created, updated}`: the daily fleet check-in trigger (below); body `{timezone?, timeOfDay?}` |
+| `POST /api/voice/runwatch` | node token | same shape plus `watches` (the harness agent id) and `headless`: the run-completed trigger that announces finished harness runs on the Desk (below) |
 | `GET /api/voice/prompt` | node token | `{agentId, name?, current, desired, changed, applied: false}`: the agent's system prompt next to the fleet persona Cyberdeck ships (`fleetPrompt` in `src/daemon/seed.ts`) |
 | `POST /api/voice/prompt` | node token | the same, after writing the persona to the agent when it differs (`applied: true`); the next session uses it |
 | `POST /api/voice/setup` | node token | the setup result above (`{agent: {id, name?, origin: kept\|adopted\|created}, sessionId, mcp: {name, url, state, tools?, error?}, warnings}`); body `{new?, adopt?, name?}` |
 
-`status` also carries `dogfood: {triggerId, name, enabled, lastFiredAt?, lastError?, nextSummary?}`
+`status` also carries `dogfood: {triggerId, name, enabled, lastFiredAt?, lastError?, nextSummary?}` and `runWatch` (same shape)
 once the check-in trigger exists (read back from `ListAgentTriggers`, cached 10 s).
 
 `configured` is true when the identity loads, the agents server answers `/api/health` with
@@ -207,6 +208,7 @@ cyberdeck seed reset-session   # next call starts a fresh session
 cyberdeck seed call            # smoke test: mint a room and print it (token withheld, profile result included); nothing joins it
 cyberdeck seed transcript [n]  # last n user/assistant messages
 cyberdeck seed dogfood [--tz Europe/Madrid] [--at 07:00]   # daily fleet check-in trigger (idempotent; rewrites a stale prompt)
+cyberdeck seed runwatch        # run-completed trigger: finished harness runs are announced on the Desk (idempotent)
 cyberdeck seed prompt [--apply]  # the agent's system prompt vs the fleet persona; --apply writes the persona
 ```
 
@@ -249,13 +251,37 @@ created; edit the time in the agent's Triggers tab afterwards.
 
 All of these go through the local daemon's HTTP API with the node token, like the other commands.
 
+## Run announcements: the agent tells you when a delegated run is done
+
+Work delegated to the Seed harness agent (the prompt bar, the Seed view, a sub-run the voice agent
+spawns) finishes while nobody is in a call. `cyberdeck seed runwatch` makes sure a `run-completed`
+trigger named `cyberdeck-run-completed` exists on the voice agent, watching the harness agent
+(`source: {type: 'run-completed', agentId: <queryAgentId>}`; the voice agent's own turns are runs
+too, which is why the trigger is scoped to the other agent). Its continuation is the headless
+`tool` kind: the agents server calls `cyberdeck__announce` with
+`{runId, title, status, sessionId, agentId}` taken from the event (`$event.runTitle` and friends),
+no model turn and no token spent; `onFailure: 'thread'` falls back to a thread with
+`RUNWATCH_PROMPT`, which tells the agent to make that one call itself. A server that rejects the
+tool continuation (400) gets the thread form at creation. Like `dogfood`, it is idempotent by name,
+keeps the id in `seed.json`, and patches a stale prompt or a changed harness agent in place; it needs
+the harness agent to exist (`cyberdeck seed sync`, or one prompt-bar query).
+
+The `announce` MCP tool composes the line (`Done: "<title>" finished.`, `Failed: "<title>" failed.`)
+or takes `text` as given, keeps the newest 50 in `seed.json` (`notices`), and
+`GET /api/voice/transcript` returns them as `notices` next to the messages, so a node without a
+bridge sees the hub's announcements through the relay. A run without a `sessionId` is a workflow
+sub-step (Seed's `await` children have no session; the owner's runs and delegated agent runs do), and
+is skipped with `announced: false` so one job announces once. The web Desk sorts notices into the
+transcript by time with a `fleet` label and refreshes the history every 20 s between calls; the
+spoken side (the worker saying it when a call is live) is not done, see "Not done".
+
 ## The voice hub
 
 The voice system runs on one node, named by `voice.hub` on every node (`createVoiceRelay` in
 `src/daemon/api/voice.ts` with `pinned`). A node whose hub is another node relays `config`, `livekit`,
 `status`, `transcript` and `session/reset` to that paired peer through the fleet proxy (20 s timeout),
 whatever its own bridge says, and every answer carries `via: {node, name}`; `status` adds the local
-bridge under `local`. `setup`, `dogfood` and `prompt` always target the node itself. A request that
+bridge under `local`. `setup`, `dogfood`, `runwatch` and `prompt` always target the node itself. A request that
 arrives with the `x-cyberdeck-voice-direct` header is never relayed again, so a misconfigured hub
 cannot bounce. When the hub is not paired with the node, voice is simply off there with the reason
 `voice hub clipper is not paired with this node` (pair it from Home). `/api/state`, the Casework
@@ -334,6 +360,7 @@ flow for no new capability. The Expo app stays iOS only; `remote-control/README.
 
 ## Not done
 
+- Announcements are written, not spoken: when a call is live the worker does not read a new notice aloud (that needs a Seed-side hook from the trigger into the room); the Desk shows it within 20 s.
 - **Voice profile editing**: Cyberdeck applies the profile but has no UI or route to change it; the
   Casework host's `set_voice` tool (or editing `companion.json`) is still how it is chosen.
 - **Voice on Seed main**: the hub runs the unmerged Seed voice branch at a pinned commit. When the

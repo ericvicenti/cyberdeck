@@ -23,7 +23,7 @@ type VoiceStatus = {
   /** The Casework voice profile calls carry (Cartesia voice id + rate) and whether the runtime token to apply it is on hand. */
   profile?: { voice: string; speed: number; runtimeToken: boolean };
 };
-type TranscriptHistory = { supported: boolean; messages?: { role: "user" | "assistant"; text: string; at?: number }[] };
+type TranscriptHistory = { supported: boolean; messages?: { role: "user" | "assistant"; text: string; at?: number }[]; notices?: { id: string; at: number; text: string }[] };
 
 const insecureHere = (): boolean => location.protocol !== "https:" && !["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
 
@@ -73,7 +73,10 @@ export function Desk({ params, onLocked }: { params: URLSearchParams; onLocked: 
     try {
       const t = await api<TranscriptHistory>("/api/voice/transcript?limit=20");
       if (!t.supported || !t.messages) { setHistory([]); return; }
-      setHistory(t.messages.map((m, i) => ({ id: `h:${i}:${m.at ?? ""}`, who: m.role === "user" ? "me" : "agent", text: m.text, final: true, at: m.at ?? 0 })));
+      // Notices (the agent's `announce` tool: a finished run, a trigger's finding) sit in the flow by time.
+      const notices: TranscriptLine[] = (t.notices ?? []).map((x) => ({ id: `n:${x.id}`, who: "notice", text: x.text, final: true, at: x.at }));
+      const messages: TranscriptLine[] = t.messages.map((m, i) => ({ id: `h:${i}:${m.at ?? ""}`, who: m.role === "user" ? "me" : "agent", text: m.text, final: true, at: m.at ?? 0 }));
+      setHistory([...messages, ...notices].sort((a, b) => a.at - b.at));
     } catch {
       setHistory([]);
     }
@@ -89,6 +92,12 @@ export function Desk({ params, onLocked }: { params: URLSearchParams; onLocked: 
   useEffect(() => {
     if (v.config?.configured) void loadHistory();
   }, [v.config?.configured, v.config?.via?.node]);
+  // Between calls the transcript keeps up with what arrives without one (announcements).
+  useEffect(() => {
+    if (!v.config?.configured) return;
+    const t = setInterval(() => { if (v.phase === "idle" && document.visibilityState === "visible") void loadHistory(); }, 20_000);
+    return () => clearInterval(t);
+  }, [v.config?.configured, v.config?.via?.node, v.phase]);
   // After a call ends, the session on the agents server holds the full exchange: reload it
   // and drop the live lines so nothing shows twice.
   useEffect(() => {
@@ -282,9 +291,9 @@ export function Desk({ params, onLocked }: { params: URLSearchParams; onLocked: 
           <div ref={listRef} className="mt-2 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1 text-[13px]">
             {lines.length === 0 && <p className="text-[11px] text-zinc-600">{configured ? "Nothing said yet. Tap TALK and speak." : "The conversation shows up here once voice is set up."}</p>}
             {lines.map((l) => (
-              <div key={l.id} className={`flex ${l.who === "me" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[88%] rounded-lg px-2.5 py-1.5 ${l.who === "me" ? "border border-sky-400/30 bg-sky-400/10 text-zinc-100" : "border border-violet-400/30 bg-violet-400/10 text-zinc-200"} ${l.final ? "" : "italic opacity-70"}`}>
-                  <div className={`hud-label mb-0.5 ${l.who === "me" ? "text-sky-300" : "text-violet-300"}`}>{l.who === "me" ? "me" : agentName ?? "agent"}</div>
+              <div key={l.id} className={`flex ${l.who === "me" ? "justify-end" : l.who === "notice" ? "justify-center" : "justify-start"}`} data-kind={l.who}>
+                <div className={`max-w-[88%] rounded-lg px-2.5 py-1.5 ${l.who === "me" ? "border border-sky-400/30 bg-sky-400/10 text-zinc-100" : l.who === "notice" ? "border border-amber-400/30 bg-amber-400/10 text-zinc-200" : "border border-violet-400/30 bg-violet-400/10 text-zinc-200"} ${l.final ? "" : "italic opacity-70"}`}>
+                  <div className={`hud-label mb-0.5 ${l.who === "me" ? "text-sky-300" : l.who === "notice" ? "text-amber-300" : "text-violet-300"}`}>{l.who === "me" ? "me" : l.who === "notice" ? "fleet" : agentName ?? "agent"}</div>
                   <div className={l.final ? "" : "hud-cursor"}>{l.text}</div>
                 </div>
               </div>

@@ -2,6 +2,8 @@
 // the Casework app. A fake agents server verifies the signed CBOR envelopes and answers the actions
 // setup and calls need.
 import { chromium } from "playwright";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { Database } from "bun:sqlite";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "fs";
@@ -15,7 +17,7 @@ import { seedConfig } from "../src/daemon/config";
 import { caseworkAllows } from "../src/daemon/api/casework";
 import { createVoiceRelay, secureCallUrl } from "../src/daemon/api/voice";
 import { Tailscale } from "../src/daemon/tailscale";
-import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME, fleetPrompt } from "../src/daemon/seed";
+import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME, fleetPrompt, RUNWATCH_TRIGGER_NAME, RUNWATCH_PROMPT } from "../src/daemon/seed";
 import { testConfig, TEST_TOKEN, tmpHomeDir } from "./helpers";
 
 // Deterministic signer; the bridge builds the keypair from this instead of opening the Seed vault.
@@ -144,7 +146,13 @@ function fakeAgents(opts: { voice: boolean }) {
         case "CreateAgentTrigger": {
           if (!agents.has(a.agentId)) return err(404, "Agent not found");
           const sc = a.trigger?.source?.schedule;
-          if (a.trigger?.source?.type !== "schedule" || sc?.kind !== "weekly" || !Array.isArray(sc.daysOfWeek) || !sc.daysOfWeek.every((d: unknown) => Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 6) || !/^\d{2}:\d{2}$/.test(sc.timeOfDay) || typeof sc.timezone !== "string") return err(400, "Schedule is invalid");
+          const src = a.trigger?.source;
+          if (src?.type === "run-completed") {
+            if (src.status !== undefined && !["succeeded", "failed", "canceled"].includes(src.status)) return err(400, "Trigger run status must be succeeded, failed, or canceled");
+            const k = a.trigger?.continuation?.kind;
+            if (!["newThread", "wake", "tool", "script"].includes(k)) return err(400, "Trigger continuation kind is unsupported: expected newThread, wake, tool, or script");
+            if (k === "tool" && (typeof a.trigger.continuation.tool !== "string" || (opts.voice === false && false))) return err(400, "Trigger tool is required");
+          } else if (a.trigger?.source?.type !== "schedule" || sc?.kind !== "weekly" || !Array.isArray(sc.daysOfWeek) || !sc.daysOfWeek.every((d: unknown) => Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 6) || !/^\d{2}:\d{2}$/.test(sc.timeOfDay) || typeof sc.timezone !== "string") return err(400, "Schedule is invalid");
           if (typeof a.trigger.prompt !== "string" || !a.trigger.name) return err(400, "Trigger prompt is required");
           const t = { id: `trigger-${++n}`, account: "x", agentId: a.agentId, name: a.trigger.name, enabled: a.trigger.enabled !== false, source: a.trigger.source, prompt: a.trigger.prompt, continuation: a.trigger.continuation, createdAt: Date.now(), updatedAt: Date.now() };
           triggers.set(a.agentId, [...(triggers.get(a.agentId) ?? []), t]);
@@ -467,6 +475,70 @@ describe("configured node", () => {
     expect(patches[0]).toMatchObject({ triggerId: j1.triggerId, patch: { prompt: DOGFOOD_PROMPT } });
     expect((await (await req(a, TEST_TOKEN, "/api/voice/dogfood", { method: "POST", body: JSON.stringify({}) })).json()).updated).toBe(false);
     expect(voiced.actions.filter((x) => x._ === "UpdateAgentTrigger").length).toBe(1);
+  });
+
+  test("runwatch: a run-completed trigger on the voice agent watches the harness agent, and announce lands in the transcript", async () => {
+    const root = mkdtempSync(join(tmpdir(), "runwatch-root-"));
+    writeFileSync(join(root, "AGENTS.md"), "# Fleet rules\n");
+    const h = startNode(voiced.url, "voice-rw", undefined, undefined, { roots: [root] });
+    try {
+      expect((await req(h, KEY, "/api/voice/runwatch", { method: "POST" })).status).toBe(403);
+      expect((await req(h, TEST_TOKEN, "/api/voice/setup", { method: "POST", body: JSON.stringify({ adopt: false }) })).status).toBe(200);
+      // No harness agent yet: nothing to watch.
+      const early = await req(h, TEST_TOKEN, "/api/voice/runwatch", { method: "POST" });
+      expect(early.status).toBe(502);
+      expect((await early.json()).error).toMatch(/no harness agent/);
+      const sync = await (await req(h, TEST_TOKEN, "/api/voice/harness/sync", { method: "POST", body: "{}" })).json();
+      const harnessId = sync.agents.find((x: any) => x.role === "harness").agentId;
+      const voiceId = (await (await req(h, TEST_TOKEN, "/api/voice/status")).json()).agent.id;
+      expect(voiceId).not.toBe(harnessId);
+
+      const r1 = await req(h, TEST_TOKEN, "/api/voice/runwatch", { method: "POST" });
+      expect(r1.status).toBe(200);
+      const j1 = await r1.json();
+      expect(j1).toMatchObject({ created: true, updated: false, name: RUNWATCH_TRIGGER_NAME, enabled: true, watches: harnessId, headless: true, nextSummary: `after each finished run of agent ${harnessId.slice(0, 8)}` });
+      const stored = voiced.triggers.get(voiceId)!;
+      expect(stored.length).toBe(1);
+      expect(stored[0].source).toEqual({ type: "run-completed", agentId: harnessId });
+      expect(stored[0].prompt).toBe(RUNWATCH_PROMPT);
+      // Headless: the server calls the announce tool with the event itself, no model turn.
+      expect(stored[0].continuation).toEqual({ kind: "tool", tool: "cyberdeck__announce", input: { runId: "$event.runId", title: "$event.runTitle", status: "$event.runStatus", sessionId: "$event.sessionId", agentId: "$event.agentId" }, onFailure: "thread" });
+      expect(JSON.parse(readFileSync(join(h.home, "seed.json"), "utf8")).runWatchTriggerId).toBe(j1.triggerId);
+      // Idempotent; status reports it.
+      const j2 = await (await req(h, TEST_TOKEN, "/api/voice/runwatch", { method: "POST" })).json();
+      expect(j2).toMatchObject({ created: false, updated: false, triggerId: j1.triggerId });
+      expect((await (await req(h, TEST_TOKEN, "/api/voice/status")).json()).runWatch).toMatchObject({ triggerId: j1.triggerId, name: RUNWATCH_TRIGGER_NAME, enabled: true });
+      // A trigger from an older build (other prompt, other harness agent) is patched in place.
+      stored[0].prompt = "old"; stored[0].source = { type: "run-completed", agentId: "agent-gone" };
+      const j3 = await (await req(h, TEST_TOKEN, "/api/voice/runwatch", { method: "POST" })).json();
+      expect(j3).toMatchObject({ created: false, updated: true, triggerId: j1.triggerId });
+      expect(stored[0].prompt).toBe(RUNWATCH_PROMPT);
+      expect(stored[0].source).toEqual({ type: "run-completed", agentId: harnessId });
+
+      // What the trigger's tool call does: the announce tool composes the line and the transcript carries it.
+      const client = new Client({ name: "runwatch-test", version: "0.0.0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${h.base}/api/mcp`), { requestInit: { headers: { authorization: `Bearer ${TEST_TOKEN}` } } }), { timeout: 10_000 });
+      const tool = async (args: Record<string, unknown>) => { const r: any = await client.callTool({ name: "announce", arguments: args }); return { text: r.content[0].text as string, data: r.structuredContent as any }; };
+      const done = await tool({ title: "Check the backups on enuc", status: "succeeded", runId: "run-1", sessionId: "s-1" });
+      expect(done.data).toMatchObject({ announced: true, notice: { text: 'Done: "Check the backups on enuc" finished.', run: { id: "run-1", title: "Check the backups on enuc", status: "succeeded", sessionId: "s-1" } } });
+      const failed = await tool({ title: "Rotate the certs", status: "failed", runId: "run-2", sessionId: "s-2", brief: true });
+      expect(failed.text).toBe('Announced on the Desk: Failed: "Rotate the certs" failed.');
+      // A workflow sub-step (no session) is dropped so one job announces once.
+      const sub = await tool({ title: "Await source preservation result", status: "succeeded", runId: "run-3" });
+      expect(sub.data).toMatchObject({ announced: false, reason: expect.stringMatching(/no session/) });
+      expect((await tool({})).data.announced).toBe(false);
+      const free = await tool({ text: "The nightly digest is ready." });
+      expect(free.data.announced).toBe(true);
+      await client.close();
+
+      const t = await (await req(h, TEST_TOKEN, "/api/voice/transcript?limit=10")).json();
+      expect(t.notices.map((x: any) => x.text)).toEqual(['Done: "Check the backups on enuc" finished.', 'Failed: "Rotate the certs" failed.', "The nightly digest is ready."]);
+      expect(t.notices.every((x: any) => typeof x.id === "string" && x.at > 0)).toBe(true);
+      // Notices survive a restart of the daemon (seed.json).
+      expect(JSON.parse(readFileSync(join(h.home, "seed.json"), "utf8")).notices.length).toBe(3);
+    } finally {
+      h.stop(); h.cleanup();
+    }
   });
   test("prompt compares the companion's system prompt with the fleet persona and applies it only on POST", async () => {
     expect((await req(a, KEY, "/api/voice/prompt")).status).toBe(403);

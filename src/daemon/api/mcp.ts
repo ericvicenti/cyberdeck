@@ -24,6 +24,7 @@ import { runScan, isScanRunning } from "../indexer/scan";
 import { resolveService, serviceLogs, restartService, restartBudget, type ManifestHost, type ServiceTarget } from "../servicectl";
 import { matchRepo, repoDetail, type RepoDetail } from "../repodetail";
 import { registerNodeTools } from "./mcp-node";
+import type { AnnounceInput, AnnounceResult } from "../seed";
 
 export const MCP_PATH = "/api/mcp";
 export const MCP_SERVER_NAME = "cyberdeck";
@@ -65,6 +66,8 @@ export type McpDeps = {
   /** The node summary behind GET /api/status. */
   status: () => NodeStatus;
   version: string;
+  /** Leave a line on the Desk transcript (SeedBridge.announce); absent when this daemon has no bridge. */
+  announce?: (input: AnnounceInput) => AnnounceResult;
 };
 
 function text(value: unknown): { content: { type: "text"; text: string }[]; structuredContent?: Record<string, unknown> } {
@@ -503,6 +506,25 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
       const r = await control.cli(["note", line]);
       if (!r || r.code !== 0) return fail(`deck note failed: ${(r?.err ?? "").trim() || "no output"}`);
       return spoken(`Noted in the inbox: ${plain(line.length > 100 ? line.slice(0, 100) : line)}${line.length > 100 ? "..." : ""}`, { ok: true }, brief, { ok: true });
+    }
+  );
+
+  server.tool(
+    "announce",
+    "Tell the owner something on the Desk transcript (web Desk and iPad Talk tab) without waiting to be asked: a short line under the conversation, kept until the owner clears it. Give `text`, or the finished run's `title`, `status` (succeeded / failed / canceled), `runId` and `sessionId` and the line is composed for you; the run-completed trigger calls it that way. A run without a sessionId is an internal sub-step and is skipped: do not retry it.",
+    {
+      text: z.string().max(400).optional().describe("The line to show, as the owner should read it"),
+      title: z.string().max(400).optional().describe("The finished run's title"),
+      status: z.string().max(40).optional().describe("The run's terminal status: succeeded, failed or canceled"),
+      runId: z.string().max(200).optional(),
+      sessionId: z.string().max(200).optional(),
+      brief: BRIEF,
+    },
+    async ({ text: line, title, status, runId, sessionId, brief }) => {
+      if (!deps.announce) return fail("This node has no Seed bridge to announce through.");
+      const r = deps.announce({ text: line, title, status, runId, sessionId });
+      if (!r.announced) return spoken(`Not announced: ${r.reason ?? "nothing to say"}.`, { announced: false, reason: r.reason }, brief, { announced: false });
+      return spoken(`Announced on the Desk: ${plain(r.notice!.text)}`, { announced: true, notice: r.notice }, brief, { announced: true, id: r.notice!.id });
     }
   );
 

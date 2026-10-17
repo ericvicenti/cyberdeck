@@ -51,6 +51,7 @@ MCP server, and grants it to the voice agent; see `docs/VOICE.md`).
 | `collab_run` | start a queued task on this node, detached; refuses while a run is active | yes (spawns agents) |
 | `run_log` | tail of `worker.log`, `reviewer.log` or `result.md` for a run | no |
 | `note` | append a dated line to `notes/inbox.md` | yes (Deck repo) |
+| `announce` | leave a line on the Desk transcript for the owner (`text`, or a finished run's `title`/`status`/`runId`/`sessionId`; a run without a session is skipped); the `cyberdeck-run-completed` trigger calls it headlessly, see docs/VOICE.md "Run announcements" | yes (seed.json notices) |
 | `scan` | rescan this node's roots now | no (indexer) |
 | `deck_context` | the `deck context [dir]` briefing every coding agent runs first (host, project of `dir`, handoff entries, inbox, collab tasks) | no |
 | `shell` | run a command line through the owner's login shell on this node, in `cwd`; `host` runs it on a manifest host over ssh; `timeoutSec` ≤ 600; long output is saved to an `outputFile` | yes (whatever the command does; audited) |

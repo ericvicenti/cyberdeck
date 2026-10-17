@@ -133,6 +133,7 @@ switch (cmd) {
       console.log(`mcp registered: ${when(s.mcpRegisteredAt)}   last call: ${when(s.lastCallAt)}`);
       if (s.via) console.log(`voice hub:     ${s.via.name} (${s.via.node}) answers every voice route of this node`);
       if (s.dogfood) console.log(`dogfood:       ${s.dogfood.name} (${s.dogfood.triggerId}) ${s.dogfood.enabled ? "enabled" : "disabled"}, ${s.dogfood.nextSummary ?? ""}; last fired ${when(s.dogfood.lastFiredAt)}${s.dogfood.lastError ? `; last error: ${s.dogfood.lastError}` : ""}`);
+      if (s.runWatch) console.log(`run watch:     ${s.runWatch.name} (${s.runWatch.triggerId}) ${s.runWatch.enabled ? "enabled" : "disabled"}, ${s.runWatch.nextSummary ?? ""}; last fired ${when(s.runWatch.lastFiredAt)}${s.runWatch.lastError ? `; last error: ${s.runWatch.lastError}` : ""}`);
       if (s.profile) console.log(`voice profile: ${s.profile.voice} x${s.profile.speed} (${s.profile.runtimeToken ? "runtime token on hand" : "NO runtime token: calls keep the worker's default voice"})`);
       console.log(s.configured ? "voice: ready (provider livekit)" : `voice: not configured — ${s.reason}`);
       const h = await api("/api/voice/harness").catch(() => null);
@@ -200,6 +201,12 @@ switch (cmd) {
       console.log(`${r.created ? "created" : r.updated ? "prompt updated" : "already present"}: ${r.name} (${r.triggerId}) ${r.enabled ? "enabled" : "disabled"}, ${r.nextSummary ?? ""}`);
       if (r.lastFiredAt) console.log(`last fired: ${when(r.lastFiredAt)}`);
       if (r.lastError) console.log(`last error: ${r.lastError}`);
+    } else if (sub === "runwatch") {
+      // Run-completed trigger: the voice agent announces finished harness runs on the Desk transcript.
+      const r = await api("/api/voice/runwatch", { method: "POST" }).catch(fail);
+      console.log(`${r.created ? "created" : r.updated ? "updated" : "already present"}: ${r.name} (${r.triggerId}) ${r.enabled ? "enabled" : "disabled"}, ${r.nextSummary ?? ""} (${r.headless ? "headless announce call" : "thread from the prompt"})`);
+      if (r.lastFiredAt) console.log(`last fired: ${when(r.lastFiredAt)}`);
+      if (r.lastError) console.log(`last error: ${r.lastError}`);
     } else if (sub === "prompt") {
       // The agent's system prompt vs the fleet persona Cyberdeck ships; --apply writes the persona.
       const r = await api("/api/voice/prompt", flags.includes("--apply") ? { method: "POST" } : {}).catch(fail);
@@ -211,8 +218,9 @@ switch (cmd) {
       const r = await api(`/api/voice/transcript?limit=${encodeURIComponent(flags[0] ?? "20")}`).catch(fail);
       for (const m of r.messages ?? []) console.log(`[${new Date(m.at).toLocaleTimeString()}] ${m.role}: ${m.text}`);
       if (!r.messages?.length) console.log("(no messages)");
+      for (const x of r.notices ?? []) console.log(`[${new Date(x.at).toLocaleTimeString()}] notice: ${x.text}`);
     } else {
-      console.log("usage: cyberdeck seed status | setup [--new] [--no-adopt] [--name <agent>] | sync [--voice] [--force] | prompt-text | keygen [--force] | login [--code <url>|--status] | providers | reset-session | call | transcript [n] | dogfood [--tz <zone>] [--at HH:MM] | prompt [--apply]");
+      console.log("usage: cyberdeck seed status | setup [--new] [--no-adopt] [--name <agent>] | sync [--voice] [--force] | prompt-text | keygen [--force] | login [--code <url>|--status] | providers | reset-session | call | transcript [n] | dogfood [--tz <zone>] [--at HH:MM] | runwatch | prompt [--apply]");
       process.exit(1);
     }
     break;
@@ -236,6 +244,6 @@ usage: cyberdeck <command>
   update     pull own source, rebuild, restart
   serve      expose the UI as https://<node>.<tailnet> via tailscale serve (serve off: stop)
   mcp        connection details for MCP clients such as Seed Agents (--json)
-  seed       Seed agents bridge: status | setup | sync [--voice] | keygen | login | providers | reset-session | call | transcript | dogfood | prompt [--apply]
+  seed       Seed agents bridge: status | setup | sync [--voice] | keygen | login | providers | reset-session | call | transcript | dogfood | runwatch | prompt [--apply]
   whoami     how the local daemon sees this caller`);
 }

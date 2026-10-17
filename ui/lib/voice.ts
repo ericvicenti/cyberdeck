@@ -12,7 +12,7 @@ import { readTalkMode, TALK_MODE_KEY, type TalkMode } from "./talk";
 export type VoicePhase = "idle" | "connecting" | "live" | "ending" | "error";
 /** The worker's published pipeline state; `initializing` until it says otherwise. */
 export type AgentState = "initializing" | "listening" | "thinking" | "speaking" | "idle";
-export type TranscriptLine = { id: string; who: "me" | "agent"; text: string; final: boolean; at: number };
+export type TranscriptLine = { id: string; who: "me" | "agent" | "notice"; text: string; final: boolean; at: number };
 
 /** `via`: the voice hub, the paired node the daemon in view relays every voice route to (docs/VOICE.md). */
 export type VoiceConfig = { configured: boolean; provider: "livekit" | "none"; reason?: string; agentId?: string; sessionId?: string; via?: { node: string; name: string } };

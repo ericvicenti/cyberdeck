@@ -15,6 +15,10 @@ import { CYBERDECK_HOME, type SeedConfig } from "./config";
 /** Persisted in `${CYBERDECK_HOME}/seed.json`. */
 export type SeedState = {
   queryAgentId?: string; agentId?: string; sessionId?: string; mcpRegisteredAt?: number; mcpTools?: string; lastCallAt?: number; dogfoodTriggerId?: string;
+  /** The run-completed trigger (`runWatch()`) that announces finished harness runs on the Desk. */
+  runWatchTriggerId?: string;
+  /** Lines the agent (or its triggers) left for the owner through the `announce` MCP tool; newest last, capped. */
+  notices?: Notice[];
   /** Memory-pack manifests per agent (path → sha256 of what was written), so a sync writes only what changed. */
   memoryPacks?: Record<string, Record<string, string>>;
   /** A pending "Sign in with ChatGPT" login (`cyberdeck seed login`). */
@@ -36,12 +40,18 @@ export type SeedStatus = {
   lastCallAt?: number;
   /** The daily fleet check-in trigger (`dogfood()`), read back from the agents server; absent when none. */
   dogfood?: DogfoodStatus;
+  /** The run-completed trigger (`runWatch()`) on the voice agent, read back from the agents server; absent when none. */
+  runWatch?: DogfoodStatus;
   /** The voice profile calls will carry (from companion.json) and whether the runtime token to apply it is on hand. */
   profile?: VoiceProfile & { runtimeToken: boolean; source: string };
 };
 
 export type DogfoodStatus = { triggerId: string; name: string; enabled: boolean; lastFiredAt?: number; lastError?: string; nextSummary?: string };
 export type DogfoodOptions = { timezone?: string; timeOfDay?: string };
+/** A line left for the owner on the Desk transcript without a call: the `announce` MCP tool writes one, the run-completed trigger drives it. */
+export type Notice = { id: string; at: number; text: string; run?: { id?: string; title?: string; status?: string; sessionId?: string } };
+export type AnnounceInput = { text?: string; title?: string; status?: string; runId?: string; sessionId?: string };
+export type AnnounceResult = { announced: boolean; notice?: Notice; reason?: string };
 type TriggerInfo = { id: string; name: string; enabled: boolean; source: any; prompt?: string | unknown[]; lastFiredAt?: number; lastError?: string; createdAt?: number };
 
 /** Cartesia voice id + speaking rate, as the Casework host keeps it in companion.json (`profile`). */
@@ -52,7 +62,7 @@ export type VoiceProfileResult = VoiceProfile & { applied: boolean; error?: stri
 export type VoiceSession = { sessionId: string; url: string; token: string; room: string; identity: string; expiresAt: number; profile?: VoiceProfileResult };
 
 export type TranscriptMessage = { seq: number; role: "user" | "assistant"; text: string; at: number };
-export type Transcript = { supported: boolean; sessionId?: string; messages: TranscriptMessage[]; hasMoreBefore?: boolean; error?: string };
+export type Transcript = { supported: boolean; sessionId?: string; messages: TranscriptMessage[]; hasMoreBefore?: boolean; error?: string; notices?: Notice[] };
 
 export type SetupOptions = {
   /** Adopt the Casework Companion agent from companion.json when no agent is set up yet (default true). */
@@ -85,10 +95,17 @@ const MCP_SERVER_NAME = "cyberdeck";
 export const DOGFOOD_TRIGGER_NAME = "cyberdeck-fleet-checkin";
 export const DOGFOOD_PROMPT =
   "Daily fleet check-in. Use your cyberdeck tools only (no guessing), always with brief: true: call cyberdeck__fleet_status, cyberdeck__services (probe: true), cyberdeck__repos (kind: 'unpushed') and cyberdeck__todo. Then call cyberdeck__note exactly once with ONE line under 400 characters in this shape: 'fleet check-in: <hosts up/down>, <services down or all up>, <repos with unpushed work>, <oldest TODO item worth attention>'. Nobody reads your final answer: the note is the only output of this run, and the run has failed if cyberdeck__note was not called. If a tool fails, say which in the note. Do not start any other work.";
+export const RUNWATCH_TRIGGER_NAME = "cyberdeck-run-completed";
+/** The fallback thread when the headless tool call cannot run: the agent relays the event to `announce` itself. */
+export const RUNWATCH_PROMPT =
+  "A run of the fleet agent just finished; its runId, runTitle, runStatus and sessionId are in this message. Call cyberdeck__announce exactly once with them (title, status, runId, sessionId): it writes the line Eric sees on the Desk transcript. Do nothing else: no other tools, no text answer, and no retry if it says the run was skipped.";
+const NOTICES_MAX = 50;
+function clipText(text: string, max: number): string { return text.length > max ? `${text.slice(0, max - 1)}…` : text; }
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /** Human summary of a schedule source, like the agents server's own trigger pages. */
 function scheduleSummary(source: any): string | undefined {
+  if (source?.type === "run-completed") return `after each ${source.status ?? "finished"} run${source.agentId ? ` of agent ${String(source.agentId).slice(0, 8)}` : ""}${source.titleMatch ? ` titled *${source.titleMatch}*` : ""}`;
   if (source?.type !== "schedule" || !source.schedule) return undefined;
   const sc = source.schedule;
   if (sc.kind === "interval") return `every ${sc.every} ${sc.unit}`;
@@ -207,6 +224,7 @@ export class SeedBridge {
   #health: SeedHealth | null = null;
   #healthInFlight: Promise<SeedHealth> | null = null;
   #dogfood: { value: DogfoodStatus | undefined; checkedAt: number; agentId: string } | null = null;
+  #runWatch: { value: DogfoodStatus | undefined; checkedAt: number; agentId: string } | null = null;
   #agentName: string | undefined;
   #agentNameTriedAt = 0;
   #querySetup: Promise<string> | null = null;
@@ -372,6 +390,8 @@ export class SeedBridge {
     if (signer && health.ok && this.#state.agentId) {
       const dogfood = await this.#dogfoodStatus().catch(() => undefined);
       if (dogfood) s.dogfood = dogfood;
+      const runWatch = await this.#runWatchStatus().catch(() => undefined);
+      if (runWatch) s.runWatch = runWatch;
     }
     const profile = this.voiceProfile();
     if (profile) s.profile = { ...profile, runtimeToken: this.#runtimeToken() !== null, source: this.companionFile };
@@ -390,10 +410,101 @@ export class SeedBridge {
   }
 
   async #findDogfoodTrigger(agentId: string): Promise<TriggerInfo | undefined> {
+    return this.#findTrigger(agentId, DOGFOOD_TRIGGER_NAME, this.#state.dogfoodTriggerId);
+  }
+
+  /** The trigger of that name on the agent: the id we recorded if it is still there, else the newest by name. */
+  async #findTrigger(agentId: string, name: string, recordedId?: string): Promise<TriggerInfo | undefined> {
     const res = await this.action<{ triggers?: TriggerInfo[] }>({ _: "ListAgentTriggers", agentId });
-    const triggers = (res.triggers ?? []).filter((t) => t && t.name === DOGFOOD_TRIGGER_NAME);
-    // Prefer the id we recorded; else the newest by name.
-    return triggers.find((t) => t.id === this.#state.dogfoodTriggerId) ?? triggers.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0];
+    const triggers = (res.triggers ?? []).filter((t) => t && t.name === name);
+    return triggers.find((t) => t.id === recordedId) ?? triggers.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0];
+  }
+
+  /** The run-completed trigger as the agents server has it; cached like the check-in. */
+  async #runWatchStatus(): Promise<DogfoodStatus | undefined> {
+    const agentId = this.#state.agentId;
+    if (!agentId) return undefined;
+    if (this.#runWatch && this.#runWatch.agentId === agentId && Date.now() - this.#runWatch.checkedAt < HEALTH_TTL_MS) return this.#runWatch.value;
+    const found = await this.#findTrigger(agentId, RUNWATCH_TRIGGER_NAME, this.#state.runWatchTriggerId);
+    const value = found ? this.#toDogfood(found) : undefined;
+    this.#runWatch = { value, checkedAt: Date.now(), agentId };
+    return value;
+  }
+
+  /**
+   * Make sure the voice agent announces finished runs of the harness agent (the one behind the prompt
+   * bar and the Seed view, where the owner delegates work): a `run-completed` trigger whose continuation
+   * calls the `announce` MCP tool headlessly with the event (no model turn), falling back to a thread
+   * with RUNWATCH_PROMPT when the server cannot run it that way. Idempotent by name; a stale prompt or a
+   * changed harness agent is patched in place. Sub-steps without a session are dropped by `announce`.
+   */
+  async runWatch(): Promise<DogfoodStatus & { created: boolean; updated: boolean; watches: string; headless: boolean }> {
+    const agentId = this.#state.agentId;
+    if (!agentId) throw new SeedError("no agent set up: run `cyberdeck seed setup`");
+    const watched = this.#state.queryAgentId;
+    if (!watched) throw new SeedError("no harness agent yet: run `cyberdeck seed sync` (or one prompt-bar query) first");
+    const source = { type: "run-completed", agentId: watched };
+    const input = { runId: "$event.runId", title: "$event.runTitle", status: "$event.runStatus", sessionId: "$event.sessionId", agentId: "$event.agentId" };
+    const headless = { kind: "tool", tool: `${MCP_SERVER_NAME}__announce`, input, onFailure: "thread" };
+    let trigger = await this.#findTrigger(agentId, RUNWATCH_TRIGGER_NAME, this.#state.runWatchTriggerId);
+    let created = false;
+    let updated = false;
+    if (trigger) {
+      const patch: Record<string, unknown> = {};
+      if (typeof trigger.prompt === "string" && trigger.prompt !== RUNWATCH_PROMPT) patch.prompt = RUNWATCH_PROMPT;
+      if (trigger.source?.type !== "run-completed" || trigger.source?.agentId !== watched) patch.source = source;
+      if (Object.keys(patch).length) {
+        const res = await this.action<{ trigger?: TriggerInfo }>({ _: "UpdateAgentTrigger", triggerId: trigger.id, patch });
+        trigger = { ...trigger, ...(res.trigger ?? {}), ...patch } as TriggerInfo;
+        updated = true;
+      }
+    } else {
+      const make = (continuation: unknown) => this.action<{ trigger: TriggerInfo }>({
+        _: "CreateAgentTrigger", agentId,
+        trigger: { name: RUNWATCH_TRIGGER_NAME, enabled: true, source, prompt: RUNWATCH_PROMPT, continuation },
+      });
+      let res: { trigger: TriggerInfo };
+      try { res = await make(headless); }
+      catch (e) {
+        // An agents server without headless tool continuations still gets the thread form.
+        if (!(e instanceof SeedError) || (e.status !== 400 && e.status !== 422)) throw e;
+        console.error(`seed: run-completed trigger: headless tool continuation refused (${e.message}); using a thread`);
+        res = await make({ kind: "newThread" });
+      }
+      trigger = res.trigger;
+      created = true;
+    }
+    if (this.#state.runWatchTriggerId !== trigger.id) { this.#state.runWatchTriggerId = trigger.id; this.#save(); }
+    const value = this.#toDogfood(trigger);
+    this.#runWatch = { value, checkedAt: Date.now(), agentId };
+    return { ...value, created, updated, watches: watched, headless: (trigger as TriggerInfo & { continuation?: { kind?: string } }).continuation?.kind === "tool" };
+  }
+
+  /**
+   * Leave a line for the owner on the Desk transcript (the `announce` MCP tool). Without `text` the
+   * line is composed from the run fields; a run that has no session is a workflow sub-step and is
+   * skipped, so one delegated job announces once, not once per internal await.
+   */
+  announce(input: AnnounceInput): AnnounceResult {
+    const text = input.text?.trim();
+    const title = input.title?.trim();
+    const status = input.status?.trim();
+    if (!text && !title) return { announced: false, reason: "nothing to say: give text, or the run's title and status" };
+    if (!text && input.runId && !input.sessionId) return { announced: false, reason: "skipped: a sub-step with no session is not announced" };
+    const verb = status === "succeeded" ? "finished" : status === "failed" ? "failed" : status === "canceled" ? "was canceled" : status ? `is ${status}` : "finished";
+    const line = text ?? `${verb === "finished" ? "Done" : verb === "failed" ? "Failed" : "Update"}: "${clipText(title!, 160)}" ${verb}.`;
+    const run = input.runId || title || status || input.sessionId ? { ...(input.runId ? { id: input.runId } : {}), ...(title ? { title: clipText(title, 200) } : {}), ...(status ? { status } : {}), ...(input.sessionId ? { sessionId: input.sessionId } : {}) } : undefined;
+    const notice: Notice = { id: `n-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, at: Date.now(), text: clipText(line, 400), ...(run ? { run } : {}) };
+    const list = [...(this.#state.notices ?? []), notice];
+    this.#state.notices = list.slice(-NOTICES_MAX);
+    this.#save();
+    return { announced: true, notice };
+  }
+
+  /** The newest notices, oldest first. */
+  notices(limit = 20): Notice[] {
+    const n = Math.max(1, Math.min(NOTICES_MAX, Math.floor(limit) || 20));
+    return (this.#state.notices ?? []).slice(-n);
   }
 
   #toDogfood(t: TriggerInfo): DogfoodStatus {
@@ -949,7 +1060,7 @@ export class SeedBridge {
   /** Recent user/assistant messages of the current session (GetSession's transcript tail; cheap). */
   async transcript(limit = 20): Promise<Transcript> {
     const n = Math.max(1, Math.min(200, Math.floor(limit) || 20));
-    if (!this.#state.sessionId) return { supported: true, messages: [] };
+    if (!this.#state.sessionId) return { supported: true, messages: [], notices: this.notices(n) };
     const res = await this.action<{ events?: { seq: number; createdAt: number; event: { type?: string; role?: string; content?: unknown } }[]; hasMoreBefore?: boolean }>({ _: "GetSession", sessionId: this.#state.sessionId, limit: n * 3 });
     const messages: TranscriptMessage[] = [];
     for (const ev of res.events ?? []) {
@@ -957,6 +1068,6 @@ export class SeedBridge {
       if (p?.type !== "message" || (p.role !== "user" && p.role !== "assistant") || typeof p.content !== "string" || !p.content.trim()) continue;
       messages.push({ seq: ev.seq, role: p.role, text: p.content, at: ev.createdAt });
     }
-    return { supported: true, sessionId: this.#state.sessionId, messages: messages.slice(-n), hasMoreBefore: res.hasMoreBefore || messages.length > n };
+    return { supported: true, sessionId: this.#state.sessionId, messages: messages.slice(-n), hasMoreBefore: res.hasMoreBefore || messages.length > n, notices: this.notices(n) };
   }
 }

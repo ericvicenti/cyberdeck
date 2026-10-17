@@ -263,6 +263,16 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
     }
   });
 
+  // Run-completed trigger on the voice agent announcing finished harness runs on the Desk (idempotent). Node token only.
+  app.post("/api/voice/runwatch", async (c) => {
+    if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);
+    try { return c.json(await bridge.runWatch()); }
+    catch (e) {
+      console.error("voice: runwatch failed:", e instanceof Error ? e.message : e);
+      return c.json(errorBody(e), errorStatus(e));
+    }
+  });
+
   // The companion's system prompt against the fleet persona; POST writes it. Node token only.
   app.get("/api/voice/prompt", async (c) => {
     if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);
