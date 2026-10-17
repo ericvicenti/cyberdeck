@@ -292,3 +292,28 @@ test("Seed links keep node selection and reject invalid nested paths", async () 
   await go("seed?r=agent%2F%25ZZ"); await title("Page not found · Seed · Cyberdeck");
   expect(errors).toEqual([]); expect(mutations).toEqual([]);
 });
+
+test("late remote-browser events cannot navigate or retitle a different primary view", async () => {
+  await page.addInitScript(() => {
+    const Base = window.WebSocket;
+    (window as any).navigationTestSockets = [];
+    window.WebSocket = class extends Base {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols);
+        (window as any).navigationTestSockets.push(this);
+      }
+    };
+  });
+  await go("cloud?profile=chatgpt&url=https%3A%2F%2Fremote.example%2Fone");
+  await title("Remote One · Cloud · Cyberdeck");
+  await page.getByTestId("nav-data").click(); await title("Data · Cyberdeck");
+  const destination=page.url();
+  await page.evaluate(() => {
+    for(const socket of (window as any).navigationTestSockets as WebSocket[]) {
+      if(socket.url.includes("/browser/")) socket.dispatchEvent(new MessageEvent("message",{data:JSON.stringify({t:"state",url:"https://late.example/",title:"Late browser"})}));
+    }
+  });
+  await page.waitForTimeout(350);
+  expect(page.url()).toBe(destination); expect(await page.title()).toBe("Data · Cyberdeck");
+  expect(errors).toEqual([]); expect(mutations).toEqual([]);
+});

@@ -1,4 +1,4 @@
-import { updateParams, useRouteTitle } from "../lib/navigation";
+import { routeHash, updateParams, useRouteTitle } from "../lib/navigation";
 // Cloud AI: ChatGPT and Claude accounts driven through the node's remote browser,
 // with every conversation archived into the Deck repo.
 import { useEffect, useState } from "react";
@@ -73,6 +73,8 @@ export function Cloud({ params, onLocked }: { params: URLSearchParams; onLocked:
   useRouteTitle(conversation ? `${docError || doc?.frontmatter.title || sel?.title || conversation} · Cloud` : browserTitle ? `${browserTitle} · Cloud` : undefined);
 
   const onBrowserState = (value: RemoteBrowserState) => {
+    // A page event arriving between hashchange and React cleanup belongs to the old view.
+    if (location.hash !== routeHash("cloud", params)) return;
     setBrowserState({ profile, url: value.url, title: value.title });
     if (!/^https?:\/\//.test(value.url)) return;
     const current = new URLSearchParams(location.hash.split("?")[1] ?? "").get("url");
