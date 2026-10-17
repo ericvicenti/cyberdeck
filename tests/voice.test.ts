@@ -514,6 +514,12 @@ describe("configured node", () => {
       expect(j3).toMatchObject({ created: false, updated: true, triggerId: j1.triggerId });
       expect(stored[0].prompt).toBe(RUNWATCH_PROMPT);
       expect(stored[0].source).toEqual({ type: "run-completed", agentId: harnessId });
+      // A trigger left in thread form (the tool was not registered when it was made) is upgraded to the headless call.
+      stored[0].continuation = { kind: "newThread" };
+      const j4 = await (await req(h, TEST_TOKEN, "/api/voice/runwatch", { method: "POST" })).json();
+      expect(j4).toMatchObject({ created: false, updated: true, headless: true, triggerId: j1.triggerId });
+      expect(stored[0].continuation).toMatchObject({ kind: "tool", tool: "cyberdeck__announce", onFailure: "thread" });
+      expect((await (await req(h, TEST_TOKEN, "/api/voice/runwatch", { method: "POST" })).json()).updated).toBe(false);
 
       // What the trigger's tool call does: the announce tool composes the line and the transcript carries it.
       const client = new Client({ name: "runwatch-test", version: "0.0.0" });

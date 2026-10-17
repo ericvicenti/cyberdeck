@@ -261,8 +261,12 @@ too, which is why the trigger is scoped to the other agent). Its continuation is
 `tool` kind: the agents server calls `cyberdeck__announce` with
 `{runId, title, status, sessionId, agentId}` taken from the event (`$event.runTitle` and friends),
 no model turn and no token spent; `onFailure: 'thread'` falls back to a thread with
-`RUNWATCH_PROMPT`, which tells the agent to make that one call itself. A server that rejects the
-tool continuation (400) gets the thread form at creation. Like `dogfood`, it is idempotent by name,
+`RUNWATCH_PROMPT`, which tells the agent to make that one call itself. The server checks the
+continuation's tool against the agent's current tool list (verified on the experiments server: the shape is
+accepted with a registered tool and refused with `Trigger tool "cyberdeck__announce" is not one of this
+agent's tools` before the daemon that serves it is deployed), so a refusal naming the tool gets one
+`refreshMcp` and one retry; a server that still rejects it gets the thread form, and a trigger left in
+thread form is upgraded to the headless call by the next `runwatch`. Like `dogfood`, it is idempotent by name,
 keeps the id in `seed.json`, and patches a stale prompt or a changed harness agent in place; it needs
 the harness agent to exist (`cyberdeck seed sync`, or one prompt-bar query).
 

@@ -52,7 +52,7 @@ export type DogfoodOptions = { timezone?: string; timeOfDay?: string };
 export type Notice = { id: string; at: number; text: string; run?: { id?: string; title?: string; status?: string; sessionId?: string } };
 export type AnnounceInput = { text?: string; title?: string; status?: string; runId?: string; sessionId?: string };
 export type AnnounceResult = { announced: boolean; notice?: Notice; reason?: string };
-type TriggerInfo = { id: string; name: string; enabled: boolean; source: any; prompt?: string | unknown[]; lastFiredAt?: number; lastError?: string; createdAt?: number };
+type TriggerInfo = { id: string; name: string; enabled: boolean; source: any; prompt?: string | unknown[]; continuation?: { kind?: string; tool?: string }; lastFiredAt?: number; lastError?: string; createdAt?: number };
 
 /** Cartesia voice id + speaking rate, as the Casework host keeps it in companion.json (`profile`). */
 export type VoiceProfile = { voice: string; speed: number };
@@ -446,6 +446,22 @@ export class SeedBridge {
     const source = { type: "run-completed", agentId: watched };
     const input = { runId: "$event.runId", title: "$event.runTitle", status: "$event.runStatus", sessionId: "$event.sessionId", agentId: "$event.agentId" };
     const headless = { kind: "tool", tool: `${MCP_SERVER_NAME}__announce`, input, onFailure: "thread" };
+    // The server checks the continuation's tool against the agent's current tool list, which may predate
+    // this build (the MCP registration is refreshed on boot, but not necessarily yet): a refusal naming the
+    // tool gets one re-registration and one retry before the thread form is used.
+    const refused = (e: unknown): e is SeedError => e instanceof SeedError && (e.status === 400 || e.status === 422);
+    const withHeadless = async <T>(attempt: (continuation: unknown) => Promise<T>, fallback: () => Promise<T>): Promise<T> => {
+      try { return await attempt(headless); }
+      catch (e) {
+        if (!refused(e)) throw e;
+        if (/not one of this agent's tools/i.test(e.message)) {
+          const refreshed = await this.refreshMcp().catch(() => "skipped" as const);
+          if (refreshed !== "skipped") { try { return await attempt(headless); } catch (e2) { if (!refused(e2)) throw e2; } }
+        }
+        console.error(`seed: run-completed trigger: headless announce call refused (${e.message}); using a thread`);
+        return fallback();
+      }
+    };
     let trigger = await this.#findTrigger(agentId, RUNWATCH_TRIGGER_NAME, this.#state.runWatchTriggerId);
     let created = false;
     let updated = false;
@@ -453,31 +469,28 @@ export class SeedBridge {
       const patch: Record<string, unknown> = {};
       if (typeof trigger.prompt === "string" && trigger.prompt !== RUNWATCH_PROMPT) patch.prompt = RUNWATCH_PROMPT;
       if (trigger.source?.type !== "run-completed" || trigger.source?.agentId !== watched) patch.source = source;
-      if (Object.keys(patch).length) {
-        const res = await this.action<{ trigger?: TriggerInfo }>({ _: "UpdateAgentTrigger", triggerId: trigger.id, patch });
-        trigger = { ...trigger, ...(res.trigger ?? {}), ...patch } as TriggerInfo;
-        updated = true;
+      const threadForm = trigger.continuation?.kind !== "tool" || trigger.continuation.tool !== headless.tool;
+      if (Object.keys(patch).length || threadForm) {
+        const t = trigger;
+        const update = (p: Record<string, unknown>) => this.action<{ trigger?: TriggerInfo }>({ _: "UpdateAgentTrigger", triggerId: t.id, patch: p }).then((res) => ({ ...t, ...(res.trigger ?? {}), ...p } as TriggerInfo));
+        // A trigger left in thread form (older build, or the tool was not registered then) is upgraded to the headless call.
+        trigger = threadForm
+          ? await withHeadless((continuation) => update({ ...patch, continuation }), () => (Object.keys(patch).length ? update(patch) : Promise.resolve(t)))
+          : await update(patch);
+        updated = trigger !== t;
       }
     } else {
       const make = (continuation: unknown) => this.action<{ trigger: TriggerInfo }>({
         _: "CreateAgentTrigger", agentId,
         trigger: { name: RUNWATCH_TRIGGER_NAME, enabled: true, source, prompt: RUNWATCH_PROMPT, continuation },
       });
-      let res: { trigger: TriggerInfo };
-      try { res = await make(headless); }
-      catch (e) {
-        // An agents server without headless tool continuations still gets the thread form.
-        if (!(e instanceof SeedError) || (e.status !== 400 && e.status !== 422)) throw e;
-        console.error(`seed: run-completed trigger: headless tool continuation refused (${e.message}); using a thread`);
-        res = await make({ kind: "newThread" });
-      }
-      trigger = res.trigger;
+      trigger = (await withHeadless(make, () => make({ kind: "newThread" }))).trigger;
       created = true;
     }
     if (this.#state.runWatchTriggerId !== trigger.id) { this.#state.runWatchTriggerId = trigger.id; this.#save(); }
     const value = this.#toDogfood(trigger);
     this.#runWatch = { value, checkedAt: Date.now(), agentId };
-    return { ...value, created, updated, watches: watched, headless: (trigger as TriggerInfo & { continuation?: { kind?: string } }).continuation?.kind === "tool" };
+    return { ...value, created, updated, watches: watched, headless: trigger.continuation?.kind === "tool" };
   }
 
   /**
