@@ -24,12 +24,13 @@ export default function SeedAgents({ params }: { params: URLSearchParams }) {
   useEffect(() => {
     if (parsed && path !== parsed.canonical) updateParams({ r: parsed.canonical || null }, "replace");
   }, [path, parsed]);
-  useRouteTitle(parsed ? seedRouteTitle(parsed.route) : "Page not found · Seed");
+  useRouteTitle(parsed ? undefined : "Page not found · Seed");
   if (!parsed) return <section className="p-6"><h1>Page not found</h1><p>This Seed link is not recognised.</p><button onClick={() => navigate("seed")}>Open Seed agents</button></section>;
   const route = parsed.route;
   return (
     <SeedAgentsEmbed
       route={route}
+      title={seedRouteTitle(route)}
       onRouteChange={(_next, mode, r) => {
         navigate("seed", r ? { r } : {}, mode);
       }}
@@ -50,8 +51,12 @@ function seedRouteTitle(route: SeedAgentsRoute): string {
 type RouteChange = (route: SeedAgentsRoute, mode: "push" | "replace", path: string) => void;
 
 /** The agents UI at one route, for other views to embed (Sessions shows Seed sessions with it). */
-export function SeedAgentsEmbed({ route, onRouteChange, node = activeNode() }: { route: SeedAgentsRoute; onRouteChange?: RouteChange; node?: string }) {
+export function SeedAgentsEmbed({ route, onRouteChange, node = activeNode(), title }: { route: SeedAgentsRoute; onRouteChange?: RouteChange; node?: string; title?: string }) {
   const { host, session, error, retry } = useSeedAgentsHost(node);
+  useRouteTitle(title ? error ? "Seed agents unavailable"
+    : host && session && !session.available ? "Seed identity unavailable"
+    : host && session && !session.reachable ? "Seed server unavailable"
+    : title : undefined);
   if (error) {
     return (
       <div className="m-4 hud-card p-4 text-sm" role="alert">

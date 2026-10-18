@@ -300,3 +300,19 @@ test("a delayed child cannot replace the parent route before acknowledging resto
   await afterglow().getByRole("heading",{name:"Series",exact:true}).waitFor();
   expect(await currentRoute()).toBe("series");
 });
+
+
+test("missing, invalid and legacy Afterglow routes replace to canonical state without remounting", async () => {
+  await page.goto(outerUrl(""));await afterglow().getByRole("heading",{name:"Discover",exact:true}).waitFor();
+  await page.waitForFunction(()=>new URLSearchParams(location.hash.split("?")[1]).get("route")==="discover");
+  const frame=page.frames().find(candidate=>candidate.url().startsWith(child.url.href))!;
+  await frame.evaluate(()=>(window as any).canonicalProof="preserved");
+  const before=await page.evaluate(()=>history.length);
+  await page.evaluate(()=>{history.pushState(null,"","#/applications?app=afterglow&route=%00bad");dispatchEvent(new HashChangeEvent("hashchange"));});
+  await page.waitForFunction(()=>new URLSearchParams(location.hash.split("?")[1]).get("route")==="discover");
+  expect(await page.evaluate(()=>history.length)).toBe(before+1);
+  expect(await frame.evaluate(()=>(window as any).canonicalProof)).toBe("preserved");
+  await page.evaluate(()=>location.hash="#/applications?app=afterglow&route=%23%2Fseries");
+  await afterglow().getByRole("heading",{name:"Series",exact:true}).waitFor();expect(await currentRoute()).toBe("series");
+  await page.reload();await afterglow().getByRole("heading",{name:"Series",exact:true}).waitFor();expect(await currentRoute()).toBe("series");
+});

@@ -48,6 +48,13 @@ const server = Bun.serve<{legacy:boolean}>({port:0,hostname:"127.0.0.1",async fe
       if (dir === "/missing") return Response.json({error:"Directory not found"},{status:404});
       return Response.json({path:dir,parent:"/home",home:"/home/test",users:{1:"test"},groups:{1:"test"},entries:[entry("alpha.txt",20),entry("beta.txt",10),entry(".hidden",30)]});
     }
+    if (path === "/api/fs/text") {
+      const file = u.searchParams.get("path");
+      if (file === "/slow.txt") await new Promise<void>(resolve => deferred.set("editor", resolve));
+      if (file === "/missing.txt") return Response.json({error:"File not found"},{status:404});
+      if (file === "/binary.bin") return Response.json({error:"Binary file"},{status:415});
+      return Response.json({content:`Text for ${file}`,size:30});
+    }
     if (path === "/api/fs/search") return Response.json({results:[`${u.searchParams.get("dir")}/nested/${u.searchParams.get("q")}.txt`]});
     if (path === "/api/cmux/tree") return Response.json({available:true,running:true,tree:[{kind:"window",ref:"w1",children:[{kind:"workspace",ref:"ws1",title:"Work",children:[{kind:"surface",ref:"s1",title:"First shell",active:true,children:[]},{kind:"surface",ref:"s2",title:"Second shell",children:[]}]}]}]});
     if (path === "/api/cmux/screen") return Response.json({text:`screen ${u.searchParams.get("surface")} scrollback=${u.searchParams.get("scrollback")}`});
@@ -287,12 +294,12 @@ test("missing cmux surfaces and service links render matching errors without act
 
 test("Seed links keep node selection and reject invalid nested paths", async () => {
   await go("seed?node=peer-a&r=" + encodeURIComponent("agent/example?tab=memory&file=notes%2Ftoday.md"));
-  await title("notes/today.md · example · Seed · Cyberdeck");
+  await title("Seed agents unavailable · Cyberdeck");
   await page.getByRole("alert").filter({hasText:"Seed agents unavailable"}).waitFor();
   expect(requests).toContain("/api/seed-agents/nodes/peer-a/session");
-  await page.reload(); await title("notes/today.md · example · Seed · Cyberdeck");
+  await page.reload(); await title("Seed agents unavailable · Cyberdeck");
   await page.getByTestId("nav-services").click(); await page.goBack();
-  await title("notes/today.md · example · Seed · Cyberdeck");
+  await title("Seed agents unavailable · Cyberdeck");
   expect(await param("node")).toBe("peer-a");
   await go("seed?r=not-a-route"); await title("Page not found · Seed · Cyberdeck");
   await page.getByRole("heading",{name:"Page not found",exact:true}).waitFor();
@@ -472,4 +479,78 @@ test("active Desk calls survive navigation, release push-to-talk while hidden, a
     await callPage.waitForFunction(()=>(window as any).callProof.disconnections===1);
     expect(await callPage.title()).toBe("Locked · Cyberdeck");
   } finally { await callPage.close(); }
+});
+
+
+test("Editor empty and failed links have honest titles, and another file clears old errors and dirty state", async () => {
+  await go("edit");await page.getByRole("heading",{name:"Choose a file"}).waitFor();await title("Choose a file · Editor · Cyberdeck");
+  await go("edit?path=%2Fmissing.txt");await page.getByRole("alert").filter({hasText:"File not found"}).waitFor();await title("/missing.txt unavailable · Editor · Cyberdeck");
+  await page.reload();await title("/missing.txt unavailable · Editor · Cyberdeck");
+  await page.evaluate(()=>location.hash="#/edit?path=%2Fone.txt");
+  await page.locator(".cm-content").getByText("Text for /one.txt",{exact:true}).waitFor();
+  expect(await page.getByRole("alert").count()).toBe(0);await title("/one.txt · Editor · Cyberdeck");
+  await page.locator(".cm-content").fill("Unsaved first draft");expect(await page.getByTestId("save-btn").isEnabled()).toBe(true);
+  await page.evaluate(()=>location.hash="#/edit?path=%2Ftwo.txt");
+  await page.locator(".cm-content").getByText("Text for /two.txt",{exact:true}).waitFor();
+  expect(await page.getByTestId("save-btn").isEnabled()).toBe(false);
+  await page.evaluate(()=>location.hash="#/edit?path=%2Fbinary.bin");await page.getByText("Binary file — no text preview.").waitFor();
+  expect(await page.getByRole("alert").count()).toBe(0);
+});
+
+test("late Editor loads and saves cannot overwrite another file or clear its unsaved indicator", async () => {
+  await go("edit?path=%2Fslow.txt");while(!deferred.has("editor"))await page.waitForTimeout(10);
+  await page.evaluate(()=>location.hash="#/edit?path=%2Fone.txt");await page.locator(".cm-content").getByText("Text for /one.txt",{exact:true}).waitFor();
+  deferred.get("editor")!();deferred.delete("editor");await page.waitForTimeout(30);
+  expect(await page.locator(".cm-content").textContent()).toBe("Text for /one.txt");
+  let release: (() => void) | undefined;
+  await page.route("**/api/fs/write",async route=>{await new Promise<void>(resolve=>release=resolve);await route.fulfill({json:{ok:true}});});
+  try {
+    await page.locator(".cm-content").fill("First draft");await page.getByTestId("save-btn").click();
+    while(!release)await page.waitForTimeout(10);
+    await page.evaluate(()=>location.hash="#/edit?path=%2Ftwo.txt");await page.locator(".cm-content").getByText("Text for /two.txt",{exact:true}).waitFor();
+    await page.locator(".cm-content").fill("Second draft");release();await page.waitForTimeout(50);
+    expect(await page.locator(".cm-content").textContent()).toBe("Second draft");
+    expect(await page.getByTestId("save-btn").isEnabled()).toBe(true);await title("/two.txt · Editor · Cyberdeck");
+  } finally {release?.();await page.unroute("**/api/fs/write");}
+});
+
+test("Seed unavailable titles survive route and node changes and ignore late backend errors", async () => {
+  const isolated=await browser.newPage({viewport:{width:1440,height:1000}});isolated.setDefaultTimeout(10000);
+  let release:(()=>void)|undefined;
+  try {
+    await isolated.route("**/api/seed-agents/**",async route=>{
+      if(route.request().url().includes("/peer-a/session"))await new Promise<void>(resolve=>release=resolve);
+      return route.fulfill({status:503,json:{error:route.request().url().includes("peer-b")?"Peer B unavailable":"Old peer unavailable"}});
+    });
+    await isolated.goto(`${server.url}#/seed?node=peer-a&r=agent%2Fexample`);
+    while(!release)await isolated.waitForTimeout(10);
+    await isolated.getByTestId("node-switcher").selectOption("peer-b");
+    await isolated.getByRole("alert").filter({hasText:"Peer B unavailable"}).waitFor();release();await isolated.waitForTimeout(50);
+    expect(await isolated.getByRole("alert").textContent()).toContain("Peer B unavailable");
+    expect(await isolated.title()).toBe("Seed agents unavailable · Cyberdeck");
+    await isolated.evaluate(()=>location.hash="#/seed?node=peer-b&r=agent%2Fother");await isolated.waitForTimeout(30);
+    expect(await isolated.title()).toBe("Seed agents unavailable · Cyberdeck");
+    await isolated.getByTestId("nav-data").click();await isolated.waitForFunction(()=>document.title==="Data · peer-b · Cyberdeck");
+  } finally {release?.();await isolated.close();}
+});
+
+test("Seed identity and server failures keep their own titles on reload and nested history", async () => {
+  const isolated=await browser.newPage({viewport:{width:1440,height:1000}});isolated.setDefaultTimeout(10000);
+  let identity=false;
+  try {
+    await isolated.route("**/api/seed-agents/**",route=>route.fulfill({json:{available:identity,reachable:false,accountUid:null,identity:"fixture",agentsUrl:"http://fixture.invalid",serverPath:"/seed-fixture",hmPath:"/hm-fixture",error:"Fixture identity unavailable"}}));
+    await isolated.route("**/seed-fixture**",route=>route.fulfill({status:503,json:{error:"Fixture server unavailable"}}));
+    await isolated.route("**/hm-fixture**",route=>route.fulfill({status:503,json:{error:"Fixture server unavailable"}}));
+    await isolated.goto(`${server.url}#/seed`);
+    await isolated.waitForFunction(()=>document.title==="Seed identity unavailable · Cyberdeck");
+    await isolated.getByText(/This node cannot sign for Seed/).waitFor();
+    identity=true;await isolated.reload();
+    await isolated.waitForFunction(()=>document.title==="Seed server unavailable · Cyberdeck");
+    await isolated.getByText(/is not answering/).waitFor();
+    await isolated.evaluate(()=>location.hash="#/seed?r=agent%2Fexample");
+    await isolated.waitForTimeout(30);expect(await isolated.title()).toBe("Seed server unavailable · Cyberdeck");
+    await isolated.getByTestId("nav-applications").click();await isolated.getByRole("heading",{name:"Applications",exact:true}).waitFor();
+    expect(await isolated.title()).toBe("Applications · Cyberdeck");await isolated.goBack();
+    await isolated.waitForFunction(()=>document.title==="Seed server unavailable · Cyberdeck");
+  } finally {await isolated.close();}
 });

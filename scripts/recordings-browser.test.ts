@@ -1,12 +1,14 @@
 // Run against a rich-player build: CYBERDECK_TEST_UI=/path/to/dist/ui bun test scripts/recordings-browser.test.ts
 // Every endpoint and audio sample is synthetic. No Spotify account, installed daemon or user media is used.
-import { beforeAll, afterAll, test, expect } from "bun:test";
+import { beforeAll, afterAll, test as bunTest, expect } from "bun:test";
 import { chromium, type Browser, type Page } from "playwright";
 import { join, resolve } from "node:path";
+const test = bunTest.skipIf(!process.env.CYBERDECK_TEST_UI);
 const ui = resolve(process.env.CYBERDECK_TEST_UI || join(import.meta.dir, "../dist/ui"));
 const track = {id:"track1",uri:"spotify:track:track1",name:"Test song",artists:[{id:"artist1",name:"Test artist"}],duration_ms:180000,album:{id:"album1",name:"Test album",images:[]}};
 let browser: Browser, server: ReturnType<typeof Bun.serve>, base: string;
 beforeAll(async () => {
+  if (!process.env.CYBERDECK_TEST_UI) return;
   server=Bun.serve({hostname:"127.0.0.1",port:0,async fetch(request){
     const path=new URL(request.url).pathname;
     if(path==="/api/fleet/nodes")return Response.json({self:{nodeId:"fixture",name:"Test"},nodes:[]});

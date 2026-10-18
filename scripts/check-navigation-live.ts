@@ -92,6 +92,16 @@ try {
   await page.reload();await page.waitForFunction(()=>["Run not found · Agents · Cyberdeck","Agents unavailable · Cyberdeck"].includes(document.title));
   await page.goto(origin+"/#/agents?task=navigation-proof-missing");
   await page.waitForFunction(()=>["Task not found · Agents · Cyberdeck","Agents unavailable · Cyberdeck"].includes(document.title));
+  await page.goto(origin+"/#/edit?path=%2Fcyberdeck-navigation-proof-missing.txt");
+  await page.getByRole("alert").waitFor();
+  await page.waitForFunction(()=>document.title==="/cyberdeck-navigation-proof-missing.txt unavailable · Editor · Cyberdeck");
+  await page.reload();await page.getByRole("alert").waitFor();
+  await page.waitForFunction(()=>document.title.includes("unavailable · Editor"));
+  await page.evaluate(()=>location.hash="#/edit");
+  await page.getByRole("heading",{name:"Choose a file",exact:true}).waitFor();
+  await page.waitForFunction(()=>document.title==="Choose a file · Editor · Cyberdeck");
+  await page.getByTestId("nav-files").click();await page.getByTestId("files-table").waitFor();
+  if((await page.title()).includes("Editor"))throw new Error("Editor error leaked its title");
   mkdirSync("/tmp/cyberdeck-navigation",{recursive:true});
   await page.screenshot({path:"/tmp/cyberdeck-navigation/live-"+new URL(origin).hostname+".png"});
   let steamDetails = "not requested";
@@ -132,6 +142,10 @@ try {
   await page.waitForFunction(()=>document.title==="series · Afterglow · Cyberdeck");
   if(await frame.evaluate(()=>(window as any).navigationProof)!=="same-document")throw new Error("Leaving Applications destroyed the embed");
   await page.goBack();await embedded.getByRole("heading",{name:"discover",exact:true}).waitFor();
+  await page.evaluate(()=>location.hash="#/applications?app=afterglow&route=%00");
+  await page.waitForFunction(()=>new URLSearchParams(location.hash.split("?")[1]).get("route")==="discover");
+  await embedded.getByRole("heading",{name:"discover",exact:true}).waitFor();
+  if(await frame.evaluate(()=>(window as any).navigationProof)!=="same-document")throw new Error("Canonicalizing the route destroyed the embed");
   if (errors.length || mutations.length) throw new Error(JSON.stringify({errors,mutations}));
-  console.log(JSON.stringify({origin,peer,checks:"deep link, reload, filters, Back/Forward, missing application, not-found title",additionalChecks:"Desk tabs/title/reload/history/voice across primary/node changes, served Afterglow bridge lifecycle fixture, invalid Cloud URL without socket, signed-out Spotify links/title/reload/player persistence, Agents invalid selection/log canonicalization",nodeChecks:peer ? "new tab and Back/Forward passed" : "skipped: no online peer",steamDetails,recordingChecks:process.env.CYBERDECK_TEST_RECORDINGS==="1"?"unavailable account link, reload, title cleanup and Back passed without audio":"not requested",pageErrors:errors,mutations}));
+  console.log(JSON.stringify({origin,peer,checks:"deep link, reload, filters, Back/Forward, missing application, not-found title",additionalChecks:"Desk tabs/title/reload/history/voice across primary/node changes, served Afterglow bridge lifecycle/canonicalization fixture, Editor missing/empty links/reload/title cleanup, invalid Cloud URL without socket, signed-out Spotify links/title/reload/player persistence, Agents invalid selection/log canonicalization",nodeChecks:peer ? "new tab and Back/Forward passed" : "skipped: no online peer",steamDetails,recordingChecks:process.env.CYBERDECK_TEST_RECORDINGS==="1"?"unavailable account link, reload, title cleanup and Back passed without audio":"not requested",pageErrors:errors,mutations}));
 } finally { await browser.close(); }

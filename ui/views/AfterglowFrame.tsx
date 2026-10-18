@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { navigate } from "../lib/api";
-import { claimRouteTitle, routeHash, readRoute } from "../lib/navigation";
+import { claimRouteTitle, routeHash, readRoute, writeRoute } from "../lib/navigation";
 
 const DEFAULT_ROUTE = "discover";
 
@@ -69,7 +69,7 @@ export function AfterglowFrame({
     const receive = (event: MessageEvent) => {
       if (event.source !== frame.current?.contentWindow || event.origin !== origin) return;
 
-      if (readRoute().view !== "applications" || readRoute().params.get("app") !== currentParams.current.get("app")) return;
+      if (location.hash !== applicationHash(currentParams.current)) return;
       const data = event.data;
       const incoming = cleanRoute(data?.route);
       if (!incoming) return;
@@ -114,6 +114,12 @@ export function AfterglowFrame({
   }, [name, origin, sendRoute, visible]);
 
   const hash = applicationHash(params);
+  useEffect(() => {
+    if (!visible || location.hash !== hash || params.get("route") === route) return;
+    const canonical = new URLSearchParams(params);
+    canonical.set("route", route);
+    writeRoute("applications", canonical, "replace");
+  }, [hash, route, visible]);
   useEffect(sendRoute, [hash, sendRoute]);
 
   return (
