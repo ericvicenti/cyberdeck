@@ -1,5 +1,6 @@
 
 import { lazy, Suspense } from "react";
+import { updateParams, useRouteTitle } from "../lib/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -111,12 +112,14 @@ function NativeSeedSession({ id, node }: { id: string; node: string }) {
   );
 }
 
-export function Term({ params }: { params: URLSearchParams }) {
+
+export function Term({ params, onLocked }: { params: URLSearchParams; onLocked?: () => void }) {
   const node = activeNode();
   const nodeName = node ? activeNodeName() : "local";
   const [sessions, setSessions] = useState<LiveSession[] | null>(null);
   const [statuses, setStatuses] = useState<Record<string, Status>>({});
-  const [adding, setAdding] = useState(false);
+  const adding = params.get("new") === "1" || (!!params.get("cwd") && !params.get("session"));
+  const setAdding = (value: boolean) => updateParams({ new: value ? "1" : null, cwd: null });
   const [newCwd, setNewCwd] = useState("");
   const [newCmd, setNewCmd] = useState("");
   const [projectDirs, setProjectDirs] = useState<string[]>([]);
@@ -129,7 +132,7 @@ export function Term({ params }: { params: URLSearchParams }) {
       const r = await apiOn<{ sessions: Omit<LiveSession, "node" | "nodeName">[]; seedError?: string }>(node, "/api/sessions");
       setSessions(r.sessions.map((s) => ({ ...s, node, nodeName })).reverse());
       setErr(r.seedError ? `Seed server: ${r.seedError}` : null);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setSessions([]); }
+    } catch (e) { if ((e as { status?: number }).status === 401) onLocked?.(); setErr(e instanceof Error ? e.message : String(e)); setSessions([]); }
   };
   useEffect(() => {
     load();
@@ -146,23 +149,19 @@ export function Term({ params }: { params: URLSearchParams }) {
       const caps = await getCaps(node);
       const s = await createSession(node, nodeName, { cwd: cwd || undefined, cmd: cmd || undefined, runner: caps?.tmux ? "tmux" : "pty" });
       rememberCwd(s.cwd);
-      setAdding(false); setNewCmd("");
+      setNewCmd("");
       await load();
       navigate("term", { session: s.id });
     } catch (e) { setErr(`could not start: ${e instanceof Error ? e.message : e}`); }
   };
 
-  // Deep links: #/term?cwd=… opens a shell there; no session selected → pick the newest, or offer the form.
+  // A shareable URL describes a view; opening/reloading it must never create a process.
+  useEffect(() => { setNewCwd(params.get("cwd") ?? ""); }, [params.get("cwd")]);
   useEffect(() => {
-    const cwd = params.get("cwd");
-    if (cwd && !active) { create(cwd); return; }
-  }, [params]);
-  useEffect(() => {
-    if (!sessions) return;
-    if (active && sessions.some((s) => s.id === active)) { setAdding(false); return; }
-    if (!active && sessions.length && !params.get("cwd")) { navigate("term", { session: sessions[0].id }); return; }
-    if (!sessions.length && !params.get("cwd")) setAdding(true);
-  }, [sessions, active]);
+    if (!sessions || active || adding) return;
+    if (sessions.length) navigate("term", { session: sessions[0].id }, "replace");
+    else updateParams({ new: "1" }, "replace");
+  }, [sessions, active, adding]);
 
   useEffect(() => {
     api<Overview>("/api/control/overview").then((o) => {
@@ -182,6 +181,7 @@ export function Term({ params }: { params: URLSearchParams }) {
   };
   const cwdOptions = useMemo(() => Array.from(new Set([...recentCwds(), ...projectDirs])), [projectDirs, adding]);
   const current = sessions?.find((s) => s.id === active) ?? null;
+  useRouteTitle(adding ? "New session" : current ? `${current.title} · Sessions` : sessions && active ? "Session not found" : undefined);
   const led = (s: LiveSession) => (s.state !== "running" ? "led-off" : statuses[s.id] === "connecting" ? "led-warn" : s.busy ? "led-run" : "led-on");
 
   return (
@@ -195,7 +195,7 @@ export function Term({ params }: { params: URLSearchParams }) {
             {editing === t.id ? (
               <input autoFocus defaultValue={t.title} onBlur={async (e) => { const v = e.target.value.trim(); setEditing(null); if (v && v !== t.title) { try { await renameSession(node, t.id, v); } catch {} load(); } }} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} className="w-32 bg-transparent font-mono outline-none" />
             ) : (
-              <button onClick={() => { setAdding(false); navigate("term", { session: t.id }); }} onDoubleClick={() => setEditing(t.id)} className="max-w-[180px] truncate font-mono" title={`${shortCwd(t.cwd)}${t.cmd ? ` · ${t.cmd}` : ""} · ${t.runner}${t.state !== "running" ? ` · ${t.state}` : ""}`}>{t.title}</button>
+              <button onClick={() => { navigate("term", { session: t.id }); }} onDoubleClick={() => setEditing(t.id)} className="max-w-[180px] truncate font-mono" title={`${shortCwd(t.cwd)}${t.cmd ? ` · ${t.cmd}` : ""} · ${t.runner}${t.state !== "running" ? ` · ${t.state}` : ""}`}>{t.title}</button>
             )}
             <button onClick={() => close(t)} className="text-zinc-600 hover:text-red-400" title={t.state === "running" ? "kill session" : "remove"}>×</button>
           </div>
@@ -228,7 +228,7 @@ export function Term({ params }: { params: URLSearchParams }) {
       {!adding && current && current.tool !== "seed" && (
         <TermPane key={`${current.node}:${current.id}`} session={current} onStatus={(s) => setStatuses((m) => (m[current.id] === s ? m : { ...m, [current.id]: s }))} onRemove={() => close(current)} />
       )}
-      {!adding && !current && sessions && sessions.length > 0 && active && !active.startsWith("seed-") && <div className="p-6 text-xs text-zinc-500">No session {active} on {nodeName}. Pick one above.</div>}
+      {!adding && !current && sessions && active && !active.startsWith("seed-") && <div className="p-6 text-xs text-zinc-500">No session {active} on {nodeName}. Pick one above.</div>}
     </div>
   );
 }

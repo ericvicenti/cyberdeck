@@ -1,16 +1,16 @@
 // Spotify stays on this browser, independent of Cyberdeck's selected fleet node.
 // PKCE needs only a public client ID. Tokens are tab-scoped and never sent to Cyberdeck.
 const PREFIX = "cyberdeck-spotify-";
-const SCOPES = "streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state playlist-read-private playlist-read-collaborative";
+const SCOPES = "streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state playlist-read-private playlist-read-collaborative user-library-read user-follow-read";
 export type SpotifyTrack = { id: string; uri: string; name: string; duration_ms: number; artists: { name: string }[]; album: { images: { url: string }[] }; external_urls?: { spotify: string } };
 export type SpotifyPlaylist = { id: string; uri: string; name: string; images: { url: string }[]; external_urls?: { spotify: string } };
 export type SpotifyDevice = { id: string | null; name: string; is_active: boolean; is_restricted: boolean; supports_volume?: boolean; volume_percent: number | null };
 export type SpotifyPlayback = { item: SpotifyTrack | null; is_playing: boolean; progress_ms: number; device: SpotifyDevice; shuffle_state: boolean; repeat_state: string };
 type Credentials = { access_token: string; refresh_token: string; expires: number; clientId: string };
-type Pending = { state: string; verifier: string; clientId: string; redirect: string; created: number };
+type Pending = { state: string; verifier: string; clientId: string; redirect: string; created: number; returnHash?: string };
 const read = <T,>(key: string): T | null => { try { return JSON.parse(sessionStorage.getItem(PREFIX + key) || "null"); } catch { return null; } };
 export const spotifyConnected = () => !!read<Credentials>("tokens");
-export const spotifyClientId = () => localStorage.getItem(PREFIX + "client-id") || "";
+export const spotifyClientId = () => localStorage.getItem(PREFIX + "client-id") || "6dc6300fa4364a81acb8a5f5e920f809";
 export function spotifyRedirect(origin = location.origin): string {
   const url = new URL(origin);
   if (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "[::1]"].includes(url.hostname))) {
@@ -23,11 +23,23 @@ export async function pkceChallenge(verifier: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
   return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
+// Keep only view parameters in the tab-local OAuth continuation. Never allow an
+// external return URL, authorization code, token, or unrelated application.
+export function spotifyReturnHash(hash: string): string {
+  if (!/^#\/spotify(?:\?|$)/.test(hash)) return "#/spotify";
+  const source = new URLSearchParams(hash.split("?")[1] || ""), params = new URLSearchParams();
+  for (const key of ["node", "q", "playlists", "shelf", "id", "page", "immersive", "radio"]) {
+    const value = source.get(key)?.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 300);
+    if (value) params.set(key, value);
+  }
+  params.sort();
+  return "#/spotify" + (params.size ? "?" + params : "");
+}
 export async function connectSpotify(clientId: string): Promise<void> {
   clientId = clientId.trim();
   if (!/^[a-f0-9]{32}$/i.test(clientId)) throw new Error("Enter the 32-character Client ID from your Spotify Developer app.");
   const redirect = spotifyRedirect();
-  const pending: Pending = { state: random(), verifier: random(), clientId, redirect, created: Date.now() };
+  const pending: Pending = { state: random(), verifier: random(), clientId, redirect, created: Date.now(), returnHash: spotifyReturnHash(location.hash) };
   const challenge = await pkceChallenge(pending.verifier);
   sessionStorage.setItem(PREFIX + "pending", JSON.stringify(pending));
   localStorage.setItem(PREFIX + "client-id", clientId);
@@ -62,9 +74,11 @@ export function finishSpotifyLogin(): Promise<boolean> {
   callback = (async () => {
     const pending = read<Pending>("pending");
     // Remove authorization codes before loading external scripts or artwork.
-    history.replaceState(null, "", location.pathname + "#/spotify");
+    const valid = !!pending && query.get("state") === pending.state && Date.now() - pending.created <= 600000 && pending.redirect === spotifyRedirect();
+    history.replaceState(null, "", location.pathname + (valid ? spotifyReturnHash(pending.returnHash || "") : "#/spotify"));
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
     sessionStorage.removeItem(PREFIX + "pending");
-    if (!pending || query.get("state") !== pending.state || Date.now() - pending.created > 600000 || pending.redirect !== spotifyRedirect()) throw new Error("Spotify sign-in could not be verified. Please connect again from this tab.");
+    if (!valid || !pending) throw new Error("Spotify sign-in could not be verified. Please connect again from this tab.");
     if (query.has("error")) throw new Error("Spotify connection was canceled. You can connect again when ready.");
     await tokenRequest(new URLSearchParams({ grant_type: "authorization_code", code: query.get("code")!, redirect_uri: pending.redirect, client_id: pending.clientId, code_verifier: pending.verifier }), pending.clientId);
     return true;
@@ -91,7 +105,10 @@ export async function spotifyApi<T>(path: string, method = "GET", body?: unknown
     if (res.status === 404) throw new Error("No active Spotify device. Choose This browser or open Spotify on your phone/computer, then refresh devices.");
     throw new Error(`Spotify request failed (${res.status}). Try again.`);
   }
-  return res.status === 204 ? null as T : res.json();
+  if (res.status === 204) return null as T;
+  const text = await res.text();
+  if (!text || text === "OK") return null as T;
+  return JSON.parse(text) as T;
 }
 export function spotifyUri(input: string): string | null {
   if (/^spotify:(track|album|playlist):[a-zA-Z0-9]+$/.test(input)) return input;

@@ -1,3 +1,4 @@
+import { updateParams, useRouteTitle } from "../lib/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { api, navigate, activeNode, activeNodeName, fmtAgo, ApiError } from "../lib/api";
 import { type Overview, type Project, type Session, type ServiceRow, pill, isoAgo, globMatches, servicesForProject, serviceLogCmd, linkCommand, fleetPath, homePath } from "../lib/control";
@@ -16,7 +17,8 @@ export function Projects({ params, onLocked }: { params: URLSearchParams; onLock
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const nodes = useFleetNodes();
-  const [repoQ, setRepoQ] = useState("");
+  const repoQ = params.get("q") ?? "";
+  const setRepoQ = (q: string) => updateParams({ q }, "edit");
   const selected = params.get("p") ?? "";
 
   const load = async () => {
@@ -41,7 +43,9 @@ export function Projects({ params, onLocked }: { params: URLSearchParams; onLock
 
   const projects = ov?.projects ?? [];
   const showUnassigned = selected === UNASSIGNED;
-  const current: Project | undefined = showUnassigned ? undefined : projects.find((p) => p.slug === selected) ?? projects[0];
+  const current: Project | undefined = showUnassigned ? undefined : (selected ? projects.find((p) => p.slug === selected) : projects[0]);
+  useEffect(() => { if (!selected && current) updateParams({ p: current.slug }, "replace"); }, [selected, current?.slug]);
+  useRouteTitle(ov && selected && !showUnassigned && !current ? "Project not found" : current ? `${current.name} · Projects` : undefined);
   const parent = useMemo(() => (current?.parent ? projects.find((p) => p.slug === current.parent) : undefined), [projects, current]);
   // Every indexed checkout that no project claims: the long tail Eric still thinks of as projects.
   const unassigned = useMemo(() => repos.filter((r) => !projects.some((p) => p.repos.some((g) => globMatches(g, r.path)))).sort((a, b) => (b.last_commit_at ?? 0) - (a.last_commit_at ?? 0)), [repos, projects]);
@@ -81,6 +85,7 @@ export function Projects({ params, onLocked }: { params: URLSearchParams; onLock
           </div>
           {msg && <span className="text-[11px] text-amber-400/90" data-testid="projects-msg">{msg}</span>}
         </header>
+        {ov && selected && !showUnassigned && !current && <p role="alert" className="p-4">Project not found: {selected}</p>}
         {err && !ov && <div className="mt-6 hud-card p-6 text-sm text-zinc-400">{err}</div>}
         {ov && (
           <div className="mt-5 grid gap-4 md:grid-cols-[260px_1fr]">

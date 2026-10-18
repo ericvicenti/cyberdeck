@@ -4,7 +4,8 @@
 // (what the agent sees through its MCP tools, at a look). When the daemon says voice is
 // not configured, the card explains why and offers the one-time setup.
 import { useEffect, useRef, useState } from "react";
-import { api, post, navigate, ApiError } from "../lib/api";
+import { routeHash, updateParams, useRouteTitle } from "../lib/navigation";
+import { api, navigate, ApiError } from "../lib/api";
 import { useVoice, micAllowedHere, type TranscriptLine } from "../lib/voice";
 import { talkFace, isTalkKey, TALK_MODES } from "../lib/talk";
 import { MicIcon } from "../lib/icons";
@@ -40,8 +41,21 @@ function healthOf(h: unknown): { ok: boolean | null; label: string } {
   return { ok: null, label: String(h) };
 }
 
-export function Desk({ onLocked }: { onLocked: () => void }) {
+export function Desk({ params, onLocked, visible = true }: { params: URLSearchParams; onLocked: () => void; visible?: boolean }) {
+  const requested = params.get("tab");
+  const tab: GlanceTab = requested === "services" || requested === "agents" ? requested : "fleet";
+  useEffect(() => {
+    if (location.hash === routeHash("desk", params) && requested !== null && requested !== "services" && requested !== "agents") updateParams({ tab: null }, "replace");
+  }, [requested]);
+  useRouteTitle(!visible || tab === "fleet" ? undefined : `${tab === "services" ? "Services" : "Agents"} · Desk${params.get("node") ? ` · ${params.get("node")}` : ""}`);
   const v = useVoice({ onLocked });
+  const wasVisible = useRef(visible);
+  useEffect(() => {
+    // Recheck an idle Desk on return (setup/hub configuration may have changed)
+    // without replacing an in-progress call or its chosen hub.
+    if (visible && !wasVisible.current && (v.phase === "idle" || v.phase === "error")) void v.refreshConfig();
+    wasVisible.current = visible;
+  }, [visible, v.refreshConfig]);
   const [status, setStatus] = useState<VoiceStatus | null>(null);
   const [nodeName, setNodeName] = useState<string>("");
   const [history, setHistory] = useState<TranscriptLine[]>([]);
@@ -55,7 +69,7 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
     // A slower answer from the node that was asked before the route changed must not win.
     const load = ++statusLoad.current;
     try {
-      const s = await api<VoiceStatus>("/api/voice/status");
+      const s = await api<VoiceStatus>("/api/voice/status", { local: true });
       if (load === statusLoad.current) setStatus(s);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) onLocked();
@@ -64,7 +78,7 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
   };
   const loadHistory = async () => {
     try {
-      const t = await api<TranscriptHistory>("/api/voice/transcript?limit=20");
+      const t = await api<TranscriptHistory>("/api/voice/transcript?limit=20", { local: true });
       if (!t.supported || !t.messages) { setHistory([]); return; }
       setHistory(t.messages.map((m, i) => ({ id: `h:${i}:${m.at ?? ""}`, who: m.role === "user" ? "me" : "agent", text: m.text, final: true, at: m.at ?? 0 })));
     } catch {
@@ -72,7 +86,7 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
     }
   };
   useEffect(() => {
-    api<{ nodeName?: string }>("/api/status").then((s) => setNodeName(s.nodeName ?? "")).catch(() => {});
+    api<{ nodeName?: string }>("/api/status", { local: true }).then((s) => setNodeName(s.nodeName ?? "")).catch(() => {});
   }, []);
   // Status and history come from wherever the calls go, which is only known once the config is in.
   const resolved = v.config !== null;
@@ -102,7 +116,7 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
     setBusy("setup");
     setNote(null);
     try {
-      const r = await post<{ ok?: boolean; message?: string; error?: string }>("/api/voice/setup", {});
+      const r = await api<{ ok?: boolean; message?: string; error?: string }>("/api/voice/setup", { local: true, method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
       setNote(r.message ?? (r.ok === false ? r.error ?? "setup failed" : "setup complete"));
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) onLocked();
@@ -119,7 +133,7 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
     setBusy("reset");
     setNote(null);
     try {
-      const r = await api<{ sessionId?: string; room?: { name: string; switched: boolean; error?: string } }>("/api/voice/session/reset", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(liveRoom ? { room: liveRoom } : {}) });
+      const r = await api<{ sessionId?: string; room?: { name: string; switched: boolean; error?: string } }>("/api/voice/session/reset", { local: true, method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(liveRoom ? { room: liveRoom } : {}) });
       v.clearTranscript();
       setHistory([]);
       const id = r.sessionId ? `new session ${r.sessionId.slice(0, 8)}` : "new session";
@@ -143,7 +157,7 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
   const glow = live ? 14 + v.level * 70 : 0;
   // Push-to-talk from a keyboard: hold the space bar (outside text fields) to open the mic.
   useEffect(() => {
-    if (!face.holdTalks) return;
+    if (!visible || !face.holdTalks) return;
     const down = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (!isTalkKey(e.key, e.repeat, t?.tagName, !!t?.isContentEditable)) return;
@@ -160,7 +174,7 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
     window.addEventListener("keyup", up);
     window.addEventListener("blur", blur);
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); window.removeEventListener("blur", blur); v.hold(false); };
-  }, [face.holdTalks, v.hold]);
+  }, [visible, face.holdTalks, v.hold]);
   const glowColor = v.agentState === "speaking" ? "rgba(34,211,238,0.55)" : v.agentState === "thinking" ? "rgba(232,121,249,0.5)" : "rgba(163,230,53,0.55)";
 
   return (
@@ -264,7 +278,7 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
             {configured && note && <p className="mt-2 text-[11px] text-zinc-400" data-testid="voice-note">{note}</p>}
           </section>
 
-          <GlancePanel onLocked={onLocked} />
+          {visible && <GlancePanel key={params.get("node") ?? ""} tab={tab} onLocked={onLocked} />}
         </div>
 
         <section className="hud-card flex min-h-[200px] flex-col p-3 md:h-[calc(100dvh-7rem)] md:min-h-0" data-testid="voice-transcript">
@@ -292,8 +306,7 @@ export function Desk({ onLocked }: { onLocked: () => void }) {
 const BADGE_TONE = { bad: "neon-red", warn: "neon-amber", ok: "text-zinc-500" } as const;
 
 /** Fleet / Services / Agents under the TALK button: the overview the agent reads, at a glance. */
-function GlancePanel({ onLocked }: { onLocked: () => void }) {
-  const [tab, setTab] = useState<GlanceTab>(() => (localStorage.getItem("cyberdeck-desk-glance") as GlanceTab | null) ?? "fleet");
+function GlancePanel({ tab, onLocked }: { tab: GlanceTab; onLocked: () => void }) {
   const [ov, setOv] = useState<Overview | null>(null);
   const [nodes, setNodes] = useState<NodeSeen[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -315,7 +328,7 @@ function GlancePanel({ onLocked }: { onLocked: () => void }) {
     const iv = setInterval(load, 60_000);
     return () => { alive = false; clearInterval(iv); };
   }, []);
-  const pick = (t: GlanceTab) => { setTab(t); localStorage.setItem("cyberdeck-desk-glance", t); };
+  const pick = (tab: GlanceTab) => updateParams({ tab: tab === "fleet" ? null : tab });
   const g = ov ? glance(ov, nodes) : null;
   const go = (view: string, params: Record<string, string> = {}) => () => navigate(view, params);
   const row = "flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-[12px] hover:bg-zinc-800/60";

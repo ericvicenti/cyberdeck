@@ -5,6 +5,7 @@
 // events and WebRTC call signalling.
 import { useEffect, useRef, useState } from "react";
 import { api, post, token, ApiError } from "../lib/api";
+import { updateParams, useRouteTitle } from "../lib/navigation";
 
 export type CaseworkApp = { id: string; name: string; description: string; title?: string };
 type Device = { id: string; info?: { name?: string; model?: string; os?: string }; scene?: string };
@@ -24,9 +25,10 @@ const isSimulator = (d: Device) => /simulator/i.test(d.info?.model ?? "");
 const btn = "rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 hover:border-cyan-500 disabled:opacity-40";
 const panel = "rounded-xl border border-zinc-800 bg-zinc-900/60 p-5";
 
-export function CaseworkConsole({ app, onLocked }: { app: CaseworkApp; onLocked: () => void }) {
+export function CaseworkConsole({ app, params, onLocked }: { app: CaseworkApp; params: URLSearchParams; onLocked: () => void }) {
   const [pairing, setPairing] = useState<Pairing | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
+  const [receivedDevices, setReceivedDevices] = useState(false);
   const [selected, setSelected] = useState("");
   const [online, setOnline] = useState(false);
   const [events, setEvents] = useState<DeviceEvent[]>([]);
@@ -54,7 +56,7 @@ export function CaseworkConsole({ app, onLocked }: { app: CaseworkApp; onLocked:
     // Prefer real hardware when a simulator is connected too.
     const sorted = [...list].sort((a, b) => Number(isSimulator(a)) - Number(isSimulator(b)));
     setDevices(sorted);
-    setSelected((keep) => (sorted.some((d) => d.id === keep) ? keep : sorted[0]?.id ?? ""));
+    setReceivedDevices(true);
   };
   const command = async (name: string, args: Record<string, unknown> = {}) => {
     if (!selectedRef.current) throw new Error("Connect a device first");
@@ -145,7 +147,21 @@ export function CaseworkConsole({ app, onLocked }: { app: CaseworkApp; onLocked:
   // Another device's results are not this device's: start clean when the selection changes.
   useEffect(() => { setEvents([]); setMotion(""); setScanned(""); setIdentity(""); }, [selected]);
 
+  const requestedDevice = params.get("device") ?? "";
   const device = devices.find((d) => d.id === selected);
+  const missingDevice = receivedDevices && Boolean(requestedDevice) && !devices.some((d) => d.id === requestedDevice);
+  useEffect(() => {
+    if (!receivedDevices) return;
+    if (requestedDevice) {
+      setSelected(devices.some((d) => d.id === requestedDevice) ? requestedDevice : "");
+    } else if (devices[0]) {
+      setSelected(devices[0].id);
+      updateParams({ device: devices[0].id }, "replace");
+    } else {
+      setSelected("");
+    }
+  }, [receivedDevices, requestedDevice, devices.map((d) => d.id).join("\0")]);
+  useRouteTitle(missingDevice ? `Device not found · ${app.name}` : device ? `${deviceName(device)} · ${app.name}` : app.name);
   const onApp = device?.scene === app.id;
   const here = inCasework();
   const inCall = Boolean(callStatus) && callStatus !== "call ended";
@@ -154,10 +170,11 @@ export function CaseworkConsole({ app, onLocked }: { app: CaseworkApp; onLocked:
     <div className="flex flex-wrap items-center gap-3">
       <span className={`led ${online ? "led-on" : "led-off"}`} /><span className="hud-label">{online ? "console online" : "connecting"}</span>
       <span className="flex-1" />
-      {devices.length > 0 && <select aria-label="Device" value={selected} onChange={(e) => setSelected(e.target.value)} className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm">{devices.map((d) => <option key={d.id} value={d.id}>{deviceName(d)}{d.scene ? ` · ${d.scene}` : ""}</option>)}</select>}
+      {devices.length > 0 && <select aria-label="Device" value={selected} onChange={(e) => { setSelected(e.target.value); updateParams({ device: e.target.value }); }} className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm"><option value="" disabled>Select a device</option>{devices.map((d) => <option key={d.id} value={d.id}>{deviceName(d)}{d.scene ? ` · ${d.scene}` : ""}</option>)}</select>}
     </div>
     <h1 className="mt-4 text-3xl font-semibold tracking-tight">{app.name}</h1>
     <p className="mt-2 max-w-3xl text-sm text-zinc-400">{app.description} It runs natively in the Casework Desk app, served from this node; this page sends it to a paired device, drives it, and shows what the device really did.</p>
+    {missingDevice && <p role="alert" className="mt-4 text-amber-300">Device not found: {requestedDevice}. <button className="underline" onClick={() => updateParams({ device: null })}>Choose a connected device</button></p>}
 
     {here && <div className={`${panel} mt-5 border-lime-800`}><p className="text-sm text-zinc-300">You are in the Casework Desk app: {app.name} runs right here.</p><button data-testid="casework-open-native" className={`${btn} mt-3 border-lime-600 text-lime-300`} onClick={() => openNative(app.id)}>Open {app.name} on this device →</button></div>}
 
