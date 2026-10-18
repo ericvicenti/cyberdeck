@@ -52,6 +52,16 @@ const RELAY_PROBE_MS = 4_000;
 /** A found relay is trusted this long before it is asked again; "nobody has voice" is re-checked sooner. */
 const RELAY_TTL_MS = 60_000;
 const RELAY_MISS_TTL_MS = 15_000;
+/** Reads (config, status, transcript) give up on a hub that does not answer this fast; actions (call grant,
+ *  new session) wait longer. An offline hub (asleep, off the tailnet) hangs the connect, so these bound the wait. */
+export const RELAY_READ_MS = 6_000;
+export const RELAY_ACTION_MS = 15_000;
+/** After the hub failed to answer, every voice route answers "hub unreachable" from memory this long instead of
+ *  waiting on the network again: the Desk polls, the iPad polls, and each poll must not cost another timeout. */
+export const HUB_DOWN_TTL_MS = 10_000;
+
+/** A relay target that stopped answering: when it first failed and the last network error. */
+export type HubOutage = { since: number; error: string };
 
 export type VoiceRelay = {
   /** The paired node that answers for voice: the hub when one is pinned (null when it is not paired), else
@@ -61,7 +71,23 @@ export type VoiceRelay = {
   reset: () => void;
   /** The hub's name when this node must relay there (set and not this node); undefined when voice is local or discovered. */
   readonly pinned?: string;
+  /** The relay target's current outage, while the last failure is fresher than HUB_DOWN_TTL_MS; null when it answered
+   *  since (or was never asked). After the TTL the next route tries the network again; `since` survives repeat failures. */
+  outage: () => HubOutage | null;
+  /** The relay target did not answer (network error, timeout). An HTTP error from it is not an outage: it answered. */
+  noteFailure: (error: string) => void;
+  /** The relay target answered. */
+  noteSuccess: () => void;
 };
+
+function outageTracker(): Pick<VoiceRelay, "outage" | "noteFailure" | "noteSuccess"> {
+  let down: { at: number; since: number; error: string } | null = null;
+  return {
+    outage() { return down && Date.now() - down.at < HUB_DOWN_TTL_MS ? { since: down.since, error: down.error } : null; },
+    noteFailure(error) { const now = Date.now(); down = { at: now, since: down?.since ?? now, error }; },
+    noteSuccess() { down = null; },
+  };
+}
 
 export type VoiceRelayOptions = {
   /** `voice.hub`: the paired node that runs the voice system; naming `self` means this node answers itself. */
@@ -100,6 +126,7 @@ export function createVoiceRelay(peers: () => NodeRow[], probe: Probe = probeCon
       pinned: hub,
       async find() { return peers().find((r) => sameName(r.name, hub) || r.id === hub) ?? null; },
       reset() {},
+      ...outageTracker(),
     };
   }
   const lookup = async (): Promise<NodeRow | null> => {
@@ -118,6 +145,7 @@ export function createVoiceRelay(peers: () => NodeRow[], probe: Probe = probeCon
       return inFlight;
     },
     reset() { cached = null; },
+    ...outageTracker(),
   };
 }
 
@@ -126,11 +154,42 @@ export const viaOf = (node: NodeRow): VoiceVia => ({ node: node.id, name: node.n
 /** Why a node whose hub is not paired has no voice. */
 export const hubUnpaired = (hub: string) => `voice hub ${hub} is not paired with this node (pair it from Home, or change voice.hub)`;
 
+/** "2 h ago" / "35 min ago" / "just now" for the hub's last sighting. */
+export function agoText(at: number | null | undefined, now = Date.now()): string | null {
+  if (!at) return null;
+  const min = Math.max(0, Math.floor((now - at) / 60_000));
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} min ago`;
+  const h = Math.round(min / 60);
+  return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} d ago`;
+}
+
+/** Why a node whose paired hub does not answer has no voice right now (it is asleep or off the network). */
+export function hubUnreachable(node: NodeRow, outage: HubOutage): string {
+  const seen = agoText(node.last_seen);
+  return `voice hub ${node.name} is paired but not answering (${outage.error}${seen ? `; last seen ${seen}` : ""}); calls resume when it is back on the network`;
+}
+
+/** What every offline-hub answer carries next to `reason`, so a client can show the hub by name and when it was last seen. */
+export const hubInfo = (node: NodeRow, outage: HubOutage) => ({ name: node.name, node: node.id, reachable: false as const, since: outage.since, lastSeen: node.last_seen ?? null });
+
+/** A network error's one-line name: AbortSignal timeouts and refused connections read the same everywhere. */
+export const networkErrorText = (e: unknown): string => {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (e instanceof Error && (e.name === "TimeoutError" || /timed out|timeout/i.test(msg))) return "no answer in time";
+  if (/unable to connect|ECONNREFUSED|ConnectionRefused/i.test(msg)) return "connection refused";
+  if (/ENOTFOUND|getaddrinfo|FailedToOpenSocket|ECONNRESET|EHOSTUNREACH|ENETUNREACH/i.test(msg)) return "no route to the hub";
+  return msg.replace(/^(TypeError|Error):\s*/, "").slice(0, 120) || "unreachable";
+};
+
 /** The shape `/api/state` and the Casework welcome carry: this node's bridge, or the peer that answers for it. */
 export async function voiceSummary(bridge: SeedBridge, relay?: VoiceRelay): Promise<{ configured: boolean; provider: "livekit" | "none"; engine: "seed"; reason?: string; via?: VoiceVia }> {
   if (relay?.pinned) {
     const node = await relay.find().catch(() => null);
-    return node ? { configured: true, provider: "livekit", engine: "seed", via: viaOf(node) } : { configured: false, provider: "none", engine: "seed", reason: hubUnpaired(relay.pinned) };
+    if (!node) return { configured: false, provider: "none", engine: "seed", reason: hubUnpaired(relay.pinned) };
+    const outage = relay.outage();
+    if (outage) return { configured: false, provider: "none", engine: "seed", reason: hubUnreachable(node, outage), via: viaOf(node) };
+    return { configured: true, provider: "livekit", engine: "seed", via: viaOf(node) };
   }
   const own = await bridge.voiceSummary();
   if (own.configured || !relay) return own;
@@ -166,22 +225,39 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
   };
   // A pinned hub that is not paired: this node has no voice, and says why (the local bridge is not consulted).
   const hubMissing = (c: any): string | null => (deps.relay?.pinned && !c.req.header(DIRECT_HEADER) ? hubUnpaired(deps.relay.pinned) : null);
-  // Forwards the request to the peer and returns its answer with `via` (and the peer's status code).
-  const relayed = async (c: any, node: NodeRow, path: string, init: RequestInit = {}) => {
+  // The peer did not answer (asleep, off the tailnet): voice is off here for now, and the answer says which hub,
+  // since when, and that it comes back by itself. Shapes per route, so the Desk and the iPad read them like "not configured".
+  type OfflineKind = "config" | "action" | "status" | "transcript";
+  const offline = (c: any, node: NodeRow, outage: HubOutage, kind: OfflineKind, local?: unknown) => {
+    const reason = hubUnreachable(node, outage);
+    const tail = { via: viaOf(node), hub: hubInfo(node, outage) };
+    if (kind === "config") return c.json({ configured: false, provider: "none", engine: "seed", reason, ...tail });
+    if (kind === "action") return c.json({ error: "voice hub unreachable", reason, ...tail }, 503);
+    if (kind === "transcript") return c.json({ supported: true, messages: [], error: reason, ...tail }, 503);
+    return c.json({ ...(local as object), configured: false, reason, ...tail, local });
+  };
+  // Forwards the request to the peer and returns its answer with `via` (and the peer's status code). A peer that does
+  // not answer is remembered as down (HUB_DOWN_TTL_MS) so the next polls answer at once instead of waiting again.
+  const relayed = async (c: any, node: NodeRow, path: string, kind: OfflineKind, init: RequestInit = {}) => {
+    const known = deps.relay?.outage();
+    if (known) return offline(c, node, known, kind);
     try {
-      const res = await peerFetch(node, path, { ...init, headers: { ...(init.headers as Record<string, string>), [DIRECT_HEADER]: "1" }, signal: AbortSignal.timeout(20_000) });
+      const res = await peerFetch(node, path, { ...init, headers: { ...(init.headers as Record<string, string>), [DIRECT_HEADER]: "1" }, signal: AbortSignal.timeout(kind === "action" ? RELAY_ACTION_MS : RELAY_READ_MS) });
+      deps.relay?.noteSuccess();
       const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
       if (!body || typeof body !== "object") return c.json({ error: `voice relay to ${node.name} returned ${res.status}`, via: viaOf(node) }, 502);
       return c.json({ ...body, via: viaOf(node) }, res.status as any);
     } catch (e) {
-      console.error(`voice: relay to ${node.name} failed:`, e instanceof Error ? e.message : e);
-      return c.json({ error: `voice relay to ${node.name} failed: ${e instanceof Error ? e.message : e}`, via: viaOf(node) }, 502);
+      const error = networkErrorText(e);
+      console.error(`voice: relay to ${node.name} failed:`, error);
+      deps.relay?.noteFailure(error);
+      return offline(c, node, deps.relay?.outage() ?? { since: Date.now(), error }, kind);
     }
   };
 
   app.get("/api/voice/config", async (c) => {
     const node = await relayFor(c);
-    if (node) return relayed(c, node, "/api/voice/config");
+    if (node) return relayed(c, node, "/api/voice/config", "config");
     const missing = hubMissing(c);
     if (missing) return c.json({ configured: false, provider: "none", engine: "seed", reason: missing });
     const s = await bridge.status();
@@ -197,7 +273,7 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
 
   app.post("/api/voice/livekit", async (c) => {
     const node = await relayFor(c);
-    if (node) return relayed(c, node, "/api/voice/livekit", { method: "POST" });
+    if (node) return relayed(c, node, "/api/voice/livekit", "action", { method: "POST" });
     const missing = hubMissing(c);
     if (missing) return c.json({ error: "voice not configured", reason: missing }, 503);
     const s = await bridge.status();
@@ -217,12 +293,18 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
     const s = await bridge.status();
     const node = await relayFor(c);
     if (node) {
+      const known = deps.relay?.outage();
+      if (known) return offline(c, node, known, "status", s);
       try {
-        const res = await peerFetch(node, "/api/voice/status", { headers: { [DIRECT_HEADER]: "1" }, signal: AbortSignal.timeout(20_000) });
+        const res = await peerFetch(node, "/api/voice/status", { headers: { [DIRECT_HEADER]: "1" }, signal: AbortSignal.timeout(RELAY_READ_MS) });
+        deps.relay?.noteSuccess();
         const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
         if (body && typeof body === "object") return c.json({ ...body, via: viaOf(node), local: s }, res.status as any);
       } catch (e) {
-        console.error(`voice: status relay to ${node.name} failed:`, e instanceof Error ? e.message : e);
+        const error = networkErrorText(e);
+        console.error(`voice: status relay to ${node.name} failed:`, error);
+        deps.relay?.noteFailure(error);
+        return offline(c, node, deps.relay?.outage() ?? { since: Date.now(), error }, "status", s);
       }
     }
     const missing = hubMissing(c);
@@ -234,7 +316,7 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
   app.post("/api/voice/session/reset", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const node = await relayFor(c);
-    if (node) return relayed(c, node, "/api/voice/session/reset", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}) });
+    if (node) return relayed(c, node, "/api/voice/session/reset", "action", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}) });
     const missing = hubMissing(c);
     if (missing) return c.json({ error: "voice not configured", reason: missing }, 503);
     try { return c.json(await bridge.resetSession({ room: typeof body?.room === "string" ? body.room : undefined })); }
@@ -244,7 +326,7 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
   app.get("/api/voice/transcript", async (c) => {
     const limit = Number(c.req.query("limit") ?? 20);
     const node = await relayFor(c);
-    if (node) return relayed(c, node, `/api/voice/transcript?limit=${Number.isFinite(limit) ? limit : 20}`);
+    if (node) return relayed(c, node, `/api/voice/transcript?limit=${Number.isFinite(limit) ? limit : 20}`, "transcript");
     const missing = hubMissing(c);
     if (missing) return c.json({ supported: true, messages: [], error: missing }, 503);
     try { return c.json(await bridge.transcript(Number.isFinite(limit) ? limit : 20)); }

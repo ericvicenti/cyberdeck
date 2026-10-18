@@ -191,6 +191,34 @@ test("desk view: the daemon relays voice to the hub; the page names it and has n
   }
 }, 30000);
 
+test("desk view: a hub that is paired but not answering shows the offline card, not setup", async () => {
+  const via = { node: "n-hub", name: "Clipper" };
+  const hub = { name: "Clipper", node: "n-hub", reachable: false, since: Date.now() - 60_000, lastSeen: Date.now() - 2 * 3600_000 };
+  const reason = "voice hub Clipper is paired but not answering (no answer in time; last seen 2 h ago); calls resume when it is back on the network";
+  await page.route("**/api/voice/**", (r) => {
+    const path = new URL(r.request().url()).pathname.split("/api/")[1];
+    if (path === "voice/config") return r.fulfill({ json: { configured: false, provider: "none", engine: "seed", reason, via, hub } });
+    if (path === "voice/status") return r.fulfill({ json: { configured: false, reason, via, hub, local: { configured: false, reason: "no bridge" } } });
+    return r.fulfill({ status: 503, json: { supported: true, messages: [], error: reason, via, hub } });
+  });
+  try {
+    await page.goto(`${BASE}/#/desk`);
+    await page.waitForSelector('[data-testid="voice-hub-offline"]');
+    const card = await page.textContent('[data-testid="voice-hub-offline"]');
+    expect(card).toContain("voice hub Clipper is offline");
+    expect(card).toContain("not answering");
+    expect(card).toContain("last seen");
+    expect(await page.isVisible('[data-testid="voice-unconfigured"]')).toBe(false);
+    expect(await page.isVisible('[data-testid="voice-setup"]')).toBe(false);
+    await waitFor(async () => (await page.textContent('[data-testid="voice-node"]'))?.includes("Clipper offline") ?? false);
+    const talk = await page.$('[data-testid="talk-button"]');
+    expect(talk).not.toBeNull();
+    expect(await talk!.isDisabled()).toBe(true);
+  } finally {
+    await page.unroute("**/api/voice/**");
+  }
+}, 30000);
+
 test("applications: the Casework kitchen sink is an example app with a live console", async () => {
   await page.click('[data-testid="nav-applications"]');
   await page.waitForSelector('[data-testid="app-kitchen-sink"]');

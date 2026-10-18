@@ -15,7 +15,7 @@ import { initSchema } from "../src/daemon/db";
 import { createServer } from "../src/daemon/server";
 import { seedConfig } from "../src/daemon/config";
 import { caseworkAllows } from "../src/daemon/api/casework";
-import { createVoiceRelay, secureCallUrl } from "../src/daemon/api/voice";
+import { createVoiceRelay, secureCallUrl, agoText, hubUnreachable, HUB_DOWN_TTL_MS } from "../src/daemon/api/voice";
 import { Tailscale } from "../src/daemon/tailscale";
 import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME, fleetPrompt, RUNWATCH_TRIGGER_NAME, RUNWATCH_PROMPT } from "../src/daemon/seed";
 import { testConfig, TEST_TOKEN, tmpHomeDir } from "./helpers";
@@ -739,6 +739,67 @@ describe("voice hub", () => {
     const grant = await (await req(i, KEY, "/api/voice/livekit", { method: "POST" })).json();
     expect(grant.url).toBe("wss://livekit.example/");
     expect(grant.via).toBeUndefined();
+  }, 20000);
+
+  test("the relay remembers a hub that did not answer, for a while, and forgets it when it answers", () => {
+    const relay = createVoiceRelay(rows, async () => true, { hub: "clipper", self: "yacht" });
+    expect(relay.outage()).toBeNull();
+    relay.noteFailure("no answer in time");
+    const first = relay.outage();
+    expect(first).toMatchObject({ error: "no answer in time" });
+    expect(Date.now() - first!.since).toBeLessThan(2000);
+    // A second failure keeps the start of the outage and carries the latest error.
+    relay.noteFailure("Unable to connect");
+    expect(relay.outage()).toEqual({ since: first!.since, error: "Unable to connect" });
+    relay.noteSuccess();
+    expect(relay.outage()).toBeNull();
+    expect(HUB_DOWN_TTL_MS).toBeGreaterThanOrEqual(5000);
+    const node = rows()[1];
+    expect(hubUnreachable({ ...node, last_seen: Date.now() - 2 * 3600_000 }, { since: 1, error: "no answer in time" }))
+      .toBe("voice hub clipper is paired but not answering (no answer in time; last seen 2 h ago); calls resume when it is back on the network");
+    expect(hubUnreachable({ ...node, last_seen: null }, { since: 1, error: "Unable to connect" })).toContain("(Unable to connect); calls resume");
+    expect(agoText(Date.now() - 30_000)).toBe("just now");
+    expect(agoText(Date.now() - 35 * 60_000)).toBe("35 min ago");
+    expect(agoText(Date.now() - 3 * 86_400_000)).toBe("3 d ago");
+    expect(agoText(null)).toBeNull();
+  });
+
+  test("a paired hub that does not answer leaves the node without voice, says which hub and that it comes back", async () => {
+    // j is pinned to "Dead", paired at a port nobody listens on: the connect fails at once.
+    const j = startNode(voiced.url, "voice-j", { agentId: COMPANION_ID }, RUNTIME_TOKEN, { voice: { hub: "dead" } });
+    j.db.query("INSERT INTO nodes (id,name,url,token,added_at,last_seen) VALUES (?,?,?,?,?,?)").run("n-dead", "Dead", "http://127.0.0.1:1", TEST_TOKEN, Date.now(), Date.now() - 90 * 60_000);
+    try {
+      expect((await req(j, TEST_TOKEN, "/api/voice/setup", { method: "POST", body: "{}" })).status).toBe(200);
+      const t0 = Date.now();
+      const cfg = await (await req(j, KEY, "/api/voice/config")).json();
+      expect(Date.now() - t0).toBeLessThan(5000);
+      expect(cfg).toMatchObject({ configured: false, provider: "none", via: { node: "n-dead", name: "Dead" }, hub: { name: "Dead", node: "n-dead", reachable: false } });
+      expect(cfg.reason).toContain("voice hub Dead is paired but not answering");
+      expect(cfg.reason).toContain("last seen 2 h ago");
+      expect(cfg.reason).not.toContain("not paired");
+      // The outage is remembered: the next answers carry the same start and do not touch the network again.
+      const again = await (await req(j, KEY, "/api/voice/config")).json();
+      expect(again.hub.since).toBe(cfg.hub.since);
+      const call = await req(j, KEY, "/api/voice/livekit", { method: "POST" });
+      expect(call.status).toBe(503);
+      const callBody = await call.json();
+      expect(callBody.error).toBe("voice hub unreachable");
+      expect(callBody.reason).toContain("not answering");
+      expect(callBody.hub.lastSeen).toBe(cfg.hub.lastSeen);
+      const s = await (await req(j, TEST_TOKEN, "/api/voice/status")).json();
+      expect(s.configured).toBe(false);
+      expect(s.reason).toContain("not answering");
+      expect(s.via).toEqual({ node: "n-dead", name: "Dead" });
+      expect(s.local).toMatchObject({ configured: true });
+      expect((await req(j, KEY, "/api/voice/session/reset", { method: "POST", body: "{}" })).status).toBe(503);
+      const t = await req(j, KEY, "/api/voice/transcript");
+      expect(t.status).toBe(503);
+      expect(await t.json()).toMatchObject({ supported: true, messages: [], via: { name: "Dead" } });
+      const state = await (await req(j, KEY, "/api/state")).json();
+      expect(state.voice).toMatchObject({ configured: false, provider: "none", via: { name: "Dead" } });
+      expect(state.voice.reason).toContain("not answering");
+      expect((await welcome(j)).voice).toMatchObject({ configured: false, via: { name: "Dead" } });
+    } finally { j.stop(); j.cleanup(); }
   }, 20000);
 });
 

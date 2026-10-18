@@ -283,14 +283,25 @@ spoken side (the worker saying it when a call is live) is not done, see "Not don
 
 The voice system runs on one node, named by `voice.hub` on every node (`createVoiceRelay` in
 `src/daemon/api/voice.ts` with `pinned`). A node whose hub is another node relays `config`, `livekit`,
-`status`, `transcript` and `session/reset` to that paired peer through the fleet proxy (20 s timeout),
-whatever its own bridge says, and every answer carries `via: {node, name}`; `status` adds the local
-bridge under `local`. `setup`, `dogfood`, `runwatch` and `prompt` always target the node itself. A request that
+`status`, `transcript` and `session/reset` to that paired peer through the fleet proxy (reads give up
+after 6 s, the call grant and `session/reset` after 15 s), whatever its own bridge says, and every answer
+carries `via: {node, name}`; `status` adds the local bridge under `local`. `setup`, `dogfood`, `runwatch` and `prompt` always target the node itself. A request that
 arrives with the `x-cyberdeck-voice-direct` header is never relayed again, so a misconfigured hub
 cannot bounce. When the hub is not paired with the node, voice is simply off there with the reason
 `voice hub clipper is not paired with this node` (pair it from Home). `/api/state`, the Casework
 `welcome` frame and `cyberdeck seed status` (`voice hub: clipper (…) answers every voice route of this
 node`) say the same.
+
+A paired hub that does not answer (asleep, off the tailnet) is a different state, **hub offline**, not a
+setup problem: the relay remembers the failure for 10 s (`HUB_DOWN_TTL_MS`) so the Desk's and the iPad's
+polls answer at once instead of each waiting out a connect, and every voice route says
+`voice hub clipper is paired but not answering (no answer in time; last seen 2 h ago); calls resume when
+it is back on the network` with `via` and `hub: {name, node, reachable: false, since, lastSeen}` next to
+`reason` (`config` → `configured: false`; `livekit` and `session/reset` → 503 `voice hub unreachable`;
+`transcript` → 503, `supported: true`; `status` → `configured: false` over the local bridge). `/api/state`
+and `welcome` carry the same reason. The web Desk shows an amber "voice hub clipper is offline" card
+(`voice-hub-offline`, no setup button), the bridge strip reads `voice clipper offline`, and the page
+rechecks every 15 s so TALK comes back by itself when the hub does.
 
 The web Desk talks only to the daemon in view and shows the hub in its bridge strip (`voice clipper`);
 the machine dropdown of the shell is hidden on the Desk because there is nothing to pick. Without a
