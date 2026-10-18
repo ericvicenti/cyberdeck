@@ -43,7 +43,10 @@ const fixtureHtml = `<!doctype html>
       addEventListener("message", event => {
         if (!parentOrigin || event.source !== parent || event.origin !== parentOrigin) return;
         if (event.data?.type === "cyberdeck:reload") return location.reload();
-        if (event.data?.type === "cyberdeck:navigate" && typeof event.data.route === "string") go(event.data.route, "replace");
+        if (event.data?.type === "cyberdeck:navigate" && typeof event.data.route === "string") {
+          if (window.holdParentRoute) { window.pendingParentRoute = event.data.route; return; }
+          go(event.data.route, "replace");
+        }
       });
       document.querySelector("#series").onclick = () => go("series");
       document.querySelector("#episode").onclick = () => go("title/series/tt999?season=2&episode=1&q=" + encodeURIComponent("A & B? #/ ü"));
@@ -186,7 +189,7 @@ test("wrapper Reload retains the nested URL and does not add history", async () 
 test("selecting another app clears nested state and Back restores Afterglow", async () => {
   await page.goto(outerUrl(nestedRoute));
   await afterglow().locator("#route").waitFor();
-  await page.getByRole("button", { name: "← Applications", exact: true }).click();
+  await page.getByRole("button", { name: "← Applications", exact: true }).or(page.getByRole("link", { name: "← Applications", exact: true })).click();
   await page.getByRole("heading", { name: "Applications", exact: true }).waitFor();
   await page.getByRole("button", { name: /Open Other/ }).click();
   await page.frameLocator('iframe[title="Other"]').getByRole("heading", { name: "Other application" }).waitFor();
@@ -249,7 +252,7 @@ test("Afterglow survives primary views, other apps and node changes without hidd
   await afterglow().getByRole("heading", {name:"Example Show · Season 2 · Episode 2"}).waitFor();
   await page.waitForFunction(() => document.title.startsWith("Example Show"));
   expect(await frame.evaluate(() => !!(window as any).sessionProof)).toBe(true);
-  await page.getByRole("button", {name:"← Applications", exact:true}).click();
+  await page.getByRole("button", {name:"← Applications", exact:true}).or(page.getByRole("link", {name:"← Applications", exact:true})).click();
   await page.getByRole("button", {name:/Open Other/}).click();
   await page.frameLocator('iframe[title="Other"]').getByRole("heading").waitFor();
   expect(await page.title()).toBe("Other · Cyberdeck");
@@ -282,4 +285,18 @@ test("rapid parent history restoration wins over queued old child events", async
   expect(await currentRoute()).toBe(nestedRoute);
   expect(await page.title()).toBe("Example Show · Season 2 · Episode 2 · Afterglow · Cyberdeck");
   expect(errors).toEqual([]);
+});
+
+
+test("a delayed child cannot replace the parent route before acknowledging restoration", async () => {
+  await page.goto(outerUrl(nestedRoute));await afterglow().locator("#route").waitFor();
+  const frame=page.frames().find(candidate=>candidate.url().startsWith(child.url.href))!;
+  await frame.evaluate(()=>(window as any).holdParentRoute=true);
+  await page.evaluate(()=>{history.pushState(null,"","#/applications?app=afterglow&route=series");dispatchEvent(new HashChangeEvent("hashchange"));});
+  await frame.waitForFunction(()=>(window as any).pendingParentRoute==="series");
+  await frame.evaluate(route=>parent.postMessage({type:"afterglow:navigation",route,title:"Old request"},new URLSearchParams(location.search).get("cyberdeck")!),nestedRoute);
+  await page.waitForTimeout(30);expect(await currentRoute()).toBe("series");
+  await frame.evaluate(()=>{(window as any).holdParentRoute=false;parent.postMessage({type:"afterglow:ready",route:location.hash.slice(1)},new URLSearchParams(location.search).get("cyberdeck")!);});
+  await afterglow().getByRole("heading",{name:"Series",exact:true}).waitFor();
+  expect(await currentRoute()).toBe("series");
 });

@@ -68,7 +68,7 @@ credentials should not be replayed from a link.
 | SteamVault / Steam | selected game, PC tab, query; native install/game/session/cloud-save decisions | `steam=<id>` detail added, resolves from serving-node library, restores without Play. Game/cloud decision/quit remain runtime/confirmation actions. Keep background Steam/client/kiosk alive. |
 | GamesSection / Games | installed native games and import form | Part of Applications. Play/import are actions; no automatic execution from links. |
 | CaseworkConsole | selected device, events, camera/media/QR, calls, native scene actions | Selected device is covered by `device=<id>`, including canonical default, reload/history, missing-device error/title and no action replay. Device IDs are serving-node-local. Media preview URL semantics and call/session lifecycle still pending. |
-| `spotify` / Spotify, SpotifyRecordings, SpotifyVisualizer | shelves, entities, query, pagination, recordings, immersive mode | Compact player (main, Yacht/Iris/Sentinel/Botical/Clipper): submitted `q` and loaded `playlists` page count restore through direct links, reload and history; stale search/page results are ignored. Rich player (Enuc/Starlight): `shelf`, `id`, `q`, `radio`, `page`, `immersive` retain the existing listening room. OAuth returns to requested content in both variants; no link starts playback. SDK/player stays mounted through URL and primary-view changes. Saved-recording detail still requires a separate navigable selection that does not start playback. |
+| `spotify` / Spotify, SpotifyRecordings, SpotifyVisualizer | shelves, entities, query, pagination, recordings, immersive mode | Compact player (main, Yacht/Iris/Sentinel/Botical/Clipper): submitted `q` and loaded `playlists` page count restore through direct links, reload and history; stale search/page results are ignored. Rich player (Enuc/Starlight): `shelf`, `id`, `q`, `radio`, `page`, `immersive` retain the existing listening room. OAuth returns to requested content in both variants; no link starts playback. SDK/player stays mounted through URL and primary-view changes. `shelf=history&recording=<id>` now selects saved-audio details separately from Play. Fresh links/reload/history resolve local or node metadata without fetching audio or retrying uploads; missing/offline/no-account states have honest titles. A persistent audio owner survives shelf/detail/primary-view transitions. Enuc’s exact rich-player build is tested; Starlight’s deployment remains pending while offline. |
 | `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session, run, server, node | Nested route canonicalization, malformed/unknown path errors, route-based titles, Back/Forward and node-preserving new-window links covered. Human-readable async entity names and full error/lifecycle matrix remain. |
 | `desktop` / Desktop | selected node and connection | Primary route/title and URL-selected node covered; connect/input/credentials remain explicit runtime actions. |
 | `desk` / Desk + voice | Fleet/Services/Agents glance tab, voice call, transcript, setup, mute | `tab=services` / `tab=agents` restore from fresh links and history; default fleet ignores stale local preferences, invalid tabs replace to the default, and titles match. Tab transitions retain the voice subtree without reconnecting. Calls and permissions stay explicit. The call owner now stays mounted across primary views, node changes and screen-remote navigation. Voice requests stay on the serving daemon’s hub relay; idle configuration refreshes on return. Simulated live-room tests prove no disconnect/reconnect during navigation, release of push-to-talk when hidden, and disconnect on authentication lock. Real calls/microphones are not used by tests. |
@@ -140,3 +140,16 @@ the active title or route. The auth gate still disposes these authenticated sess
 The screen-remote view hides the main shell instead of disposing media/voice owners.
 Live smoke checks exercise the installed Afterglow wrapper with a local intercepted
 child fixture, keeping production media and saved state untouched.
+
+Rich saved-recording changes are isolated in `scripts/navigation-recordings.patch`
+because the complete listening-room UI is still an installed overlay. Apply only
+after reconciling that overlay; never replace the richer player with main’s compact
+player. Run `CYBERDECK_TEST_UI=/path/to/exact/dist/ui bun test
+scripts/recordings-browser.test.ts --timeout 30000` for standalone browser fixtures:
+encoded detail IDs, reload/new tab/history, missing/offline/account boundaries, mobile
+layout and generated local audio continuing through shelf/primary-view transitions.
+The fixture blocks external networking and uses synthetic credentials/media only.
+
+The TV keyboard companion patch also reserves Space for the visible live Desk’s
+push-to-talk control. Its global activation handler must not swallow that hold,
+and hidden Desk controls must not receive keys from another view.

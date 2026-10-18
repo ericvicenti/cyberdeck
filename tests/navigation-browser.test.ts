@@ -453,9 +453,11 @@ test("active Desk calls survive navigation, release push-to-talk while hidden, a
     expect(await callPage.evaluate(()=>(window as any).callProof.connections)).toBe(1);
     expect(await callPage.evaluate(()=>(window as any).callProof.disconnections)).toBe(0);
     await callPage.getByTestId("voice-mode-push-to-talk").click();
-    await callPage.evaluate(()=>{ (document.activeElement as HTMLElement)?.blur(); dispatchEvent(new KeyboardEvent("keydown",{key:" ",bubbles:true})); });
+    await callPage.evaluate(() => (document.activeElement as HTMLElement)?.blur());
+    await callPage.keyboard.down("Space");
     await callPage.waitForFunction(()=>(window as any).callProof.mic.at(-1)===true);
     await callPage.getByTestId("nav-data").click();
+    await callPage.keyboard.up("Space");
     await callPage.waitForFunction(()=>(window as any).callProof.mic.at(-1)===false);
     const count = await callPage.evaluate(()=>(window as any).callProof.mic.length);
     await callPage.keyboard.press("Space");

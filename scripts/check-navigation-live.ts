@@ -78,6 +78,14 @@ try {
   await page.goBack();await page.getByTestId("spotify-app").waitFor();
   if(await page.getByTestId("spotify-app").getAttribute("data-navigation-proof")!=="preserved") throw new Error("Spotify route remounted player");
   await page.reload();await page.waitForFunction(()=>document.title.includes("navigation-proof")&&document.title.endsWith("Spotify · Cyberdeck"));
+  if (rich && process.env.CYBERDECK_TEST_RECORDINGS === "1") {
+    await page.goto(origin+"/#/spotify?recording=navigation-proof-missing&shelf=history");
+    await page.getByRole("heading",{name:"Recording unavailable",exact:true}).waitFor();
+    await page.waitForFunction(()=>document.title==="Recording unavailable · Saved audio · Spotify · Cyberdeck");
+    await page.reload();await page.getByRole("heading",{name:"Recording unavailable",exact:true}).waitFor();
+    await page.getByTestId("nav-files").click();await page.getByTestId("files-table").waitFor();
+    await page.goBack();await page.waitForFunction(()=>document.title==="Recording unavailable · Saved audio · Spotify · Cyberdeck");
+  }
   await page.goto(origin+"/#/agents?run=navigation-proof-missing&log=invalid");
   await page.waitForFunction(()=>["Run not found · Agents · Cyberdeck","Agents unavailable · Cyberdeck"].includes(document.title));
   if(new URLSearchParams(new URL(page.url()).hash.split("?")[1]).has("log")) throw new Error("Invalid log was not canonicalized");
@@ -125,5 +133,5 @@ try {
   if(await frame.evaluate(()=>(window as any).navigationProof)!=="same-document")throw new Error("Leaving Applications destroyed the embed");
   await page.goBack();await embedded.getByRole("heading",{name:"discover",exact:true}).waitFor();
   if (errors.length || mutations.length) throw new Error(JSON.stringify({errors,mutations}));
-  console.log(JSON.stringify({origin,peer,checks:"deep link, reload, filters, Back/Forward, missing application, not-found title",additionalChecks:"Desk tabs/title/reload/history/voice across primary/node changes, served Afterglow bridge lifecycle fixture, invalid Cloud URL without socket, signed-out Spotify links/title/reload/player persistence, Agents invalid selection/log canonicalization",nodeChecks:peer ? "new tab and Back/Forward passed" : "skipped: no online peer",steamDetails,pageErrors:errors,mutations}));
+  console.log(JSON.stringify({origin,peer,checks:"deep link, reload, filters, Back/Forward, missing application, not-found title",additionalChecks:"Desk tabs/title/reload/history/voice across primary/node changes, served Afterglow bridge lifecycle fixture, invalid Cloud URL without socket, signed-out Spotify links/title/reload/player persistence, Agents invalid selection/log canonicalization",nodeChecks:peer ? "new tab and Back/Forward passed" : "skipped: no online peer",steamDetails,recordingChecks:process.env.CYBERDECK_TEST_RECORDINGS==="1"?"unavailable account link, reload, title cleanup and Back passed without audio":"not requested",pageErrors:errors,mutations}));
 } finally { await browser.close(); }
