@@ -12,7 +12,7 @@ The native SwiftUI/AppKit launcher, Afterglow poster shelves/library/series page
 
 ## System-audio visualizer
 
-The **Visualizer** tile on Casework's home screen works without Spotify: it analyzes audio playing on this Mac from any app. Afterglow → Music → Visualizer (or V) uses the same capture; Spotify metadata is only used for the transport/title, never for audio samples. The fullscreen spectrum/tunnel uses ScreenCaptureKit system-audio capture and Accelerate FFT, decays to stillness in silence, and honors Reduce Motion. Capture starts on entry and stops on exit. On first use macOS asks for Screen Recording permission; if denied, grant Casework access in System Settings → Privacy & Security → Screen & System Audio Recording, restart Casework, then press Retry. Streaming from a different computer is not captured: playback must actually reach Clipper's audio output. Do not run `install.sh` over a running Clipper app; build/test in a separate app path first.
+The **Visualizer** tile on Casework's home screen works without Spotify: it analyzes audio playing on this Mac from any app. Afterglow → Music → Visualizer (or V) uses the same capture; Spotify metadata is only used for the transport/title, never for audio samples. The fullscreen circular spectrum uses ScreenCaptureKit system-audio capture and Accelerate FFT, decays to stillness in silence, and honors Reduce Motion. Capture starts on entry and stops on exit. On first use macOS asks for Screen Recording permission; if denied, grant Casework access in System Settings → Privacy & Security → Screen & System Audio Recording, restart Casework, then press Retry. Streaming from a different computer is not captured: playback must actually reach Clipper's audio output. Do not run `install.sh` over a running Clipper app; build/test in a separate app path first.
 
 ## Controller
 
@@ -80,8 +80,8 @@ plain-text Spotify mutation replies, rejected routes and credential non-disclosu
 
 ## Electric Sky visualizer
 
-Music includes an ambient native Canvas visualizer: cyan electric arcs, violet plasma
-rings and drifting sparks. Choose **Visualizer** with the controller or mouse, or press
+Music includes a native Canvas visualizer: five flowing circular spectrum ribbons,
+with a full rainbow and soft colored halos. The rings expand with captured audio energy. Choose **Visualizer** with the controller or mouse, or press
 **V**, for the immersive view; **B/Escape** returns to the library without stopping music.
 D-pad/A still select the transport controls, Start pauses, and shoulders change tracks.
 Search leaves the immersive view and opens the normal input-aware search field.

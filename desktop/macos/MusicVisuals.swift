@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-// A spectrum/tunnel driven exclusively by captured Mac output; silence is a still frame.
+// Circular spectrum ribbons driven by captured Mac output; silence is a still frame.
 struct ElectricStorm: View {
     @StateObject private var audio = SystemAudio()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -30,53 +30,55 @@ struct ElectricStorm: View {
     }
     private static func draw(_ context: inout GraphicsContext, size: CGSize, bands: [Float], energy: Float, time: Double, reduceMotion: Bool) {
         let w = size.width, h = size.height
-        let center = CGPoint(x: w * 0.5, y: h * 0.44)
-        let cyan = Color(red: 0.08, green: 0.9, blue: 1)
-        let magenta = Color(red: 0.95, green: 0.15, blue: 0.78)
-        let base = min(w, h) * 0.26
+        let center = CGPoint(x: w * 0.5, y: h * 0.5)
+        let base = min(w, h) * 0.25
         let drive = Double(energy)
-        context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color(red: 0.008, green: 0.012, blue: 0.035)))
-        context.fill(Path(CGRect(origin: .zero, size: size)), with: .radialGradient(
-            Gradient(colors: [Color(red: 0.12 + min(drive * 0.18, 0.12), green: 0.025, blue: 0.26), .clear]),
-            center: center, startRadius: 0, endRadius: max(w, h) * 0.76))
-        context.blendMode = .plusLighter
-        // Classic receding neon tunnel: its geometry follows low-end energy, not a fake beat.
         let bass = Double(bands.prefix(8).reduce(0, +)) / 8
-        for depth in 0..<11 {
-            let fraction = Double(depth + 1) / 11
-            let radius = base * (0.17 + fraction * 1.75) * (1 + bass * 0.21)
-            let twist = reduceMotion ? 0 : time * 0.045 + fraction * 0.5
+        let turn = reduceMotion ? 0 : time * 0.035
+        let colors = (0...12).map { Color(hue: Double($0) / 12, saturation: 0.9, brightness: 1) }
+        let spectrum = GraphicsContext.Shading.conicGradient(Gradient(colors: colors), center: center, angle: .radians(turn))
+        context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color(red: 0.008, green: 0.012, blue: 0.018)))
+        context.blendMode = .plusLighter
+
+        // Broad pools of every hue give the halo color without tinting the whole room purple.
+        for hue in 0..<6 {
+            let angle = Double(hue) / 6 * .pi * 2 + turn
+            let point = CGPoint(x: center.x + cos(angle) * base, y: center.y + sin(angle) * base)
+            let color = Color(hue: Double(hue) / 6, saturation: 0.95, brightness: 1)
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .radialGradient(
+                Gradient(colors: [color.opacity(0.09 + drive * 0.12), .clear]),
+                center: point, startRadius: 0, endRadius: base * 1.6))
+        }
+
+        // Mirror the frequency range around the circle, smoothly joining bass at the seam.
+        // Continuous ribbons keep peaks organic instead of turning them into radial bars.
+        for layer in 0..<5 {
             var ring = Path()
-            for corner in 0...8 {
-                let angle = Double(corner) * .pi / 4 + twist
-                let point = CGPoint(x: center.x + cos(angle) * radius * 1.5, y: center.y + sin(angle) * radius * 0.88)
-                if corner == 0 { ring.move(to: point) } else { ring.addLine(to: point) }
+            let depth = Double(layer)
+            for step in 0...240 {
+                let fraction = Double(step) / 240
+                let angle = fraction * .pi * 2
+                let position = (1 - cos(angle)) * 0.5 * Double(max(0, bands.count - 1))
+                let lower = Int(position)
+                let mix = position - Double(lower)
+                let eased = mix * mix * (3 - 2 * mix)
+                let value: Double
+                if bands.isEmpty { value = 0 } else {
+                    value = Double(bands[lower]) * (1 - eased) + Double(bands[min(lower + 1, bands.count - 1)]) * eased
+                }
+                let ripple = sin(angle * 3 + turn * 3 + depth * 0.7) * drive * 0.045
+                let radius = base * (0.69 + depth * 0.14 + bass * 0.14 + value * (0.24 + depth * 0.025) + ripple)
+                let point = CGPoint(x: center.x + cos(angle + turn) * radius, y: center.y + sin(angle + turn) * radius)
+                if step == 0 { ring.move(to: point) } else { ring.addLine(to: point) }
             }
-            context.stroke(ring, with: .color((depth % 3 == 0 ? magenta : cyan).opacity(0.06 + fraction * 0.26)), lineWidth: fraction * 3)
-        }
-        for spoke in 0..<8 {
-            let angle = Double(spoke) * .pi / 4 + (reduceMotion ? 0 : time * 0.045)
-            var path = Path()
-            path.move(to: CGPoint(x: center.x + cos(angle) * base * 0.17 * 1.5, y: center.y + sin(angle) * base * 0.17 * 0.88))
-            path.addLine(to: CGPoint(x: center.x + cos(angle) * base * 1.92 * 1.5, y: center.y + sin(angle) * base * 1.92 * 0.88))
-            context.stroke(path, with: .color(cyan.opacity(0.12)), lineWidth: 1)
-        }
-        let count = bands.count
-        let gap: CGFloat = 3
-        let width = min(19, (w * 0.83 / CGFloat(count)) - gap)
-        let left = (w - CGFloat(count) * (width + gap)) / 2
-        let floor = h * 0.79
-        for i in 0..<count {
-            let value = Double(bands[i])
-            let height = max(2, h * 0.39 * value)
-            let x = left + CGFloat(i) * (width + gap)
-            let bar = CGRect(x: x, y: floor - height, width: width, height: height)
-            let color = i % 7 < 2 ? magenta : cyan
-            context.fill(Path(roundedRect: bar, cornerRadius: 2), with: .linearGradient(
-                Gradient(colors: [color.opacity(0.92), color.opacity(0.27)]), startPoint: bar.origin, endPoint: CGPoint(x: x, y: floor)))
-            if height > 4 {
-                context.fill(Path(CGRect(x: x, y: floor + 5, width: width, height: height * 0.26)), with: .color(color.opacity(0.10)))
-            }
+            ring.closeSubpath()
+            var glow = context
+            glow.opacity = layer == 2 ? 0.42 : 0.22
+            glow.addFilter(.blur(radius: base * 0.028))
+            glow.stroke(ring, with: spectrum, style: StrokeStyle(lineWidth: base * 0.032, lineCap: .round, lineJoin: .round))
+            var line = context
+            line.opacity = layer == 2 ? 0.95 : 0.48
+            line.stroke(ring, with: spectrum, style: StrokeStyle(lineWidth: layer == 2 ? 3 : 1.5, lineCap: .round, lineJoin: .round))
         }
     }
 }
