@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
 
@@ -108,6 +108,9 @@ const currentRoute = () => page.evaluate(() => new URLSearchParams(location.hash
 
 beforeAll(async () => {
   browser = await chromium.launch();
+});
+beforeEach(async () => {
+  await page?.close();
   page = await browser.newPage();
   page.on("pageerror", error => errors.push(error.message));
 });
@@ -234,7 +237,6 @@ test("wrong source and wrong origin messages cannot change URL or title", async 
 });
 
 test("Afterglow survives primary views, other apps and node changes without hidden messages stealing navigation", async () => {
-  await page.close(); page = await browser.newPage(); page.on("pageerror", error => errors.push(error.message));
   await page.goto(outerUrl(nestedRoute));
   await afterglow().locator("#route").waitFor();
   const frame = page.frames().find(candidate => candidate.url().startsWith(child.url.href))!;
