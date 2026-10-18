@@ -1,8 +1,8 @@
 # Cyberdeck navigation coverage
 
-Updated 2026-10-17. This is an implementation inventory, not a completion claim.
+Updated 2026-10-18. This is an implementation inventory, not a completion claim.
 The nightly routine and fleet deployment status live in Deck's
-`handoff/routines/cyberdeck-navigation/2026-10-17.md`.
+`handoff/routines/cyberdeck-navigation/2026-10-18.md`.
 
 ## Source and rollout status
 
@@ -61,8 +61,8 @@ credentials should not be replayed from a link.
 | App / api / navigation | primary view, node, not-found, auth, titles | Covered, including legacy `service`→`svc`, Steam app→Vault tab. More parameter validation and every error title remain. |
 | `fleet` / Home | local/fleet overview, node links; pairing and account/reset dialogs; NetworkMap selected endpoints | Overview and node links covered. Pairing/reset/benchmark actions remain transient and must never auto-run. Decide URL representation for NetworkMap endpoint selection. |
 | `controls` / Controls | control diagram, bindings/editor, reset notice | Static route/title covered where installed. Binding changes are settings, not navigation. Keyboard/gamepad mode preferences remain local. |
-| `applications` / Applications | application id, Casework example, pairing dialog, reload | Id and unknown-id error/title covered. Pairing is an explicit operation. Generic iframe reload/history/state/title require cooperative bridges. |
-| `applications?app=afterglow` / AfterglowFrame + BoticalMedia/public/navigation.js | child route, season/episode, search/filter, person dialog, music and YouTube state | Existing bridge retained: exact origin+source, parent-only history, route restoration, stable iframe, title cleanup. Browser regression suite passes. Cross-primary-view playback lifecycle still needs explicit coverage. |
+| `applications` / Applications | application id, Casework example, pairing dialog, reload | Id and unknown-id error/title covered. Pairing is an explicit operation. Visited generic iframe documents now survive primary-view, application and node navigation. Their nested reload/history/state/title still require cooperative bridges. |
+| `applications?app=afterglow` / AfterglowFrame + BoticalMedia/public/navigation.js | child route, season/episode, search/filter, person dialog, music and YouTube state | Existing bridge retained: exact origin+source, parent-only history, route restoration, stable iframe, title cleanup. Browser regressions now prove document/timer continuity across primary views, other apps and node changes, plus hidden-message isolation and route/title restoration. A pending parent route rejects stale child acknowledgements. No production media is played by these checks. |
 | `applications?app=vimm` / Vault | tabs, system, query, letter, page; selected retro title modal | Covered. `game=<catalog-id>` restores a detail from its shelf/catalog/list context on fresh open, reload and history without starting playback. Invalid tab/system/query/letter/page/game values normalize; missing IDs retain an honest error/title. My list and ready-to-play metadata remain browser-local by design. |
 | VaultPlayer / vault download and storage | running emulator, ROM cache, save state, native N64 handoff, pause menu | Runtime session; do not replay Play/downloads from URL. Verify continuation across all relevant URL changes. Existing regression suites exercise generated fixture ROMs only. |
 | SteamVault / Steam | selected game, PC tab, query; native install/game/session/cloud-save decisions | `steam=<id>` detail added, resolves from serving-node library, restores without Play. Game/cloud decision/quit remain runtime/confirmation actions. Keep background Steam/client/kiosk alive. |
@@ -71,7 +71,7 @@ credentials should not be replayed from a link.
 | `spotify` / Spotify, SpotifyRecordings, SpotifyVisualizer | shelves, entities, query, pagination, recordings, immersive mode | Compact player (main, Yacht/Iris/Sentinel/Botical/Clipper): submitted `q` and loaded `playlists` page count restore through direct links, reload and history; stale search/page results are ignored. Rich player (Enuc/Starlight): `shelf`, `id`, `q`, `radio`, `page`, `immersive` retain the existing listening room. OAuth returns to requested content in both variants; no link starts playback. SDK/player stays mounted through URL and primary-view changes. Saved-recording detail still requires a separate navigable selection that does not start playback. |
 | `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session, run, server, node | Nested route canonicalization, malformed/unknown path errors, route-based titles, Back/Forward and node-preserving new-window links covered. Human-readable async entity names and full error/lifecycle matrix remain. |
 | `desktop` / Desktop | selected node and connection | Primary route/title and URL-selected node covered; connect/input/credentials remain explicit runtime actions. |
-| `desk` / Desk + voice | Fleet/Services/Agents glance tab, voice call, transcript, setup, mute | `tab=services` / `tab=agents` restore from fresh links and history; default fleet ignores stale local preferences, invalid tabs replace to the default, and titles match. Tab transitions retain the voice subtree without reconnecting. Calls and permissions stay explicit. Cross-primary-view call lifecycle still needs coverage. |
+| `desk` / Desk + voice | Fleet/Services/Agents glance tab, voice call, transcript, setup, mute | `tab=services` / `tab=agents` restore from fresh links and history; default fleet ignores stale local preferences, invalid tabs replace to the default, and titles match. Tab transitions retain the voice subtree without reconnecting. Calls and permissions stay explicit. The call owner now stays mounted across primary views, node changes and screen-remote navigation. Voice requests stay on the serving daemon’s hub relay; idle configuration refreshes on return. Simulated live-room tests prove no disconnect/reconnect during navigation, release of push-to-talk when hidden, and disconnect on authentication lock. Real calls/microphones are not used by tests. |
 | `projects` / Projects | selected project, nested slug, unassigned repos, query | URL selection, canonical default, filter, title, missing project covered. Nested slugs use the same `p` key. Editing launches Files/Editor. |
 | `agents` / Agents | task focus, run, log file, session query/host/tool, handoff disclosure, project prefill | Covered, including late search suppression. Task selection defaults to its run. Follow-scroll preference and launch/task drafts remain transient. Missing tasks/runs/logs have matching errors and titles; log content is keyed to run/file so failed or late requests cannot display another selection. Invalid log names canonicalize to worker.log. Backend failure titles are covered by the same ownership rules; broader session lifecycle checks remain. |
 | `services` / Services | host and service focus | Existing URL parameters retained; legacy Home `service` links fixed centrally. Missing host/service selections and unavailable backend now have matching titles and visible errors. Start/restart/log commands remain explicit. |
@@ -131,3 +131,12 @@ Files deep search in `tests/navigation-browser.test.ts`, CodeMirror save in
 Those browser suites use isolated fake services and generated local fixtures.
 
 Mac tar resource forks (`._*`) are metadata, not build inputs. The prebuilt installer ignores them while fingerprinting every content input and served asset; it still refuses genuine added/changed files. Browser suites should run separately from fleet builds (`bun test tests --timeout 30000`) to avoid startup timeouts on the shared Mac.
+
+The 2026-10-18 session lifecycle checks are in `tests/afterglow-navigation.test.ts`
+and `tests/navigation-browser.test.ts`. `RetainedView` mounts Applications and Desk
+on their first visit, keeps their own params while hidden, and makes them inert.
+`ApplicationFrames` retains only visited frame documents; hidden frames cannot own
+the active title or route. The auth gate still disposes these authenticated sessions.
+The screen-remote view hides the main shell instead of disposing media/voice owners.
+Live smoke checks exercise the installed Afterglow wrapper with a local intercepted
+child fixture, keeping production media and saved state untouched.

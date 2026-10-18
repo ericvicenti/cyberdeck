@@ -386,3 +386,88 @@ test("Agents late log responses cannot overwrite a newer run", async () => {
     expect(mutations).toEqual([]);
   } finally {holdLog=false;deferred.get("log")?.();deferred.delete("log");}
 });
+
+test("Desk retains its voice owner across primary views and node selection without retitling hidden pages", async () => {
+  await go("desk?tab=services&node=peer-a");
+  await page.getByTestId("voice-transcript").waitFor();
+  await page.getByTestId("voice-transcript").evaluate(node => node.setAttribute("data-session-proof", "same-call-owner"));
+  const configs = requests.filter(path => path === "/api/voice/config").length;
+  await page.getByTestId("nav-files").click();
+  await page.getByPlaceholder("filter · Enter = deep search").waitFor();
+  await page.getByTestId("node-switcher").selectOption("peer-b");
+  await page.getByTestId("nav-desk").click();
+  await page.getByTestId("glance-fleet").waitFor();
+  expect(await page.getByTestId("voice-transcript").getAttribute("data-session-proof")).toBe("same-call-owner");
+  expect(requests.filter(path => path === "/api/voice/config").length).toBeGreaterThanOrEqual(configs);
+  expect(requests.filter(path => path.includes("/proxy/voice/"))).toEqual([]);
+  await page.getByTestId("glance-tab-agents").click();
+  await title("Agents · Desk · peer-b · Cyberdeck");
+  await page.getByTestId("nav-data").click();
+  await title("Data · peer-b · Cyberdeck");
+  await page.goBack();
+  await page.getByTestId("glance-agents").waitFor();
+  await title("Agents · Desk · peer-b · Cyberdeck");
+  expect(await page.getByTestId("voice-transcript").getAttribute("data-session-proof")).toBe("same-call-owner");
+  expect(mutations).toEqual([]);
+});
+
+test("active Desk calls survive navigation, release push-to-talk while hidden, and stop at the auth boundary", async () => {
+  const callPage = await browser.newPage({viewport:{width:1440,height:1000}});
+  callPage.setDefaultTimeout(5000);
+  const voiceRequests: string[] = [];
+  try {
+    await callPage.route("**/assets/livekit-client.esm-*.js", route => route.fulfill({contentType:"text/javascript",body:`
+      window.callProof = {connections:0,disconnections:0,mic:[],rooms:[]};
+      export const RoomEvent = new Proxy({}, {get:(_,key)=>key});
+      export const Track = {Kind:{Audio:"audio"}};
+      export const createAudioAnalyser = () => ({calculateVolume:()=>0,cleanup:()=>{}});
+      export class Room {
+        events = new Map(); remoteParticipants = new Map();
+        localParticipant = {identity:"fixture", isMicrophoneEnabled:false,
+          setMicrophoneEnabled: async value => { this.localParticipant.isMicrophoneEnabled=value; window.callProof.mic.push(value); }, sendText:async()=>{}};
+        constructor(){window.callProof.rooms.push(this);}
+        on(name,fn){this.events.set(name,fn);return this;}
+        removeAllListeners(){this.events.clear();}
+        async connect(){window.callProof.connections++;}
+        async disconnect(){window.callProof.disconnections++;}
+        async startAudio(){}
+      }
+    `}));
+    await callPage.route("**/api/**voice/**", route => {
+      const path = new URL(route.request().url()).pathname;
+      voiceRequests.push(`${route.request().method()} ${path}`);
+      const body = path.endsWith("/config") ? {configured:true,provider:"livekit",via:{node:"hub",name:"Fixture hub"}}
+        : path.endsWith("/livekit") ? {url:"wss://fixture.invalid",token:"fixture-only",room:"fixture-call"}
+        : path.endsWith("/transcript") ? {supported:true,messages:[]} : {configured:true,agent:{name:"Fixture agent"}};
+      return route.fulfill({json:body});
+    });
+    await callPage.goto(`${server.url}#/desk?node=peer-a&tab=services`);
+    await callPage.getByRole("button",{name:"Start call",exact:true}).click();
+    await callPage.getByRole("button",{name:"End call",exact:true}).waitFor();
+    expect(voiceRequests).toContain("POST /api/voice/livekit");
+    expect(voiceRequests.some(path=>path.includes("/proxy/"))).toBe(false);
+    await callPage.getByTestId("nav-files").click();
+    await callPage.getByTestId("node-switcher").selectOption("peer-b");
+    await callPage.goBack(); await callPage.goBack();
+    await callPage.getByRole("button",{name:"End call",exact:true}).waitFor();
+    expect(await callPage.evaluate(()=>(window as any).callProof.connections)).toBe(1);
+    expect(await callPage.evaluate(()=>(window as any).callProof.disconnections)).toBe(0);
+    await callPage.getByTestId("voice-mode-push-to-talk").click();
+    await callPage.evaluate(()=>{ (document.activeElement as HTMLElement)?.blur(); dispatchEvent(new KeyboardEvent("keydown",{key:" ",bubbles:true})); });
+    await callPage.waitForFunction(()=>(window as any).callProof.mic.at(-1)===true);
+    await callPage.getByTestId("nav-data").click();
+    await callPage.waitForFunction(()=>(window as any).callProof.mic.at(-1)===false);
+    const count = await callPage.evaluate(()=>(window as any).callProof.mic.length);
+    await callPage.keyboard.press("Space");
+    expect(await callPage.evaluate(()=>(window as any).callProof.mic.length)).toBe(count);
+    await callPage.evaluate(()=>{history.pushState(null,"","#/remote");dispatchEvent(new HashChangeEvent("hashchange"));});
+    await callPage.getByTestId("screen-remote").waitFor();
+    expect(await callPage.evaluate(()=>(window as any).callProof.disconnections)).toBe(0);
+    await callPage.goBack();
+    await callPage.route("**/fs/list**",route=>route.fulfill({status:401,json:{error:"Locked"}}));
+    await callPage.getByTestId("nav-files").click();
+    await callPage.getByPlaceholder("access token").waitFor();
+    await callPage.waitForFunction(()=>(window as any).callProof.disconnections===1);
+    expect(await callPage.title()).toBe("Locked · Cyberdeck");
+  } finally { await callPage.close(); }
+});

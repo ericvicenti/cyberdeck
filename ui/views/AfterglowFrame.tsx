@@ -27,12 +27,15 @@ export function AfterglowFrame({
   url,
   params,
   name,
+  visible = true,
 }: {
   url: string;
   params: URLSearchParams;
   name: string;
+  visible?: boolean;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
+  const pendingRoute = useRef<string | null>(null);
   const currentParams = useRef(params);
   currentParams.current = params;
 
@@ -48,6 +51,8 @@ export function AfterglowFrame({
   });
 
   const sendRoute = useCallback(() => {
+    if (!visible || location.hash !== applicationHash(currentParams.current)) return;
+    pendingRoute.current = cleanRoute(currentParams.current.get("route")) || DEFAULT_ROUTE;
     frame.current?.contentWindow?.postMessage(
       {
         type: "cyberdeck:navigate",
@@ -55,9 +60,10 @@ export function AfterglowFrame({
       },
       origin,
     );
-  }, [origin]);
+  }, [origin, visible]);
 
   useEffect(() => {
+    if (!visible) return;
     let releaseTitle = claimRouteTitle(name);
 
     const receive = (event: MessageEvent) => {
@@ -72,6 +78,11 @@ export function AfterglowFrame({
         sendRoute();
         return;
       }
+
+      // Parent Back/Forward wins over child events queued for the old route.
+      // A title/navigation acknowledgement for the requested route reopens it.
+      if (pendingRoute.current && incoming !== pendingRoute.current) return;
+      if (data.type === "afterglow:title" || data.type === "afterglow:navigation") pendingRoute.current = null;
 
       if (data.type === "afterglow:navigation") {
         const next = new URLSearchParams(currentParams.current);
@@ -100,9 +111,10 @@ export function AfterglowFrame({
       window.removeEventListener("message", receive);
       releaseTitle();
     };
-  }, [name, origin, sendRoute]);
+  }, [name, origin, sendRoute, visible]);
 
-  useEffect(sendRoute, [route, sendRoute]);
+  const hash = applicationHash(params);
+  useEffect(sendRoute, [hash, sendRoute]);
 
   return (
     <section className="flex h-full flex-col" aria-label={name}>

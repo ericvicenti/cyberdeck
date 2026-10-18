@@ -54,6 +54,14 @@ try {
   await page.getByTestId("glance-tab-agents").click();await page.getByTestId("glance-agents").waitFor();
   await page.goBack();await page.getByTestId("glance-services").waitFor();
   if (await page.getByTestId("voice-transcript").getAttribute("data-navigation-proof")!=="preserved") throw new Error("Desk tab remounted voice");
+  await page.getByTestId("nav-files").click();await page.getByTestId("files-table").waitFor();
+  if (peer) {
+    await page.getByTestId("node-switcher").selectOption(peer);
+    await page.getByTestId("files-table").waitFor();
+    await page.goBack();
+  }
+  await page.goBack();await page.getByTestId("glance-services").waitFor();
+  if (await page.getByTestId("voice-transcript").getAttribute("data-navigation-proof")!=="preserved") throw new Error("Leaving Desk remounted voice");
   await page.reload();await page.getByTestId("glance-services").waitFor();
   const browserSockets: string[]=[];
   page.on("websocket",ws=>{if(ws.url().includes("/api/browser/")) browserSockets.push(ws.url());});
@@ -92,6 +100,30 @@ try {
       steamDetails = "direct link, reload, close and Back passed without Play";
     } else steamDetails = "skipped: no available Steam library";
   }
+  // Exercise this host's served bridge with an isolated cooperative child. No real
+  // Afterglow playback, saved state, account or media endpoint is touched.
+  await page.route("**/api/applications", route => route.fulfill({json:{applications:[{id:"afterglow",name:"Afterglow",url:origin+"/navigation-fixture",description:"Local test fixture"}]}}));
+  await page.route("**/navigation-fixture*", route => route.fulfill({contentType:"text/html",body:`<!doctype html><title>Fixture</title><button id="next">Next fixture route</button><h1 id="route"></h1><script>
+    const parentOrigin=new URLSearchParams(location.search).get('cyberdeck');
+    function show(route){history.replaceState(null,'','#'+route);document.querySelector('h1').textContent=route;parent.postMessage({type:'afterglow:title',route,title:route+' · Afterglow'},parentOrigin);}
+    addEventListener('message',event=>{if(event.source!==parent||event.origin!==parentOrigin)return;if(event.data.type==='cyberdeck:navigate')show(event.data.route);if(event.data.type==='cyberdeck:reload')location.reload();});
+    document.querySelector('button').onclick=()=>{show('series');parent.postMessage({type:'afterglow:navigation',route:'series',title:'series · Afterglow'},parentOrigin);};
+    show(location.hash.slice(1));parent.postMessage({type:'afterglow:ready',route:location.hash.slice(1)},parentOrigin);
+  </script>`}));
+  await page.goto(origin+"/#/applications?app=afterglow&route=discover");await page.reload();
+  const embedded=page.frameLocator('[data-testid="afterglow-frame"]');
+  await embedded.getByRole("heading",{name:"discover",exact:true}).waitFor();
+  const frame=page.frames().find(frame=>frame.url().includes("/navigation-fixture"))!;
+  await frame.evaluate(()=>(window as any).navigationProof="same-document");
+  await embedded.getByRole("button",{name:"Next fixture route"}).click();
+  await page.waitForFunction(()=>new URLSearchParams(location.hash.split("?")[1]).get("route")==="series");
+  await page.getByTestId("nav-files").click();await page.getByTestId("files-table").waitFor();
+  await frame.evaluate(()=>parent.postMessage({type:"afterglow:navigation",route:"hidden",title:"Hidden"},location.origin));
+  if (!new URL(page.url()).hash.startsWith("#/files")) throw new Error("Hidden embed navigated the parent");
+  await page.goBack();await embedded.getByRole("heading",{name:"series",exact:true}).waitFor();
+  await page.waitForFunction(()=>document.title==="series · Afterglow · Cyberdeck");
+  if(await frame.evaluate(()=>(window as any).navigationProof)!=="same-document")throw new Error("Leaving Applications destroyed the embed");
+  await page.goBack();await embedded.getByRole("heading",{name:"discover",exact:true}).waitFor();
   if (errors.length || mutations.length) throw new Error(JSON.stringify({errors,mutations}));
-  console.log(JSON.stringify({origin,peer,checks:"deep link, reload, filters, Back/Forward, missing application, not-found title",additionalChecks:"Desk tabs/title/reload/history/voice subtree, invalid Cloud URL without socket, signed-out Spotify links/title/reload/player persistence, Agents invalid selection/log canonicalization",nodeChecks:peer ? "new tab and Back/Forward passed" : "skipped: no online peer",steamDetails,pageErrors:errors,mutations}));
+  console.log(JSON.stringify({origin,peer,checks:"deep link, reload, filters, Back/Forward, missing application, not-found title",additionalChecks:"Desk tabs/title/reload/history/voice across primary/node changes, served Afterglow bridge lifecycle fixture, invalid Cloud URL without socket, signed-out Spotify links/title/reload/player persistence, Agents invalid selection/log canonicalization",nodeChecks:peer ? "new tab and Back/Forward passed" : "skipped: no online peer",steamDetails,pageErrors:errors,mutations}));
 } finally { await browser.close(); }

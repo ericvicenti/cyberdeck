@@ -229,3 +229,57 @@ test("wrong source and wrong origin messages cannot change URL or title", async 
   expect(await page.title()).toBe(before.title);
   expect(errors).toEqual([]);
 });
+
+test("Afterglow survives primary views, other apps and node changes without hidden messages stealing navigation", async () => {
+  await page.close(); page = await browser.newPage(); page.on("pageerror", error => errors.push(error.message));
+  await page.goto(outerUrl(nestedRoute));
+  await afterglow().locator("#route").waitFor();
+  const frame = page.frames().find(candidate => candidate.url().startsWith(child.url.href))!;
+  await frame.evaluate(() => { (window as any).sessionProof = { ticks: 0 }; setInterval(() => (window as any).sessionProof.ticks++, 10); });
+  await page.getByTestId("nav-data").click();
+  await page.waitForFunction(() => location.hash === "#/data");
+  const ticks = await frame.evaluate(() => (window as any).sessionProof.ticks);
+  await frame.evaluate(() => parent.postMessage({type:"afterglow:navigation", route:"series", title:"Hidden child"}, new URLSearchParams(location.search).get("cyberdeck")!));
+  await frame.evaluate(() => parent.postMessage({type:"afterglow:title", route:"series", title:"Hidden title"}, new URLSearchParams(location.search).get("cyberdeck")!));
+  await page.waitForTimeout(50);
+  expect(page.url().endsWith("#/data")).toBe(true);
+  expect(await page.title()).toBe("Data · Cyberdeck");
+  expect(await frame.evaluate(() => (window as any).sessionProof.ticks)).toBeGreaterThan(ticks);
+  await page.goBack();
+  await afterglow().getByRole("heading", {name:"Example Show · Season 2 · Episode 2"}).waitFor();
+  await page.waitForFunction(() => document.title.startsWith("Example Show"));
+  expect(await frame.evaluate(() => !!(window as any).sessionProof)).toBe(true);
+  await page.getByRole("button", {name:"← Applications", exact:true}).click();
+  await page.getByRole("button", {name:/Open Other/}).click();
+  await page.frameLocator('iframe[title="Other"]').getByRole("heading").waitFor();
+  expect(await page.title()).toBe("Other · Cyberdeck");
+  expect(await frame.evaluate(() => !!(window as any).sessionProof)).toBe(true);
+  const other = page.frames().find(candidate => candidate.url().endsWith("/other"))!;
+  await other.evaluate(() => (window as any).genericProof = "retained");
+  await page.goBack(); await page.goBack();
+  await afterglow().getByRole("heading", {name:"Example Show · Season 2 · Episode 2"}).waitFor();
+  await page.evaluate(() => { const p = new URLSearchParams(location.hash.split("?")[1]); p.set("node","fixture-peer"); location.hash = "/applications?" + p; });
+  await page.waitForFunction(() => new URLSearchParams(location.hash.split("?")[1]).get("node") === "fixture-peer");
+  expect(await frame.evaluate(() => !!(window as any).sessionProof)).toBe(true);
+  expect(await other.evaluate(() => (window as any).genericProof)).toBe("retained");
+  expect(childRequests.every(request => request.method === "GET")).toBe(true);
+});
+
+test("rapid parent history restoration wins over queued old child events", async () => {
+  await page.goto(outerUrl(nestedRoute));
+  await afterglow().locator("#route").waitFor();
+  const frame = page.frames().find(candidate => candidate.url().startsWith(child.url.href))!;
+  await page.evaluate(() => {
+    const p = new URLSearchParams({app:"afterglow",route:"series"});
+    history.pushState(null,"","#/applications?"+p);
+    dispatchEvent(new HashChangeEvent("hashchange"));
+  });
+  await afterglow().getByRole("heading", {name:"Series",exact:true}).waitFor();
+  await page.goBack();
+  await afterglow().getByRole("heading", {name:"Example Show · Season 2 · Episode 2"}).waitFor();
+  await frame.evaluate(() => parent.postMessage({type:"afterglow:title",route:"series",title:"Stale title"},new URLSearchParams(location.search).get("cyberdeck")!));
+  await page.waitForTimeout(30);
+  expect(await currentRoute()).toBe(nestedRoute);
+  expect(await page.title()).toBe("Example Show · Season 2 · Episode 2 · Afterglow · Cyberdeck");
+  expect(errors).toEqual([]);
+});
