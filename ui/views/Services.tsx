@@ -1,39 +1,31 @@
 import { useRouteTitle } from "../lib/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { api, post, wsUrl, navigate, activeNode, activeNodeName, fmtAgo, ApiError } from "../lib/api";
-import { type Overview, type ServiceProbe, isoAgo, projectsForService, projectsOnHost, serviceLogCmd, serviceRestartCmd, pill } from "../lib/control";
-import { useFleetNodes, openOnHost, resolveHost } from "../lib/hosts";
+import { postOn, wsUrl, navigate, fmtAgo } from "../lib/api";
+import { type ServiceProbe, isoAgo, projectsForService, projectsOnHost, serviceLogCmd, serviceRestartCmd, pill } from "../lib/control";
+import { useHostTargets, openOnHost, resolveHost } from "../lib/hosts";
+import { useOverview } from "../lib/fleet";
 import { Panel, Empty, ServiceLine, Action } from "./Projects";
 
+/** Every host in the Deck manifest with its last probe. The probe is Deck data (the same on every
+ *  machine); it is read from this node or, when this node has no Deck checkout, from a peer. A
+ *  shell or a log tail for a host runs ON that host: natively here, on its paired node, or over ssh. */
 export function Services({ params, onLocked }: { params: URLSearchParams; onLocked: () => void }) {
-  const [ov, setOv] = useState<Overview | null>(null);
+  const { overview: ov, source, error: err, refresh } = useOverview(onLocked, 60_000);
   const [probe, setProbe] = useState<ServiceProbe | null>(null);
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const nodes = useFleetNodes();
+  const { me, hosts, nodes } = useHostTargets(ov, source);
   const focusHost = params.get("host") ?? "";
   const focusSvc = params.get("svc") ?? "";
 
-  const load = async () => {
-    try {
-      const o = await api<Overview>("/api/control/overview");
-      setOv(o);
-      setProbe(o.services);
-      setErr(null);
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 401) onLocked();
-      else setErr(e instanceof ApiError && e.status === 404 ? "No fleet dir configured on this node." : String(e instanceof Error ? e.message : e));
-    }
-  };
+  useEffect(() => { if (ov) setProbe(ov.services); }, [ov]);
+  // this node pushes probe results over its event bus; a peer's Deck is covered by the poll
   useEffect(() => {
-    load();
-    const iv = setInterval(load, 60_000);
-    if (activeNode()) return () => clearInterval(iv);
+    if (!source || source.node !== "") return;
     const ws = new WebSocket(wsUrl("/api/events"));
-    ws.onmessage = (m) => { try { if (JSON.parse(m.data).kind === "services") load(); } catch {} };
-    return () => { clearInterval(iv); ws.close(); };
-  }, []);
+    ws.onmessage = (m) => { try { if (JSON.parse(m.data).kind === "services") refresh(); } catch {} };
+    return () => ws.close();
+  }, [source?.node]);
   // scroll the focused host into view once data is there
   useEffect(() => {
     if (!ov || !focusHost) return;
@@ -41,8 +33,9 @@ export function Services({ params, onLocked }: { params: URLSearchParams; onLock
   }, [ov?.fleetDir, focusHost]);
 
   const probeNow = async () => {
+    if (!source) return;
     setBusy(true);
-    try { setProbe(await post<ServiceProbe>("/api/control/services/probe", {})); } catch (e) { setErr(String(e instanceof Error ? e.message : e)); } finally { setBusy(false); }
+    try { setProbe(await postOn<ServiceProbe>(source.node, "/api/control/services/probe", {})); setMsg(null); } catch (e) { setMsg(`probe failed: ${e instanceof Error ? e.message : e}`); } finally { setBusy(false); }
   };
 
   const byHost = useMemo(() => {
@@ -50,9 +43,7 @@ export function Services({ params, onLocked }: { params: URLSearchParams; onLock
     for (const r of probe?.rows ?? []) m.set(r.host, [...(m.get(r.host) ?? []), r]);
     return m;
   }, [probe]);
-  const hosts = ov?.status?.hosts ?? [];
   const projects = ov?.projects ?? [];
-  const me = ov?.status?.host ?? "";
   const missingHost = !!ov && !!focusHost && !hosts.some(h => h.name.toLowerCase() === focusHost.toLowerCase());
   const missingService = !!probe && !!focusSvc && !missingHost && !probe.rows.some(r => r.service === focusSvc && (!focusHost || r.host.toLowerCase() === focusHost.toLowerCase()));
   useRouteTitle(err && !ov ? "Services unavailable" : missingHost ? "Host not found · Services" : missingService ? "Service not found · Services" : undefined);
@@ -67,14 +58,15 @@ export function Services({ params, onLocked }: { params: URLSearchParams; onLock
       <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
         <header className="flex items-center justify-between gap-2">
           <div>
-            <h1 className="neon text-lg font-semibold uppercase tracking-[0.15em]">Services{activeNode() ? ` via ${activeNodeName()}` : ""}</h1>
+            <h1 className="neon text-lg font-semibold uppercase tracking-[0.15em]">Services</h1>
             <p className="text-xs text-zinc-500">
               {probe?.probedAt ? `probed ${isoAgo(probe.probedAt)} · ${probe.rows.length} services · ${down ? `${down} down` : "all up"}` : err ?? "no probe yet"}
+              {source?.node ? <span data-testid="overview-source"> · Deck read from {source.nodeName}</span> : null}
               {focusHost && <> · showing <span className="text-zinc-300">{focusHost}</span> <button onClick={() => navigate("services")} className="text-sky-400 hover:underline">(all hosts)</button></>}
             </p>
           </div>
           {msg && <span className="text-[11px] text-amber-400/90" data-testid="services-msg">{msg}</span>}
-          <button onClick={probeNow} disabled={busy || !ov} data-testid="probe-now" className="hud-badge neon px-3 py-1.5 hover:bg-sky-500/10 disabled:opacity-40">{busy ? "Probing…" : "Probe now"}</button>
+          <button onClick={probeNow} disabled={busy || !ov} data-testid="probe-now" className="hud-badge neon px-3 py-1.5 hover:bg-sky-500/10 disabled:opacity-40" title={source?.node ? `probe from ${source.nodeName}` : "probe from this machine"}>{busy ? "Probing…" : "Probe now"}</button>
         </header>
         {err && !ov && <div className="mt-6 hud-card p-6 text-sm text-zinc-400">{err}</div>}
         {missingService && <p role="alert" className="mt-4">Service not found: {focusSvc}{focusHost ? ` on ${focusHost}` : ""}.</p>}
@@ -94,7 +86,7 @@ export function Services({ params, onLocked }: { params: URLSearchParams; onLock
                       {h.cyberdeck && (
                         <button onClick={() => navigate("fleet")} className="hidden text-zinc-400 hover:text-sky-400 md:inline" title="open Fleet">cyberdeck {h.cyberdeck.version} · {h.cyberdeck.repos} repos · {h.cyberdeck.atRisk} at risk{h.cyberdeck.lastScanAt ? ` · scanned ${fmtAgo(h.cyberdeck.lastScanAt)}` : ""}</button>
                       )}
-                      {where.kind !== "none" && <Action onClick={() => onHost(h.name, undefined, h.name)} title={where.kind === "ssh" ? `ssh ${where.alias}` : where.kind === "node" ? `terminal on ${where.name}` : "terminal here"}>{where.kind === "local" ? "$ shell" : where.kind === "node" ? "$ shell there" : `$ ssh ${where.alias}`}</Action>}
+                      {where.kind !== "none" && <Action onClick={() => onHost(h.name, undefined, h.name)} data-testid={`host-shell-${h.name}`} data-route={where.kind} title={where.kind === "ssh" ? `ssh ${where.alias} from ${me || "this machine"}` : where.kind === "node" ? `terminal on ${where.name}` : "terminal here"}>{where.kind === "local" ? "$ shell here" : where.kind === "node" ? `$ shell on ${where.name}` : `$ ssh ${where.alias}`}</Action>}
                       <span className={`hud-badge flex items-center gap-1.5 ${h.online === true ? "neon-green" : h.online === false ? "neon-red" : "text-zinc-500"}`}>
                         <span className={`led ${h.online === true ? "led-on" : h.online === false ? "led-err" : "led-off"}`} />
                         {h.online === true ? "online" : h.online === false ? "unreachable" : "off-tailnet"}

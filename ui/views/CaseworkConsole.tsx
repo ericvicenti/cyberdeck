@@ -140,8 +140,8 @@ export function CaseworkConsole({ app, params, onLocked }: { app: CaseworkApp; p
       };
       ws.onclose = () => { setOnline(false); endCall(false); if (alive) timer = setTimeout(() => connect(key), 1500); };
     };
-    api<Pairing>(`/api/casework/pairing?url=${encodeURIComponent(location.origin)}`, { local: true }).then((p) => { if (!alive) return; setPairing(p); connect(p.key); }).catch(fail);
-    api<{ text: string; qr: string }>("/api/casework/demo-qr", { local: true }).then((q) => { if (alive) setQr(q); }).catch(() => {});
+    api<Pairing>(`/api/casework/pairing?url=${encodeURIComponent(location.origin)}`).then((p) => { if (!alive) return; setPairing(p); connect(p.key); }).catch(fail);
+    api<{ text: string; qr: string }>("/api/casework/demo-qr").then((q) => { if (alive) setQr(q); }).catch(() => {});
     return () => { alive = false; clearTimeout(timer); endCall(); socket.current?.close(); setMedia((prev) => { if (prev) URL.revokeObjectURL(prev.url); return null; }); };
   }, []);
   // Another device's results are not this device's: start clean when the selection changes.

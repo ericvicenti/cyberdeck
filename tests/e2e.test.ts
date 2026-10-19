@@ -27,8 +27,8 @@ async function waitFor(fn: () => Promise<boolean> | boolean, ms = 15000, step = 
   }
 }
 
-const gotoFiles = async (path: string) => {
-  await page.goto(`${BASE}/#/files?path=${encodeURIComponent(path)}`);
+const gotoFiles = async (path: string, node = "") => {
+  await page.goto(`${BASE}/#/files?path=${encodeURIComponent(path)}${node ? `&node=${node}` : ""}`);
   await page.waitForSelector('[data-testid="files-table"]');
   // wait until the breadcrumbs reflect THIS directory (hash navigation keeps
   // the previous listing rendered while the new one loads)
@@ -160,7 +160,7 @@ test("desk view: talk button and the not-configured card render", async () => {
   await page.waitForFunction(() => document.querySelector('link[rel="manifest"]')?.getAttribute("href") === "/manifest.webmanifest");
 }, 20000);
 
-test("desk view: the daemon relays voice to the hub; the page names it and has no machine dropdown", async () => {
+test("desk view: the daemon relays voice to the hub; the page names it and nothing on the page picks a machine", async () => {
   // voice is centralized: the daemon in view answers with `via` and the page talks to nobody else
   const calls: string[] = [];
   await page.route("**/api/voice/**", (r) => {
@@ -173,7 +173,9 @@ test("desk view: the daemon relays voice to the hub; the page names it and has n
   });
   try {
     await page.goto(`${BASE}/#/fleet`);
-    expect(await page.isVisible('[data-testid="node-switcher"]')).toBe(true);
+    // no page-wide machine dropdown anywhere: the header names the serving machine
+    expect(await page.isVisible('[data-testid="node-switcher"]')).toBe(false);
+    await page.waitForSelector('[data-testid="header-node"]');
     await page.goto(`${BASE}/#/desk`);
     await page.waitForSelector('[data-testid="talk-button"]');
     await waitFor(async () => (await page.textContent('[data-testid="voice-node"]'))?.includes("Clipper") ?? false);
@@ -185,7 +187,7 @@ test("desk view: the daemon relays voice to the hub; the page names it and has n
     expect(calls.some((c) => c.startsWith("voice/transcript"))).toBe(true);
     expect(calls.every((c) => !c.includes("/proxy/"))).toBe(true);
     await page.goto(`${BASE}/#/fleet`);
-    await page.waitForSelector('[data-testid="node-switcher"]');
+    await page.waitForSelector('[data-testid="header-node"]');
   } finally {
     await page.unroute("**/api/voice/**");
   }
@@ -513,6 +515,14 @@ test("prompt bar: plans a harness from the text and starts a session from any vi
   await waitFor(async () => (await page.$$('[data-testid="term-tab"]')).length === before - 1);
 }, 45000);
 
+/** A running shell session on the local daemon (whatever earlier tests left behind). */
+const ensureLocalSession = async () => {
+  const list = await (await fetch(`${BASE}/api/sessions?token=${TOKEN}`)).json();
+  if (list.sessions.some((x: { state: string }) => x.state === "running")) return;
+  const res = await fetch(`${BASE}/api/sessions`, { method: "POST", headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" }, body: JSON.stringify({ cmd: "sleep 300", title: "local keepalive", runner: "pty" }) });
+  expect(res.ok).toBe(true);
+};
+
 // ---- fleet: pair a second daemon through the UI, then browse it remotely ----
 let daemon2: Subprocess | undefined;
 let home2: string | undefined;
@@ -523,10 +533,11 @@ test("fleet: pair a second node via the UI and browse it", async () => {
   writeFileSync(join(home2, "node-id"), "stw-e2e-two");
   writeFileSync(
     join(home2, "config.json"),
-    JSON.stringify({ nodeName: "second-box", port: 4796, bind: "127.0.0.1", roots: [], dataRoots: [], watch: false, autoUpdate: false, junkDirs: [], skipDirs: [], scanDepth: 1 , fleetDir: null })
+    // the peer is the one with the Deck checkout (the stub CLI, presenting itself as host "second-box"); this node has none
+    JSON.stringify({ nodeName: "second-box", port: 4796, bind: "127.0.0.1", roots: [], dataRoots: [], watch: false, autoUpdate: false, junkDirs: [], skipDirs: [], scanDepth: 1, fleetDir: join(ROOT, "tests", "fixtures", "fleet") })
   );
   daemon2 = Bun.spawn(["bun", "run", join(ROOT, "src/daemon/main.ts")], {
-    env: { ...process.env, CYBERDECK_HOME: home2, CYBERDECK_SESSIONS_TMUX: "0", CYBERDECK_USAGE_NET: "0" },
+    env: { ...process.env, CYBERDECK_HOME: home2, CYBERDECK_SESSIONS_TMUX: "0", CYBERDECK_USAGE_NET: "0", DECK_STUB_HOST: "second-box" },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -557,15 +568,51 @@ test("fleet: pair a second node via the UI and browse it", async () => {
   // the peer card appears and reports online
   await page.waitForSelector("text=second-box");
 
-  // switch the whole UI onto the remote node and browse files through the proxy
-  await page.selectOption('[data-testid="node-switcher"]', "stw-e2e-two");
-  await page.goto(`${BASE}/#/files?node=stw-e2e-two&path=${encodeURIComponent(play)}`);
+  // there is no page-wide node switcher any more: a machine is named by the view's own URL
+  expect(await page.$('[data-testid="node-switcher"]')).toBeNull();
+  await gotoFiles(play, "stw-e2e-two");
   await page.getByTestId("row-readme.md").waitFor().catch(async error => { console.log("Peer navigation diagnostic", page.url(), await page.locator("main").innerText()); throw error; });
   expect(await page.isVisible('[data-testid="row-readme.md"]')).toBe(true);
-  // status bar shows we are remote
-  expect(await page.textContent('[data-testid="statusbar-node"]')).toContain("second-box");
+  // the Files picker shows which machine this listing is from; the status bar still names the serving node
+  expect(await page.inputValue('[data-testid="files-node"]')).toBe("stw-e2e-two");
+  expect(await page.textContent('[data-testid="statusbar-node"]')).toContain("e2e-node");
+  expect(await page.title()).toContain("second-box");
+  // links carry the machine: a terminal opened from here is offered on second-box, not this node
+  // (the link prefills the form; Open starts it)
+  await page.click("text=▚ Shell");
+  await page.waitForSelector('[data-testid="term-new-form"]');
+  expect(await page.inputValue('[data-testid="term-new-node"]')).toBe("stw-e2e-two");
+  await page.click('[data-testid="term-new-open"]');
+  await page.waitForSelector("text=live");
+  expect(page.url()).toContain("node=stw-e2e-two");
+  await waitFor(async () => (await page.textContent('[data-testid="term-status"]'))?.includes("second-box") ?? false);
+  const remote = page.url().match(/session=([0-9a-f]{8})/)![1];
+  const two = await (await fetch(`http://127.0.0.1:4796/api/sessions?token=e2e-token-two`)).json();
+  expect(two.sessions.map((x: { id: string }) => x.id)).toContain(remote);
+  // Sessions lists both machines' sessions in one strip, each tagged with its host; the strip chip too
+  // (a local session is started here so the test does not depend on earlier ones)
+  await ensureLocalSession();
+  await waitFor(async () => (await page.$$('[data-testid="term-tab"][data-node=""]')).length >= 1);
+  expect(await page.textContent(`[data-testid="term-tab"][data-session="${remote}"]`)).toContain("second-box");
+  await waitFor(async () => ((await page.textContent('[data-testid="session-strip"]')) ?? "").includes("second-box"));
+  // the picker in the strip narrows to one machine without changing the URL's session
+  await page.selectOption('[data-testid="term-filter-node"]', "");
+  await waitFor(async () => (await page.$$('[data-testid="term-tab"][data-node="stw-e2e-two"]')).length === 0);
+  expect((await page.$$('[data-testid="term-tab"][data-node=""]')).length).toBeGreaterThanOrEqual(1);
+  expect(page.url()).toContain(`session=${remote}`);
+  await page.selectOption('[data-testid="term-filter-node"]', "*");
+  // switching the Files picker back to this machine drops the node from the URL
+  await gotoFiles(play, "stw-e2e-two");
+  await page.selectOption('[data-testid="files-node"]', "");
+  await waitFor(async () => !page.url().includes("node="));
+  await page.waitForSelector('[data-testid="files-table"]');
+  // Data asks every machine and names each one; second-box answered
+  await page.goto(`${BASE}/#/data`);
+  await page.waitForSelector('[data-testid="node-health-second-box"]');
+  await waitFor(async () => (await page.getAttribute('[data-testid="node-health-second-box"]', "data-state")) === "ok");
+  expect(await page.textContent("main")).toContain("2 machines");
   // the Fleet page's "this machine" card still describes the local node (one repo after this
-  // scan), not the active remote node (no roots, 0 repos)
+  // scan), not the remote node (no roots, 0 repos)
   mkdirSync(join(play, "repo-one"));
   Bun.spawnSync(["git", "init", "-q", join(play, "repo-one")]);
   await fetch(`${BASE}/api/scan`, { method: "POST", headers: { authorization: `Bearer ${TOKEN}` } });
@@ -581,9 +628,138 @@ test("fleet: pair a second node via the UI and browse it", async () => {
   expect(storage).toContain("2 machines");
   expect(await page.textContent('[data-testid="system-second-box"]')).toContain("memory");
   expect(await page.textContent('[data-testid="system-e2e-node"]')).toContain("this machine");
-  // back to local
-  await page.selectOption('[data-testid="node-switcher"]', "");
-}, 45000);
+  // a machine card's buttons link to that machine's view
+  await page.click('[data-testid="node-card-second-box"] [data-testid="card-files"]');
+  await waitFor(async () => page.url().includes("node=stw-e2e-two"));
+  await page.waitForSelector('[data-testid="files-table"]');
+  expect(await page.inputValue('[data-testid="files-node"]')).toBe("stw-e2e-two");
+}, 60000);
+
+const PEER = "stw-e2e-two";
+const peerSessions = async () => (await (await fetch(`http://127.0.0.1:4796/api/sessions?token=e2e-token-two`)).json()).sessions as { id: string; cwd: string }[];
+const localSessions = async () => (await (await fetch(`${BASE}/api/sessions?token=${TOKEN}`)).json()).sessions as { id: string; cwd: string }[];
+
+test("fleet: Deck read from a peer: Projects, Services and Agents render, and the peer's host actions run on the peer, not here", async () => {
+  // this node has no fleetDir: the views take the Deck overview from second-box and say so
+  await page.goto(`${BASE}/#/projects`);
+  await page.waitForSelector('[data-testid="overview-source"]');
+  expect(await page.textContent('[data-testid="overview-source"]')).toContain("second-box");
+  expect((await page.$$('[data-testid="project-demo"]')).length).toBe(1);
+  // the peer's Deck says host "second-box" is where the project lives; that chip is the peer, not this node
+  expect(await page.isVisible('[data-testid="host-chip-second-box"]')).toBe(true);
+  // unassigned repos are host-bound: this node's repo-one, tagged with this node's name
+  await page.goto(`${BASE}/#/projects?p=_repos`);
+  await page.waitForSelector('[data-testid="unassigned-row"]');
+  const unassigned = (await page.textContent('[data-testid="unassigned-row"]')) ?? "";
+  expect(unassigned).toContain("repo-one");
+  expect(unassigned).toContain("e2e-node");
+
+  // Services: the host panel for the Deck host offers a shell ON THAT NODE ("here" is still e2e-node)
+  await page.goto(`${BASE}/#/services`);
+  await page.waitForSelector('[data-testid="host-panel-second-box"]');
+  expect(await page.textContent('[data-testid="overview-source"]')).toContain("second-box");
+  expect(await page.getAttribute('[data-testid="host-shell-second-box"]', "data-route")).toBe("node");
+  expect(await page.textContent('[data-testid="host-shell-second-box"]')).toContain("second-box");
+  const localBefore = (await localSessions()).length;
+  const peerBefore = (await peerSessions()).length;
+  await page.click('[data-testid="host-shell-second-box"]');
+  await waitFor(async () => page.url().includes(`node=${PEER}`));
+  await page.waitForSelector("text=live");
+  await waitFor(async () => (await peerSessions()).length === peerBefore + 1);
+  expect((await localSessions()).length).toBe(localBefore);
+  expect(await page.textContent('[data-testid="term-status"]')).toContain("second-box");
+
+  // Agents: renders from the peer's Deck too (no "No fleet dir" error); its indexed session resumes on second-box,
+  // its open task runs on second-box (the host it names), and the launch form offers this machine first
+  await page.goto(`${BASE}/#/agents`);
+  await page.waitForSelector('[data-testid="overview-source"]');
+  expect(await page.textContent('[data-testid="overview-source"]')).toContain("second-box");
+  await page.waitForSelector('[data-testid="session-resume"]');
+  expect(await page.textContent('[data-testid="session-resume"]')).toBe("Resume on second-box");
+  expect(await page.textContent('[data-testid="launch-node"] option[value=""]')).toContain("e2e-node");
+  expect(await page.textContent('[data-testid="task-run-t1"]')).toBe("Run on second-box");
+  expect(await page.textContent('[data-testid="collab-tick"]')).toContain("second-box");
+}, 60000);
+
+test("fleet: Projects stays one canonical list when this node has the Deck checkout too", async () => {
+  // give this node the same Deck the peer has (the real proxied answer), without a second fleetDir
+  const ov = await (await fetch(`${BASE}/api/nodes/${PEER}/proxy/control/overview?token=${TOKEN}`)).json();
+  await page.route("**/api/control/overview", (r) => r.fulfill({ json: ov }));
+  try {
+    await page.goto(`${BASE}/?fresh=${Date.now()}#/projects?p=demo`);
+    await page.waitForSelector('[data-testid="project-demo"]');
+    await page.waitForSelector('[data-testid="node-health-second-box"]');
+    expect((await page.$$('[data-testid="project-demo"]')).length).toBe(1);
+    // read locally now: no "Deck read from" note, and the project chip for second-box is still the peer
+    expect(await page.$('[data-testid="overview-source"]')).toBeNull();
+    expect(await page.textContent('[data-testid="project-tree"]')).toContain("Demo");
+  } finally {
+    await page.unroute("**/api/control/overview");
+  }
+}, 30000);
+
+test("sessions: a cwd link prefills the New session form on the named machine and starts nothing until Open", async () => {
+  const before = (await peerSessions()).length;
+  await page.goto(`${BASE}/#/term?cwd=${encodeURIComponent(play)}&node=${PEER}`);
+  await page.waitForSelector('[data-testid="term-new-form"]');
+  expect(await page.inputValue('[data-testid="term-new-node"]')).toBe(PEER);
+  expect(await page.inputValue('[data-testid="term-new-form"] input[list="cwd-options"]')).toBe(play);
+  await new Promise((r) => setTimeout(r, 1200));
+  expect((await peerSessions()).length).toBe(before);
+  expect(page.url()).toContain("cwd=");
+  await page.click('[data-testid="term-new-open"]');
+  await waitFor(async () => (await peerSessions()).length === before + 1);
+  await waitFor(async () => page.url().includes("session=") && page.url().includes(`node=${PEER}`) && !page.url().includes("cwd="));
+  expect((await peerSessions()).some((x) => x.cwd === play)).toBe(true);
+  await page.waitForSelector("text=live");
+}, 30000);
+
+test("fleet: cmux surfaces from every machine in one tree, and input goes to the machine that owns the surface", async () => {
+  const surface = (ref: string, title: string) => ({ kind: "surface", ref, title, type: "terminal", selected: true, focused: true, current: true, active: true, children: [] });
+  const tree = (name: string) => ({ available: true, running: true, current: "ws1", tree: [{ kind: "window", ref: "w1", selected: true, focused: true, current: true, active: true, children: [{ kind: "workspace", ref: "ws1", title: name, selected: true, focused: true, current: true, active: true, children: [surface("s1", `${name} shell`)] }] }] });
+  const sent: string[] = [];
+  await page.route("**/api/cmux/tree", (r) => r.fulfill({ json: { available: false, error: "cmux is not installed on this node" } }));
+  await page.route(`**/api/nodes/${PEER}/proxy/cmux/tree`, (r) => r.fulfill({ json: tree("peer") }));
+  await page.route(`**/api/nodes/${PEER}/proxy/cmux/screen*`, (r) => r.fulfill({ json: { text: "peer screen" } }));
+  await page.route(`**/api/nodes/${PEER}/proxy/cmux/send`, (r) => { sent.push(`peer:${JSON.parse(r.request().postData() ?? "{}").text}`); r.fulfill({ json: { ok: true } }); });
+  await page.route("**/api/cmux/send", (r) => { sent.push(`local:${JSON.parse(r.request().postData() ?? "{}").text}`); r.fulfill({ json: { ok: true } }); });
+  try {
+    await page.goto(`${BASE}/#/cmux`);
+    await page.waitForSelector('[data-testid="cmux-host-second-box"]');
+    await waitFor(async () => page.url().includes("surface=s1") && page.url().includes(`node=${PEER}`));
+    expect(await page.textContent('[data-testid="cmux-idle"]')).toContain("e2e-node");
+    await waitFor(async () => ((await page.textContent('[data-testid="cmux-screen"]')) ?? "").includes("peer screen"));
+    await page.fill('[data-testid="cmux-input"]', "echo hi");
+    await page.press('[data-testid="cmux-input"]', "Enter");
+    await waitFor(async () => sent.length > 0);
+    expect(sent).toEqual(["peer:echo hi"]);
+    expect(await page.textContent('[data-testid="cmux-msg"]')).toContain("second-box");
+  } finally {
+    await page.unroute("**/api/cmux/tree");
+    await page.unroute(`**/api/nodes/${PEER}/proxy/cmux/tree`);
+    await page.unroute(`**/api/nodes/${PEER}/proxy/cmux/screen*`);
+    await page.unroute(`**/api/nodes/${PEER}/proxy/cmux/send`);
+    await page.unroute("**/api/cmux/send");
+  }
+}, 30000);
+
+test("fleet: a dead peer keeps its last sessions on screen and is reported, this node's view keeps working", async () => {
+  await ensureLocalSession();
+  await page.goto(`${BASE}/#/term`);
+  await waitFor(async () => (await page.$$('[data-testid="term-tab"][data-node="stw-e2e-two"]')).length >= 1);
+  daemon2!.kill();
+  await waitFor(async () => ((await page.textContent('[data-testid="term-node-errors"]').catch(() => "")) ?? "").includes("second-box"), 30000);
+  // its sessions are still listed (last known), this node's are still live and usable
+  expect((await page.$$('[data-testid="term-tab"][data-node="stw-e2e-two"]')).length).toBeGreaterThanOrEqual(1);
+  expect((await page.$$('[data-testid="term-tab"][data-node=""]')).length).toBeGreaterThanOrEqual(1);
+  await page.click('[data-testid="term-tab"][data-node=""] >> button');
+  await page.waitForSelector("text=live");
+  // Files on the dead peer fails in its own view with the machine named; local Files is unaffected
+  await page.goto(`${BASE}/#/files?path=${encodeURIComponent(play)}&node=stw-e2e-two`);
+  await waitFor(async () => ((await page.textContent("main")) ?? "").toLowerCase().includes("second-box") || ((await page.textContent("main")) ?? "").includes("502"), 20000);
+  await gotoFiles(play);
+  expect(await page.isVisible('[data-testid="row-readme.md"]')).toBe(true);
+}, 60000);
 
 test("media player: playlist, transport, track switching", async () => {
   mkdirSync(join(play, "music"), { recursive: true });

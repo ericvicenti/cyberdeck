@@ -1,9 +1,13 @@
-// Live sessions client: daemon-owned PTYs on any node. Unlike the rest of the UI,
-// these helpers address nodes explicitly (the prompt bar shows every node's sessions
-// at once), so they bypass the active-node scoping in api.ts.
+// Live sessions client: daemon-owned PTYs on any node. Every helper names the node it
+// talks to ("" = the daemon serving this page); the Sessions view and the prompt bar show
+// every machine's sessions at once, each tagged with where it runs.
 import { useEffect, useRef, useState } from "react";
-import { token, activeNode, setActiveNode, navigate, wsUrl } from "./api";
+import { token, apiOn, navigate, wsUrl } from "./api";
+import { fetchNodes, subscribeNodes, type FleetNodes } from "./fleet";
 import type { Caps, Runner, Tool } from "../../src/shared/harness";
+
+export { fetchNodes, type FleetNode, type FleetNodes } from "./fleet";
+export { apiOn };
 
 export type LiveSession = {
   id: string; title: string; cwd: string; cmd: string | null; tool: Tool; prompt: string | null; runner: Runner;
@@ -12,28 +16,12 @@ export type LiveSession = {
   /** Added client-side: which node it lives on ("" = local). */
   node: string; nodeName: string;
 };
-export type FleetNode = { id: string; name: string; online: boolean };
-export type FleetNodes = { self: { nodeId: string; name: string; commit?: string }; nodes: FleetNode[] };
 
-const nodePath = (node: string, path: string) => (node ? `/api/nodes/${encodeURIComponent(node)}/proxy/${path.slice("/api/".length)}` : path);
-
-/** Fetch against a specific node regardless of the UI's active node. */
-export async function apiOn<T>(node: string, path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(nodePath(node, path), { ...init, headers: { authorization: `Bearer ${token()}`, ...(init?.headers as Record<string, string>) } });
-  if (!res.ok) {
-    let message = `${res.status}`;
-    try { message = (await res.json()).error ?? message; } catch {}
-    const err = new Error(message) as Error & { status: number };
-    err.status = res.status;
-    throw err;
-  }
-  return res.json();
-}
 const postOn = <T,>(node: string, path: string, body: unknown) => apiOn<T>(node, path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
-export const fetchNodes = () => apiOn<FleetNodes>("", "/api/fleet/nodes");
+type SessionsAnswer = { sessions: Omit<LiveSession, "node" | "nodeName">[]; seedError?: string };
 export const listSessions = async (node: string, nodeName: string): Promise<LiveSession[]> =>
-  (await apiOn<{ sessions: Omit<LiveSession, "node" | "nodeName">[] }>(node, "/api/sessions")).sessions.map((s) => ({ ...s, node, nodeName }));
+  (await apiOn<SessionsAnswer>(node, "/api/sessions")).sessions.map((s) => ({ ...s, node, nodeName }));
 
 /** Idempotency key available on private HTTP fleet origins as well as HTTPS. */
 export function messageRequestId(): string {
@@ -67,16 +55,16 @@ export function getCaps(node: string): Promise<Caps | null> {
   return p;
 }
 
-/** Go to a session's terminal, switching the UI onto its node first. */
+/** Go to a session's terminal; the URL names the session and its node. */
 export function openSession(s: { node: string; nodeName: string; id: string }) {
   navigate("term", { session: s.id, node: s.node });
 }
 
 export const toolForCmd = (cmd: string | undefined): Tool => (!cmd ? "shell" : /^claude(\s|$)/.test(cmd) ? "cc" : /^codex(\s|$)/.test(cmd) ? "cx" : "shell");
 
-/** Create a session on a node, picking tmux when that node has it, and open it (or not). */
+/** Create a session on a node ("" = this machine), picking tmux when that node has it, and open it (or not). */
 export async function startSession(opts: { node?: string; nodeName?: string; cwd?: string; cmd?: string; title?: string; tool?: Tool; prompt?: string; runner?: Runner; open?: boolean }): Promise<LiveSession> {
-  const node = opts.node ?? activeNode();
+  const node = opts.node ?? "";
   const nodeName = opts.nodeName ?? (node ? "node" : "local");
   const runner = opts.runner ?? ((await getCaps(node))?.tmux ? "tmux" : "pty");
   const s = await createSession(node, nodeName, { cwd: opts.cwd, cmd: opts.cmd, title: opts.title, tool: opts.tool ?? toolForCmd(opts.cmd), prompt: opts.prompt, runner });
@@ -84,9 +72,14 @@ export async function startSession(opts: { node?: string; nodeName?: string; cwd
   return s;
 }
 
-/** All live sessions across this node and every online peer, refreshed every few seconds and on session events. */
-export function useLiveSessions(intervalMs = 4000): { sessions: LiveSession[]; nodes: FleetNodes | null; refresh: () => void } {
-  const [sessions, setSessions] = useState<LiveSession[]>([]);
+/** What each machine said the last time it was asked for its sessions. */
+export type NodeSessionsState = { node: string; nodeName: string; online: boolean; answered: boolean; error: string | null; seedError: string | null };
+
+/** All live sessions across this node and every online peer, refreshed every few seconds and on session events.
+ *  A machine that stops answering keeps its last known sessions on screen and reports its error in `states`. */
+export function useLiveSessions(intervalMs = 4000): { sessions: LiveSession[]; nodes: FleetNodes | null; states: NodeSessionsState[]; refresh: () => void; replace: (node: string, sessions: LiveSession[]) => void } {
+  const [byNode, setByNode] = useState<Record<string, LiveSession[]>>({});
+  const [states, setStates] = useState<Record<string, NodeSessionsState>>({});
   const [nodes, setNodes] = useState<FleetNodes | null>(null);
   const nodesRef = useRef<FleetNodes | null>(null);
   const [gen, setGen] = useState(0);
@@ -99,9 +92,19 @@ export function useLiveSessions(intervalMs = 4000): { sessions: LiveSession[]; n
         try { nodesRef.current = await fetchNodes(); lastNodes = Date.now(); if (alive) setNodes(nodesRef.current); } catch {}
       }
       const f = nodesRef.current;
-      const targets = [{ id: "", name: f?.self.name ?? "local" }, ...(f?.nodes.filter((n) => n.online) ?? [])];
-      const results = await Promise.all(targets.map((t) => listSessions(t.id, t.name).catch(() => [] as LiveSession[])));
-      if (alive) setSessions(results.flat());
+      const targets = [{ id: "", name: f?.self.name ?? "local", online: true }, ...(f?.nodes ?? [])];
+      await Promise.all(targets.map(async (t) => {
+        if (!t.online) { if (alive) setStates((m) => ({ ...m, [t.id]: { node: t.id, nodeName: t.name, online: false, answered: m[t.id]?.answered ?? false, error: `${t.name} is offline`, seedError: null } })); return; }
+        try {
+          const r = await apiOn<SessionsAnswer>(t.id, "/api/sessions", { signal: AbortSignal.timeout(10_000) });
+          if (!alive) return;
+          setByNode((m) => ({ ...m, [t.id]: r.sessions.map((s) => ({ ...s, node: t.id, nodeName: t.name })) }));
+          setStates((m) => ({ ...m, [t.id]: { node: t.id, nodeName: t.name, online: true, answered: true, error: null, seedError: r.seedError ?? null } }));
+        } catch (e) {
+          if (!alive) return;
+          setStates((m) => ({ ...m, [t.id]: { node: t.id, nodeName: t.name, online: true, answered: true, error: e instanceof Error ? e.message : String(e), seedError: null } }));
+        }
+      }));
     };
     tick();
     const iv = setInterval(tick, intervalMs);
@@ -109,7 +112,16 @@ export function useLiveSessions(intervalMs = 4000): { sessions: LiveSession[]; n
     ws.onmessage = (m) => { try { if (JSON.parse(m.data).kind === "sessions") tick(); } catch {} };
     const onVis = () => { if (document.visibilityState === "visible") tick(); };
     document.addEventListener("visibilitychange", onVis);
-    return () => { alive = false; clearInterval(iv); ws.close(); document.removeEventListener("visibilitychange", onVis); };
+    // a machine paired (or lost) elsewhere on the page shows up here at once, not after the next node refresh
+    const unsubscribe = subscribeNodes((f) => { nodesRef.current = f; lastNodes = Date.now(); if (alive) { setNodes(f); tick(); } });
+    return () => { alive = false; clearInterval(iv); ws.close(); document.removeEventListener("visibilitychange", onVis); unsubscribe(); };
   }, [gen, intervalMs]);
-  return { sessions, nodes, refresh: () => setGen((g) => g + 1) };
+  const sessions = Object.values(byNode).flat();
+  return {
+    sessions,
+    nodes,
+    states: Object.values(states),
+    refresh: () => setGen((g) => g + 1),
+    replace: (node, next) => setByNode((m) => ({ ...m, [node]: next })),
+  };
 }

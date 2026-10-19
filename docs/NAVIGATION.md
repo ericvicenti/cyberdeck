@@ -24,10 +24,14 @@ The Deck report is authoritative for completed and pending deployments.
 ## URL contract
 
 `#/view?key=value&node=<paired-id>` is authoritative. Missing `node` means the
-serving machine, even when local storage remembers another machine. Existing
-internal navigation carries `node`; explicit local/node links override it. The
-server still authenticates every API/proxy request; node IDs are path-encoded.
-Node-scoped components remount only when that node changes, not on query edits.
+serving machine, even when local storage remembers another machine. Internal
+navigation never carries `node` from one view to the next: a link states its own
+machine (Files, Editor, Cloud, Desktop, Seed and a session tab are machine-bound;
+Projects, Sessions, cmux, Data, Agents, Services and Home span the fleet and have no
+node of their own, except Data's `node` filter). There is no page-wide machine
+selector. The server still authenticates every API/proxy request; node IDs are
+path-encoded. Node-scoped components remount only when that node changes, not on
+query edits.
 Applications, Spotify and the physical screen remote retain their existing
 serving-node behavior.
 

@@ -47,7 +47,7 @@ export function Desk({ params, onLocked, visible = true }: { params: URLSearchPa
   useEffect(() => {
     if (location.hash === routeHash("desk", params) && requested !== null && requested !== "services" && requested !== "agents") updateParams({ tab: null }, "replace");
   }, [requested]);
-  useRouteTitle(!visible || tab === "fleet" ? undefined : `${tab === "services" ? "Services" : "Agents"} · Desk${params.get("node") ? ` · ${params.get("node")}` : ""}`);
+  useRouteTitle(!visible || tab === "fleet" ? undefined : `${tab === "services" ? "Services" : "Agents"} · Desk`);
   const v = useVoice({ onLocked });
   const wasVisible = useRef(visible);
   useEffect(() => {
@@ -69,7 +69,7 @@ export function Desk({ params, onLocked, visible = true }: { params: URLSearchPa
     // A slower answer from the node that was asked before the route changed must not win.
     const load = ++statusLoad.current;
     try {
-      const s = await api<VoiceStatus>("/api/voice/status", { local: true });
+      const s = await api<VoiceStatus>("/api/voice/status");
       if (load === statusLoad.current) setStatus(s);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) onLocked();
@@ -78,7 +78,7 @@ export function Desk({ params, onLocked, visible = true }: { params: URLSearchPa
   };
   const loadHistory = async () => {
     try {
-      const t = await api<TranscriptHistory>("/api/voice/transcript?limit=20", { local: true });
+      const t = await api<TranscriptHistory>("/api/voice/transcript?limit=20");
       if (!t.supported || !t.messages) { setHistory([]); return; }
       // Notices (the agent's `announce` tool: a finished run, a trigger's finding) sit in the flow by time.
       const notices: TranscriptLine[] = (t.notices ?? []).map((x) => ({ id: `n:${x.id}`, who: "notice", text: x.text, final: true, at: x.at }));
@@ -89,7 +89,7 @@ export function Desk({ params, onLocked, visible = true }: { params: URLSearchPa
     }
   };
   useEffect(() => {
-    api<{ nodeName?: string }>("/api/status", { local: true }).then((s) => setNodeName(s.nodeName ?? "")).catch(() => {});
+    api<{ nodeName?: string }>("/api/status").then((s) => setNodeName(s.nodeName ?? "")).catch(() => {});
   }, []);
   // Status and history come from wherever the calls go, which is only known once the config is in.
   const resolved = v.config !== null;
@@ -132,7 +132,7 @@ export function Desk({ params, onLocked, visible = true }: { params: URLSearchPa
     setBusy("setup");
     setNote(null);
     try {
-      const r = await api<{ ok?: boolean; message?: string; error?: string }>("/api/voice/setup", { local: true, method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      const r = await api<{ ok?: boolean; message?: string; error?: string }>("/api/voice/setup", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
       setNote(r.message ?? (r.ok === false ? r.error ?? "setup failed" : "setup complete"));
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) onLocked();
@@ -149,7 +149,7 @@ export function Desk({ params, onLocked, visible = true }: { params: URLSearchPa
     setBusy("reset");
     setNote(null);
     try {
-      const r = await api<{ sessionId?: string; room?: { name: string; switched: boolean; error?: string } }>("/api/voice/session/reset", { local: true, method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(liveRoom ? { room: liveRoom } : {}) });
+      const r = await api<{ sessionId?: string; room?: { name: string; switched: boolean; error?: string } }>("/api/voice/session/reset", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(liveRoom ? { room: liveRoom } : {}) });
       v.clearTranscript();
       setHistory([]);
       const id = r.sessionId ? `new session ${r.sessionId.slice(0, 8)}` : "new session";
@@ -308,7 +308,7 @@ export function Desk({ params, onLocked, visible = true }: { params: URLSearchPa
             {configured && note && <p className="mt-2 text-[11px] text-zinc-400" data-testid="voice-note">{note}</p>}
           </section>
 
-          {visible && <GlancePanel key={params.get("node") ?? ""} tab={tab} onLocked={onLocked} />}
+          {visible && <GlancePanel tab={tab} onLocked={onLocked} />}
         </div>
 
         <section className="hud-card flex min-h-[200px] flex-col p-3 md:h-[calc(100dvh-7rem)] md:min-h-0" data-testid="voice-transcript">

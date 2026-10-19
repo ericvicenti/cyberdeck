@@ -15,7 +15,7 @@ export function Spotify({ visible, params }: { visible: boolean; params?: URLSea
   const routeKey = routeHash("spotify", lastParams.current);
   const locationState = basicSpotifyLocation(lastParams.current);
   const { q: routeQuery, pages } = locationState;
-  useRouteTitle(visible && location.hash === routeKey ? `${routeQuery ? `${routeQuery} · ` : ""}${pages > 1 ? `Playlists ${pages} · ` : ""}Spotify${lastParams.current.get("node") ? ` · ${lastParams.current.get("node")}` : ""}` : undefined);
+  useRouteTitle(visible && location.hash === routeKey ? `${routeQuery ? `${routeQuery} · ` : ""}${pages > 1 ? `Playlists ${pages} · ` : ""}Spotify` : undefined);
   useEffect(() => {
     if (visible && location.hash === routeKey) writeRoute("spotify", locationState.canonical, "replace");
   }, [visible, params?.toString()]);

@@ -2,7 +2,9 @@ import { routeHash, updateParams, useRouteTitle } from "../lib/navigation";
 // Cloud AI: ChatGPT and Claude accounts driven through the node's remote browser,
 // with every conversation archived into the Deck repo.
 import { useEffect, useState } from "react";
-import { api, post, ApiError, activeNodeName } from "../lib/api";
+import { api, post, navigate, routeNode, ApiError } from "../lib/api";
+import { useFleet } from "../lib/fleet";
+import { NodePicker } from "../components/NodePicker";
 import { isoAgo } from "../lib/control";
 import { Panel, Empty } from "./Projects";
 import { Markdown } from "./Markdown";
@@ -25,7 +27,12 @@ const STATUS: Record<ProviderState["status"], { led: string; text: string }> = {
   never: { led: "led led-off", text: "NOT SYNCED" },
 };
 
+/** The browser profiles (and their logins) live on one machine, named in the URL (`?node=`) and picked
+ *  beside the profile. The archive is in the Deck repo, read from the same machine. */
 export function Cloud({ params, onLocked }: { params: URLSearchParams; onLocked: () => void }) {
+  const node = routeNode(params);
+  const { targets } = useFleet();
+  const where = targets.find((t) => t.id === node)?.name ?? (node ? "that machine" : "this machine");
   const [sum, setSum] = useState<Summary | null>(null);
   const [profiles, setProfiles] = useState<Profiles | null>(null);
   const [profilesError, setProfilesError] = useState("");
@@ -44,8 +51,8 @@ export function Cloud({ params, onLocked }: { params: URLSearchParams; onLocked:
   const [msg, setMsg] = useState<string | null>(null);
 
   const load = async () => {
-    try { setSum(await api<Summary>("/api/cloud")); } catch (e) { if (e instanceof ApiError && e.status === 401) onLocked(); }
-    try { setProfiles(await api<Profiles>("/api/browser/profiles")); setProfilesError(""); } catch (e) { if (e instanceof ApiError && e.status === 401) onLocked(); setProfilesError("Browser unavailable"); }
+    try { setSum(await api<Summary>("/api/cloud", { node })); } catch (e) { if (e instanceof ApiError && e.status === 401) onLocked(); }
+    try { setProfiles(await api<Profiles>("/api/browser/profiles", { node })); setProfilesError(""); } catch (e) { if (e instanceof ApiError && e.status === 401) onLocked(); setProfilesError(`Browser unavailable on ${where}`); }
   };
   useEffect(() => { load(); const iv = setInterval(load, 8000); return () => clearInterval(iv); }, []);
 
@@ -53,7 +60,7 @@ export function Cloud({ params, onLocked }: { params: URLSearchParams; onLocked:
     let alive = true;
     const timer = setTimeout(async () => {
       const all: Conv[] = [];
-      for (const p of PROVIDERS) { try { all.push(...(await api<Conv[]>(`/api/cloud/${p.key}/conversations?q=${encodeURIComponent(q)}`))); } catch {} }
+      for (const p of PROVIDERS) { try { all.push(...(await api<Conv[]>(`/api/cloud/${p.key}/conversations?q=${encodeURIComponent(q)}`, { node }))); } catch {} }
       all.sort((a, b) => b.updated.localeCompare(a.updated));
       if (alive) setConvs(all);
     }, 200);
@@ -64,7 +71,7 @@ export function Cloud({ params, onLocked }: { params: URLSearchParams; onLocked:
     setDoc(null); setDocError("");
     if (!conversation) return;
     let alive = true;
-    api<{ frontmatter: Record<string, string>; markdown: string }>(`/api/cloud/${provider}/conversations/${encodeURIComponent(conversation)}`)
+    api<{ frontmatter: Record<string, string>; markdown: string }>(`/api/cloud/${provider}/conversations/${encodeURIComponent(conversation)}`, { node })
       .then(value => { if (alive) setDoc(value); })
       .catch(e => { if (alive) { if (e instanceof ApiError && e.status === 401) onLocked(); setDocError(e instanceof ApiError && e.status === 404 ? "Conversation not found" : String(e)); } });
     return () => { alive = false; };
@@ -85,9 +92,8 @@ export function Cloud({ params, onLocked }: { params: URLSearchParams; onLocked:
     updateParams({ url: value.url }, value.navigation === "initial" || value.navigation === "restore" ? "replace" : "push");
   };
 
-  const sync = async (p: string) => { try { await post(`/api/cloud/${p}/sync`, {}); setMsg(`${p}: sync started`); setTimeout(load, 1500); } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); } };
+  const sync = async (p: string) => { try { await post(`/api/cloud/${p}/sync`, {}, node); setMsg(`${p}: sync started on ${where}`); setTimeout(load, 1500); } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); } };
   const openSite = (p: typeof PROVIDERS[number]) => updateParams({ profile: p.key, url: p.home });
-  const where = activeNodeName() || "this node";
 
   return (
     <div className="h-full overflow-y-auto px-4 py-4 sm:px-6">
@@ -132,6 +138,7 @@ export function Cloud({ params, onLocked }: { params: URLSearchParams; onLocked:
           title="Remote browser"
           right={
             <div className="flex items-center gap-2 text-[11px]">
+              {targets.length > 1 && <NodePicker value={node} onChange={(n) => navigate("cloud", { node: n || undefined, profile })} targets={targets} testId="cloud-node" title="which machine's browser" />}
               <select value={profile} onChange={(e) => { updateParams({ profile: e.target.value, url: null }); }} className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-300">
                 {(profiles?.profiles ?? [{ name: "chatgpt" }, { name: "claude" }, { name: "default" }]).map((pr) => <option key={pr.name} value={pr.name}>{pr.name}{"open" in pr && pr.open ? " ●" : ""}</option>)}
               </select>
@@ -144,7 +151,7 @@ export function Cloud({ params, onLocked }: { params: URLSearchParams; onLocked:
           ) : !profiles ? (
             <Empty>Loading browser profiles…</Empty>
           ) : (
-            <RemoteBrowser key={profile} profile={profile} url={navUrl} onState={onBrowserState} />
+            <RemoteBrowser key={`${node}:${profile}`} profile={profile} node={node} url={navUrl} onState={onBrowserState} />
           )}
         </Panel>
 

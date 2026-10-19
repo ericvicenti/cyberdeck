@@ -304,7 +304,7 @@ and `welcome` carry the same reason. The web Desk shows an amber "voice hub clip
 rechecks every 15 s so TALK comes back by itself when the hub does.
 
 The web Desk talks only to the daemon in view and shows the hub in its bridge strip (`voice clipper`);
-the machine dropdown of the shell is hidden on the Desk because there is nothing to pick. Without a
+the shell has no machine dropdown anywhere (nothing on the Desk picks a machine either). Without a
 hub configured (not the fleet's setup), a node with no bridge of its own still finds the first paired
 node whose `/api/voice/config` says configured (probe 4 s, found peer trusted 60 s, miss 15 s) and
 relays there, so nothing breaks on a node that missed the config.

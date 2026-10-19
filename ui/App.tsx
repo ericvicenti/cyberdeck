@@ -1,7 +1,8 @@
 import { lazy, Suspense } from "react";
 import { refreshRouteTitle, routeHash } from "./lib/navigation";
 import { useEffect, useLayoutEffect, useState } from "react";
-import { parseHash, navigate, api, activeNode, activeNodeName, setActiveNode, rememberNodeNames, type Route } from "./lib/api";
+import { parseHash, navigate, api, type Route } from "./lib/api";
+import { useFleet, useOverview } from "./lib/fleet";
 import { ShieldIcon, ServerIcon, FolderIcon, TerminalIcon, GitIcon, LayersIcon, BotIcon, PulseIcon, GridIcon, CloudIcon, MicIcon, MusicIcon, SeedIcon } from "./lib/icons";
 import { RetainedView } from "./components/RetainedView";
 import { Spotify } from "./views/Spotify";
@@ -10,7 +11,6 @@ import { Applications } from "./views/Applications";
 import { ScreenRemote } from "./views/ScreenRemote";
 import { Home } from "./views/Home";
 import { Desk } from "./views/Desk";
-import type { Overview } from "./lib/control";
 import { Projects } from "./views/Projects";
 import { Agents } from "./views/Agents";
 import { Services } from "./views/Services";
@@ -44,18 +44,21 @@ const NAV = [
   { view: "cloud", label: "Cloud", icon: CloudIcon },
 ];
 
-type FleetSummary = { self: { nodeId: string; name: string; commit?: string }; nodes: { id: string; name: string; online: boolean }[] };
-
+/** The shell: title bar, activity bar, the view, the prompt bar, the status bar. There is no
+ *  page-wide machine selection: the fleet is one place. Views that span machines ask every node
+ *  (Projects, Sessions, cmux, Data, Home); views bound to one machine name it in their own URL
+ *  (`?node=`) and pick it in place (Files, Editor, Cloud, Desktop, Seed). */
 export function App() {
   const [route, setRoute] = useState<Route>(parseHash());
   const [spotifyOpened, setSpotifyOpened] = useState(route.view === "spotify");
   useEffect(() => { if (route.view === "spotify") setSpotifyOpened(true); }, [route.view]);
   const [locked, setLocked] = useState(false);
-  const [fleet, setFleet] = useState<FleetSummary | null>(null);
+  const { fleet } = useFleet();
   const knownRoute = NAV.some(item => item.view === route.view) || ["edit", "remote"].includes(route.view);
+  // a machine-bound view remounts when its machine changes, so nothing of the old machine lingers
   const nodeId = route.params.get("node") ?? "";
-  const nodeGen = nodeId; // only a node change remounts node-scoped views
-  const [hud, setHud] = useState<{ tasks: number; running: number; down: number | null; handoff: number } | null>(null);
+  const { overview: hudOverview } = useOverview(undefined, 30_000);
+  const hud = hudOverview ? { tasks: hudOverview.collab.tasks.filter((t) => t.status === "open").length, running: hudOverview.collab.runs.filter((r) => r.status === "running").length, down: hudOverview.services ? hudOverview.services.rows.filter((r) => r.ok === false).length : null, handoff: hudOverview.status?.handoffOpen ?? 0 } : null;
   const [cmuxCount, setCmuxCount] = useState<number | null>(null);
 
   useLayoutEffect(() => {
@@ -67,19 +70,14 @@ export function App() {
   }, []);
 
   useEffect(() => applyInstallTarget(route.view), [route.view]);
-  useEffect(() => refreshRouteTitle(locked, !knownRoute), [route, locked, knownRoute]);
+  // re-run once the fleet list arrives: a machine-bound title names the machine, not its id
+  useEffect(() => refreshRouteTitle(locked, !knownRoute), [route, locked, knownRoute, fleet]);
+  // the page-wide node preference of earlier builds; a link names its machine now
+  useEffect(() => { try { localStorage.removeItem("cyberdeck-active-node"); } catch {} }, []);
 
   useEffect(() => {
     let alive = true;
     const poll = async () => {
-      try {
-        const f = await api<FleetSummary>("/api/fleet/nodes");
-        if (alive) { rememberNodeNames(f.nodes); setFleet(f); }
-      } catch {}
-      try {
-        const o = await api<Overview>("/api/control/overview");
-        if (alive) setHud({ tasks: o.collab.tasks.filter((t) => t.status === "open").length, running: o.collab.runs.filter((r) => r.status === "running").length, down: o.services ? o.services.rows.filter((r) => r.ok === false).length : null, handoff: o.status?.handoffOpen ?? 0 });
-      } catch { if (alive) setHud(null); }
       try {
         const t = await api<{ available: boolean; running?: boolean; tree: { kind: string; children: any[] }[] }>("/api/cmux/tree");
         if (alive) setCmuxCount(t.available && t.running ? t.tree.reduce((n, w) => n + w.children.length, 0) : null);
@@ -97,30 +95,23 @@ export function App() {
   const lock = () => { if (location.hash === routeHash(route.view, route.params)) setLocked(true); };
   const isActive = (v: string) => route.view === v || (v === "files" && route.view === "edit");
   const onlineCount = fleet ? fleet.nodes.filter((n) => n.online).length : 0;
-
-  const switchNode = (value: string) => {
-    if (value === "") setActiveNode("", "");
-    else {
-      const n = fleet?.nodes.find((n) => n.id === value);
-      setActiveNode(value, n?.name ?? "node");
-    }
-  };
+  const selfName = fleet?.self.name ?? "local";
 
   const view = (
     <>
       {!knownRoute && <section className="p-6"><h1 className="text-xl">Page not found</h1><p className="my-3">No Cyberdeck view named “{route.view}”.</p><button onClick={() => navigate("fleet")}>Go home</button></section>}
-      {route.view === "desktop" && <Suspense fallback={<div className="p-6">Loading desktop…</div>}><Desktop key={`desktop-${nodeGen}-${nodeId}`} /></Suspense>}
-      {route.view === "fleet" && <Home onLocked={lock} key={`fleet-${nodeGen}`} />}
-      {route.view === "projects" && <Projects params={route.params} onLocked={lock} key={`projects-${nodeGen}-${nodeId}`} />}
-      {route.view === "seed" && <Suspense fallback={<div className="p-6 text-xs text-zinc-500">Loading Seed agents…</div>}><SeedAgents params={route.params} /></Suspense>}
-      {route.view === "agents" && <Agents params={route.params} onLocked={lock} key={`agents-${nodeGen}-${nodeId}`} />}
-      {route.view === "services" && <Services params={route.params} onLocked={lock} key={`services-${nodeGen}-${nodeId}`} />}
-      {route.view === "data" && <Data params={route.params} onLocked={lock} key={`data-${nodeGen}-${nodeId}`} />}
-      {route.view === "files" && <Files params={route.params} onLocked={lock} key={`files-${nodeGen}-${nodeId}`} />}
-      {route.view === "edit" && <Editor params={route.params} onLocked={lock} key={`edit-${nodeGen}-${nodeId}`} />}
-      {route.view === "term" && <Term params={route.params} onLocked={lock} key={`term-${nodeGen}-${nodeId}`} />}
-      {route.view === "cmux" && <Cmux params={route.params} onLocked={lock} key={`cmux-${nodeGen}-${nodeId}`} />}
-      {route.view === "cloud" && <Cloud params={route.params} onLocked={lock} key={`cloud-${nodeGen}-${nodeId}`} />}
+      {route.view === "desktop" && <Suspense fallback={<div className="p-6">Loading desktop…</div>}><Desktop params={route.params} key={`desktop-${nodeId}`} /></Suspense>}
+      {route.view === "fleet" && <Home onLocked={lock} />}
+      {route.view === "projects" && <Projects params={route.params} onLocked={lock} />}
+      {route.view === "seed" && <Suspense fallback={<div className="p-6 text-xs text-zinc-500">Loading Seed agents…</div>}><SeedAgents params={route.params} key={`seed-${nodeId}`} /></Suspense>}
+      {route.view === "agents" && <Agents params={route.params} onLocked={lock} />}
+      {route.view === "services" && <Services params={route.params} onLocked={lock} />}
+      {route.view === "data" && <Data params={route.params} onLocked={lock} />}
+      {route.view === "files" && <Files params={route.params} onLocked={lock} key={`files-${nodeId}`} />}
+      {route.view === "edit" && <Editor params={route.params} onLocked={lock} key={`edit-${nodeId}`} />}
+      {route.view === "term" && <Term params={route.params} onLocked={lock} />}
+      {route.view === "cmux" && <Cmux params={route.params} onLocked={lock} />}
+      {route.view === "cloud" && <Cloud params={route.params} onLocked={lock} key={`cloud-${nodeId}`} />}
     </>
   );
 
@@ -134,31 +125,13 @@ export function App() {
         <span className="neon text-[13px] font-semibold uppercase tracking-[0.2em]">Cyberdeck</span>
         <span className="hidden text-[10px] uppercase tracking-widest text-zinc-600 sm:inline">/ {NAV.find((n) => isActive(n.view))?.label ?? route.view}</span>
         <div className="hidden items-center gap-1.5 pl-3 md:flex" data-testid="hud-chips">
-          <span className="hud-chip text-zinc-300"><span className="led led-on" />{nodeId ? activeNodeName() : fleet?.self.name ?? "local"}</span>
+          <span className="hud-chip text-zinc-300" data-testid="header-node" title="the machine serving this page"><span className="led led-on" />{selfName}</span>
           <button type="button" data-testid="header-fleet" className="hud-chip text-zinc-300 hover:text-zinc-100" onClick={() => navigate("fleet")} title="Open Fleet overview"><span className={`led ${onlineCount === (fleet?.nodes.length ?? 0) ? "led-on" : "led-warn"}`} />fleet {onlineCount}/{fleet?.nodes.length ?? 0}</button>
           <button className="hud-chip text-zinc-300 hover:text-zinc-100" onClick={() => navigate("agents")}><span className={`led ${hud?.running ? "led-run" : "led-off"}`} />tasks {hud ? `${hud.tasks} open` : "—"}{hud?.running ? ` · ${hud.running} run` : ""}</button>
           <button className={`hud-chip ${hud?.down ? "neon-red" : "text-zinc-300"} hover:text-zinc-100`} onClick={() => navigate("services")}><span className={`led ${hud?.down ? "led-err" : hud?.down === 0 ? "led-on" : "led-off"}`} />svc {hud?.down == null ? "—" : hud.down ? `${hud.down} down` : "ok"}</button>
           {cmuxCount != null && <button className="hud-chip text-zinc-300 hover:text-zinc-100" onClick={() => navigate("cmux")}><span className="led led-on" />cmux {cmuxCount}</button>}
         </div>
         <div className="flex-1" />
-        {/* The Desk has no machine to pick: voice always goes through the hub (docs/VOICE.md). */}
-        {route.view !== "desk" && (
-          <select
-            value={nodeId}
-            onChange={(e) => switchNode(e.target.value)}
-            data-testid="node-switcher"
-            className="max-w-[45vw] rounded-sm border border-zinc-800 bg-zinc-900 px-2 py-0.5 text-[11px] uppercase tracking-wider text-zinc-300 outline-none focus:border-zinc-600"
-            title="Which machine you are operating on"
-          >
-            <option value="">{fleet?.self.name ?? "this machine"} (local)</option>
-            {nodeId && !fleet?.nodes.some(n => n.id === nodeId) && <option value={nodeId}>{nodeId} (unavailable)</option>}
-            {fleet?.nodes.map((n) => (
-              <option key={n.id} value={n.id} disabled={!n.online}>
-                {n.name} {n.online ? "" : "(offline)"}
-              </option>
-            ))}
-          </select>
-        )}
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -186,13 +159,13 @@ export function App() {
       </div>
 
       {/* sticky prompt bar: start sessions from anywhere; live sessions strip */}
-      {route.view !== "applications" && <PromptBar route={route} nodeName={fleet?.self.name ?? "local"} />}
+      {route.view !== "applications" && <PromptBar route={route} nodeName={selfName} />}
 
       {/* status bar (desktop) */}
       <footer className="hud-chrome hidden h-6 shrink-0 items-center gap-4 border-t px-3 text-[10px] uppercase tracking-wider text-zinc-500 sm:flex">
-        <button className="flex items-center gap-1.5 hover:text-zinc-300" onClick={() => navigate("fleet")} data-testid="statusbar-node">
-          <span className={`led ${nodeId ? "led-run" : "led-on"}`} />
-          {nodeId ? `remote: ${activeNodeName()}` : fleet?.self.name ?? "local"}
+        <button className="flex items-center gap-1.5 hover:text-zinc-300" onClick={() => navigate("fleet")} data-testid="statusbar-node" title="the machine serving this page">
+          <span className="led led-on" />
+          {selfName}
         </button>
         <span>
           fleet: {onlineCount}/{fleet?.nodes.length ?? 0} peers online

@@ -1,7 +1,9 @@
 import { useEffect } from "react";
 
-/** The fragment is the view's source of truth, including which paired node it uses.
- * Missing node means the serving machine, never a preference from another tab. */
+/** The fragment is the view's source of truth, including which paired node a machine-bound
+ * view uses (`node`). Missing node means the serving machine, never a preference from another
+ * tab or a page-wide selection: links state their own machine, and navigating between views
+ * never carries one along. */
 export interface Route { view: string; params: URLSearchParams }
 export const VIEW_NAMES: Record<string, string> = {
   desktop: "Desktop", seed: "Seed", fleet: "Home", controls: "Controls", applications: "Applications", spotify: "Spotify",
@@ -45,11 +47,19 @@ export function writeRoute(view: string, params: URLSearchParams | Record<string
   window.dispatchEvent(new HashChangeEvent("hashchange"));
 }
 
-export function navigate(view: string, params: Record<string, string> = {}, mode: "push" | "replace" = "push") {
-  const q = new URLSearchParams(params);
-  if (!q.has("node")) q.set("node", readRoute().params.get("node") ?? "");
+export function navigate(view: string, params: Record<string, string | undefined> = {}, mode: "push" | "replace" = "push") {
+  const q = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) if (value !== undefined) q.set(key, value);
   writeRoute(view, q, mode);
 }
+
+// Node names for titles and labels, learnt from /api/fleet/nodes (ui/lib/fleet.ts). Pure data, no DOM.
+const nodeNames = new Map<string, string>();
+export function rememberNodeNames(nodes: { id: string; name: string }[]) {
+  for (const n of nodes) nodeNames.set(n.id, n.name);
+}
+/** The display name of a node id ("" = this machine); the id itself until the fleet list has been read. */
+export const nodeName = (id: string): string => (id === "self" ? nodeNames.get("") ?? "this machine" : nodeNames.get(id) ?? (id || nodeNames.get("") || "this machine"));
 
 let editing: { element: Element | null; hash: string } | undefined;
 let watchingEdits = false;
@@ -91,7 +101,7 @@ export function routeTitle(route = readRoute()): string {
     title = p.get("app") === "vimm" ? `${p.get("tab") === "steam" ? "PC games · " : ""}The Vault` : p.get("app") === "afterglow" ? "Afterglow" : `${p.get("app")} · Applications`;
   }
   if (p.get("q")) title = `${p.get("q")} · ${title}`;
-  if (p.get("node")) title += ` · ${p.get("node")}`;
+  if (p.get("node")) title += ` · ${nodeName(p.get("node")!)}`;
   return `${title.replace(/[\u0000-\u001f]/g, " ").slice(0, 350)} · Cyberdeck`;
 }
 

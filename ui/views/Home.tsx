@@ -3,9 +3,9 @@
 // summary, services, handoff, and the machine cards with pairing at the bottom.
 import { NetworkMap } from "../components/NetworkMap";
 import { useEffect, useState } from "react";
-import { api, post, navigate, setActiveNode, fmtBytes, fmtAgo, ApiError } from "../lib/api";
+import { api, post, navigate, fmtBytes, fmtAgo, ApiError } from "../lib/api";
+import { useOverview, refreshNodes } from "../lib/fleet";
 import { ServerIcon, FolderIcon, TerminalIcon, GitIcon, GridIcon } from "../lib/icons";
-import type { Overview } from "../lib/control";
 import type { Dashboard, UsageSummary } from "../../src/daemon/api/dashboard";
 import type { CodexResets } from "../../src/daemon/codexrpc";
 import { apiOn, startSession } from "../lib/sessions";
@@ -203,17 +203,17 @@ function NodeCard(props: { name: string; subtitle: string; online: boolean; stat
 
       <div className="mt-3 flex flex-wrap gap-1.5">
         {props.onRepos && (
-          <button onClick={props.onRepos} disabled={!props.online} className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-[11px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-40">
+          <button onClick={props.onRepos} disabled={!props.online} data-testid="card-repos" title={`${props.name}'s repos and data`} className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-[11px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-40">
             <GitIcon size={13} /> Repos
           </button>
         )}
         {props.onBrowse && (
-          <button onClick={props.onBrowse} disabled={!props.online} className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-[11px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-40">
+          <button onClick={props.onBrowse} disabled={!props.online} data-testid="card-files" title={`browse ${props.name}'s files`} className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-[11px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-40">
             <FolderIcon size={13} /> Files
           </button>
         )}
         {props.onTerminal && (
-          <button onClick={props.onTerminal} disabled={!props.online} className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-[11px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-40">
+          <button onClick={props.onTerminal} disabled={!props.online} data-testid="card-shell" title={`sessions on ${props.name}`} className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-[11px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-40">
             <TerminalIcon size={13} /> Shell
           </button>
         )}
@@ -252,7 +252,7 @@ function CaseworkCard() {
   const [err, setErr] = useState("");
   const [copied, setCopied] = useState("");
   const load = async () => {
-    try { setPairing(await api<CaseworkPairing>(`/api/casework/pairing?url=${encodeURIComponent(location.origin)}`, { local: true })); setErr(""); }
+    try { setPairing(await api<CaseworkPairing>(`/api/casework/pairing?url=${encodeURIComponent(location.origin)}`)); setErr(""); }
     catch (e) { setErr(e instanceof ApiError && e.status === 403 ? "sign in with the token or over the tailnet to see the pairing key" : String(e)); }
   };
   useEffect(() => { void load(); const t = setInterval(() => void load(), 15_000); return () => clearInterval(t); }, []);
@@ -305,8 +305,10 @@ function CaseworkCard() {
 export function Home({ onLocked }: { onLocked: () => void }) {
   const [info, setInfo] = useState<FleetInfo | null>(null);
   const [selfStatus, setSelfStatus] = useState<NodeStatus | null>(null);
-  // undefined = not answered yet, null = this node has no Deck repo (404)
-  const [control, setControl] = useState<Overview | null | undefined>(undefined);
+  // Deck widgets: from this node, else the first peer with the checkout. undefined = not answered yet,
+  // null = no machine has a Deck repo
+  const { overview: deckOverview, source: deckSource, error: deckError } = useOverview(onLocked, 30_000);
+  const control: typeof deckOverview | undefined = deckOverview ?? (deckError ? null : undefined);
   const [dash, setDash] = useState<Dashboard | null>(null);
   /** Dashboards of the paired nodes, by node id. */
   const [peerDash, setPeerDash] = useState<Record<string, Dashboard>>({});
@@ -316,16 +318,13 @@ export function Home({ onLocked }: { onLocked: () => void }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
-  // Home shows the whole fleet no matter which node the switcher has selected. It asks the node
-  // serving this page for its own numbers (`local: true` = do not reroute the call through the
-  // selected node, which used to show that node's disk twice) and asks every paired node for theirs
-  // through `/api/nodes/:id/proxy/...`. Each row is labelled with the machine that answered.
+  // Home shows the whole fleet: this node's own numbers, and every paired node's through
+  // `/api/nodes/:id/proxy/...`. Each row is labelled with the machine that answered.
   const load = async () => {
     try {
-      const [f, s] = await Promise.all([api<FleetInfo>("/api/fleet/nodes"), api<NodeStatus>("/api/status", { local: true })]);
+      const [f, s] = await Promise.all([api<FleetInfo>("/api/fleet/nodes"), api<NodeStatus>("/api/status")]);
       setInfo(f);
       setSelfStatus(s);
-      api<Overview>("/api/control/overview", { local: true }).then(setControl).catch((e) => { if (e instanceof ApiError && e.status === 404) setControl(null); });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) onLocked();
     }
@@ -333,7 +332,7 @@ export function Home({ onLocked }: { onLocked: () => void }) {
   // The dashboard is heavier (usage APIs, df); poll it on its own, slower clock.
   const loadDash = async () => {
     try {
-      setDash(await api<Dashboard>("/api/dashboard", { local: true }));
+      setDash(await api<Dashboard>("/api/dashboard"));
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) onLocked();
     }
@@ -356,8 +355,9 @@ export function Home({ onLocked }: { onLocked: () => void }) {
     };
   }, []);
 
-  const goto = (id: string, name: string, view: string) => {
-    navigate(view, { node: id });
+  /** A machine card's buttons open that machine's view: the link names the node (Data filters to it). */
+  const goto = (id: string, _name: string, view: string) => {
+    navigate(view, { node: view === "data" ? id || "self" : id || undefined });
   };
 
   const pair = async () => {
@@ -369,6 +369,7 @@ export function Home({ onLocked }: { onLocked: () => void }) {
       setPeerUrl("");
       setPeerCode("");
       load();
+      refreshNodes();
     } catch (err) {
       setMsg({ kind: "err", text: String(err instanceof Error ? err.message : err) });
     } finally {
@@ -535,7 +536,7 @@ export function Home({ onLocked }: { onLocked: () => void }) {
           </Widget>
 
           {/* row 3: control, services, handoff */}
-          <Widget title="Control" testId="control-card" onClick={() => navigate("projects")} meta={control ? `deck ${control.status?.repo.branch ?? ""}${control.status?.repo.dirty ? ` · ${control.status.repo.dirty} dirty` : ""}` : control === null ? "deck repo not configured" : "loading…"}>
+          <Widget title="Control" testId="control-card" onClick={() => navigate("projects")} meta={control ? `deck ${control.status?.repo.branch ?? ""}${control.status?.repo.dirty ? ` · ${control.status.repo.dirty} dirty` : ""}${deckSource?.node ? ` · read from ${deckSource.nodeName}` : ""}` : control === null ? "no machine has a deck repo" : "loading…"}>
             <div className="grid grid-cols-2 gap-2 text-center">
               {[
                 ["projects", control?.projects.length ?? "—", "projects", "text-zinc-200"],
@@ -571,7 +572,7 @@ export function Home({ onLocked }: { onLocked: () => void }) {
           </Widget>
 
           <Widget title="Handoff" testId="widget-handoff" onClick={() => navigate("projects")} meta={control ? `${control.status?.handoffOpen ?? 0} open` : ""}>
-            {todoEntries.length === 0 && <div className="text-[11px] text-zinc-500">{control ? "Nothing in the handoff." : control === null ? "Deck repo not configured on this node." : "loading…"}</div>}
+            {todoEntries.length === 0 && <div className="text-[11px] text-zinc-500">{control ? "Nothing in the handoff." : control === null ? "No machine has a Deck repo configured." : "loading…"}</div>}
             <ul className="space-y-2">
               {todoEntries.map((e, i) => (
                 <li key={i} className="text-[11px] leading-snug">
@@ -624,6 +625,7 @@ export function Home({ onLocked }: { onLocked: () => void }) {
           {info?.nodes.map((n) => (
             <NodeCard
               key={n.id}
+              testId={`node-card-${n.name.toLowerCase()}`}
               name={n.name}
               subtitle={`${n.url} · paired ${fmtAgo(n.added_at)}${n.last_seen ? ` · seen ${fmtAgo(n.last_seen)}` : ""}`}
               online={n.online}
@@ -635,6 +637,7 @@ export function Home({ onLocked }: { onLocked: () => void }) {
               onUnpair={async () => {
                 await api(`/api/fleet/nodes/${n.id}`, { method: "DELETE" });
                 load();
+                refreshNodes();
               }}
             />
           ))}

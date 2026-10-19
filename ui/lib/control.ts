@@ -43,12 +43,7 @@ export function duration(a: string, b: string | null): string {
   return s < 60 ? `${s | 0}s` : s < 3600 ? `${(s / 60) | 0}m ${(s % 60) | 0}s` : `${(s / 3600) | 0}h ${((s % 3600) / 60) | 0}m`;
 }
 
-/** Repo glob (relative to ~/Code, `*` = one path segment) → does it cover this repo path? */
-export function globMatches(glob: string, repoPath: string): boolean {
-  const rel = repoPath.replace(/^.*\/Code\//, "");
-  const re = new RegExp("^" + glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*") + "(/|$)");
-  return re.test(rel);
-}
+export { globMatches } from "../../src/shared/fleetview";
 
 /** Service pattern `host/name` from a project's `services:` (`*` = one segment) → does it cover this probe row? */
 export function serviceMatches(pattern: string, row: { host: string; service: string }): boolean {

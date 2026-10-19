@@ -7,7 +7,7 @@ import { bracketMatching, indentOnInput, syntaxHighlighting, defaultHighlightSty
 import { search, searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { languages } from "@codemirror/language-data";
-import { api, post, rawUrl, scoped, activeNode, navigate, fmtBytes, ApiError } from "../lib/api";
+import { api, post, rawUrl, nodePath, navigate, routeNode, fmtBytes, ApiError } from "../lib/api";
 import { SkipBackIcon, SkipFwdIcon, RepeatIcon, ShuffleIcon } from "../lib/icons";
 import videojs from "video.js";
 import "video.js/dist/video-js.css";
@@ -28,7 +28,7 @@ const MEDIA_EXT: Record<string, "image" | "video" | "audio" | "pdf"> = {
 const NATIVE_VIDEO = new Set(["mp4", "webm", "m4v", "mov"]);
 const VIDEO_MIME: Record<string, string> = { mp4: "video/mp4", m4v: "video/mp4", webm: "video/webm", mov: "video/quicktime" };
 
-function VideoJsPlayer(props: { path: string; loop: boolean; onEnded: () => void }) {
+function VideoJsPlayer(props: { path: string; node: string; loop: boolean; onEnded: () => void }) {
   const host = useRef<HTMLDivElement>(null);
   const playerRef = useRef<ReturnType<typeof videojs> | null>(null);
   const ext = props.path.toLowerCase().split(".").pop() ?? "";
@@ -37,7 +37,7 @@ function VideoJsPlayer(props: { path: string; loop: boolean; onEnded: () => void
   const [ffmpegAvailable, setFfmpegAvailable] = useState(true);
 
   useEffect(() => {
-    api<{ ffmpeg: boolean }>(`/api/media/info?path=${encodeURIComponent(props.path)}`)
+    api<{ ffmpeg: boolean }>(`/api/media/info?path=${encodeURIComponent(props.path)}`, { node: props.node })
       .then((i) => setFfmpegAvailable(i.ffmpeg))
       .catch(() => {});
   }, [props.path]);
@@ -64,13 +64,13 @@ function VideoJsPlayer(props: { path: string; loop: boolean; onEnded: () => void
       try {
         if (mode === "hls") {
           setStatus("preparing stream…");
-          const res = await post<{ url: string; transcoding: boolean }>("/api/media/hls/start", { path: props.path });
+          const res = await post<{ url: string; transcoding: boolean }>("/api/media/hls/start", { path: props.path }, props.node);
           if (disposed) return;
           setStatus(res.transcoding ? "transcoding in the background — seek range grows as it runs" : null);
-          player.src({ src: scoped(res.url), type: "application/x-mpegURL" });
+          player.src({ src: nodePath(props.node, res.url), type: "application/x-mpegURL" });
         } else {
           setStatus(null);
-          player.src({ src: rawUrl("/api/fs/read", { path: props.path }), type: VIDEO_MIME[ext] ?? "video/mp4" });
+          player.src({ src: rawUrl("/api/fs/read", { path: props.path }, props.node), type: VIDEO_MIME[ext] ?? "video/mp4" });
           // If the browser can't decode this file, fall back to transcoding.
           player.one("error", () => {
             if (!disposed && ffmpegAvailable) setMode("hls");
@@ -109,7 +109,7 @@ function VideoJsPlayer(props: { path: string; loop: boolean; onEnded: () => void
 
 // ---------- media player with folder playlist ----------
 
-function MediaPlayer({ path, kind }: { path: string; kind: "audio" | "video" }) {
+function MediaPlayer({ path, node, kind }: { path: string; node: string; kind: "audio" | "video" }) {
   const name = path.split("/").pop() ?? "";
   const dir = path.slice(0, path.lastIndexOf("/")) || "~";
   const [playlist, setPlaylist] = useState<string[]>([]);
@@ -117,7 +117,7 @@ function MediaPlayer({ path, kind }: { path: string; kind: "audio" | "video" }) 
   const [shuffle, setShuffle] = useState(false);
 
   useEffect(() => {
-    api<{ entries: { name: string; type: string }[] }>(`/api/fs/list?path=${encodeURIComponent(dir)}`)
+    api<{ entries: { name: string; type: string }[] }>(`/api/fs/list?path=${encodeURIComponent(dir)}`, { node })
       .then((res) =>
         setPlaylist(
           res.entries
@@ -130,7 +130,7 @@ function MediaPlayer({ path, kind }: { path: string; kind: "audio" | "video" }) 
   }, [dir]);
 
   const idx = playlist.indexOf(name);
-  const goto = (n: string) => navigate("edit", { path: `${dir}/${n}` });
+  const goto = (n: string) => navigate("edit", { path: `${dir}/${n}`, node: node || undefined });
   const step = (delta: number) => {
     if (playlist.length < 2) return;
     if (shuffle) {
@@ -148,7 +148,7 @@ function MediaPlayer({ path, kind }: { path: string; kind: "audio" | "video" }) 
     <div className="flex min-h-0 flex-1 flex-col lg:flex-row" data-testid="media-player">
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-4 sm:p-8">
         {kind === "video" ? (
-          <VideoJsPlayer key={path} path={path} loop={loop} onEnded={() => !loop && step(1)} />
+          <VideoJsPlayer key={path} path={path} node={node} loop={loop} onEnded={() => !loop && step(1)} />
         ) : (
           <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 text-center shadow-2xl">
             <div className="mx-auto flex h-28 w-28 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500/25 to-sky-500/20 text-5xl">
@@ -158,7 +158,7 @@ function MediaPlayer({ path, kind }: { path: string; kind: "audio" | "video" }) 
             <div className="mt-0.5 text-[11px] text-zinc-500">
               {idx + 1} of {playlist.length} in {dir.split("/").pop() || "~"}
             </div>
-            <audio key={path} src={rawUrl("/api/fs/read", { path })} controls autoPlay loop={loop} onEnded={() => !loop && step(1)} className="mt-4 w-full" />
+            <audio key={path} src={rawUrl("/api/fs/read", { path }, node)} controls autoPlay loop={loop} onEnded={() => !loop && step(1)} className="mt-4 w-full" />
           </div>
         )}
         <div className="flex items-center gap-1.5" data-testid="media-transport">
@@ -203,6 +203,7 @@ function MediaPlayer({ path, kind }: { path: string; kind: "audio" | "video" }) 
 
 export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked: () => void }) {
   const path = params.get("path") ?? "";
+  const node = routeNode(params);
   const name = path.split("/").pop() ?? "";
   const dir = path.slice(0, path.lastIndexOf("/")) || "~";
   const ext = name.toLowerCase().split(".").pop() ?? "";
@@ -228,7 +229,7 @@ export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked
     const current = () => currentPath.current === path && view.current === editor;
     setSaving(true);
     try {
-      await post("/api/fs/write", { path, content: editor.state.doc.toString() });
+      await post("/api/fs/write", { path, content: editor.state.doc.toString() }, node);
       if (!current()) return;
       setDirty(false);
       setSavedAt(Date.now());
@@ -237,7 +238,7 @@ export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked
     } finally {
       if (current()) setSaving(false);
     }
-  }, [path]);
+  }, [path, node]);
 
   useEffect(() => {
     setState("loading"); setError(""); setLoadedPath(""); setDirty(false); setSavedAt(null); setSaving(false);
@@ -249,7 +250,7 @@ export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked
     let cancelled = false;
     (async () => {
       try {
-        const res = await api<{ content: string; size: number }>(`/api/fs/text?path=${encodeURIComponent(path)}`);
+        const res = await api<{ content: string; size: number }>(`/api/fs/text?path=${encodeURIComponent(path)}`, { node });
         if (cancelled) return;
         setLoadedPath(path);
         setSize(res.size);
@@ -306,7 +307,7 @@ export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked
       view.current?.destroy();
       view.current = null;
     };
-  }, [path]);
+  }, [path, node]);
 
   // Warn before closing with unsaved changes.
   useEffect(() => {
@@ -321,7 +322,7 @@ export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-zinc-800 px-3 py-2 sm:px-4">
-        <button onClick={() => navigate("files", { path: dir })} className="rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">
+        <button onClick={() => navigate("files", { path: dir, node: node || undefined })} className="rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">
           ← {dir.split("/").pop() || "~"}
         </button>
         <div className="min-w-0 flex-1">
@@ -338,7 +339,7 @@ export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked
               {savedAt && !dirty ? " · saved" : ""}
             </span>
             <a
-              href={rawUrl("/api/fs/read", { path, download: "1" })}
+              href={rawUrl("/api/fs/read", { path, download: "1" }, node)}
               download={name}
               className="rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
             >
@@ -360,17 +361,17 @@ export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked
 
       {media === "image" && (
         <div className="flex flex-1 items-center justify-center overflow-auto p-8">
-          <img src={rawUrl("/api/fs/read", { path })} alt={name} className="max-h-full max-w-full rounded-lg shadow-2xl" />
+          <img src={rawUrl("/api/fs/read", { path }, node)} alt={name} className="max-h-full max-w-full rounded-lg shadow-2xl" />
         </div>
       )}
-      {(media === "video" || media === "audio") && <MediaPlayer path={path} kind={media} />}
-      {media === "pdf" && <iframe src={rawUrl("/api/fs/read", { path })} className="flex-1" title={name} />}
+      {(media === "video" || media === "audio") && <MediaPlayer path={path} node={node} kind={media} />}
+      {media === "pdf" && <iframe src={rawUrl("/api/fs/read", { path }, node)} className="flex-1" title={name} />}
 
       {!media && state === "binary" && (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 text-zinc-500">
           <div className="text-4xl">📦</div>
           <div className="text-sm">Binary file — no text preview.</div>
-          <a href={rawUrl("/api/fs/read", { path, download: "1" })} download={name} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">
+          <a href={rawUrl("/api/fs/read", { path, download: "1" }, node)} download={name} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">
             Download
           </a>
         </div>

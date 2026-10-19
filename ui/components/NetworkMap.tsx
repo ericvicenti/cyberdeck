@@ -22,12 +22,12 @@ export function NetworkMap() {
       if (busy) return;
       busy = true;
       try {
-        const own = await api<NetworkSnapshot>("/api/network", { local: true, signal: AbortSignal.timeout(10_000) });
+        const own = await api<NetworkSnapshot>("/api/network", { signal: AbortSignal.timeout(10_000) });
         if (!Array.isArray(own.nodes)) throw new Error("Network map needs a daemon update");
         const peers = own.nodes.filter(n => n.id);
         const remote = await Promise.all(peers.map(async n => {
           try {
-            const s = await api<NetworkSnapshot>(`/api/nodes/${n.id}/proxy/network`, { local: true, signal: AbortSignal.timeout(8_000) });
+            const s = await api<NetworkSnapshot>(`/api/nodes/${n.id}/proxy/network`, { signal: AbortSignal.timeout(8_000) });
             return Array.isArray(s.samples) && Array.isArray(s.nodes) ? [n.name, s] as const : null;
           } catch { return null; }
         }));
@@ -79,7 +79,7 @@ export function NetworkMap() {
     setSending(true); setNotice("");
     try {
       const path = sourceNode.local ? "/api/network/test" : `/api/nodes/${sourceNode.id}/proxy/network/test`;
-      await api(path, { local: true, method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ target: destination.id }) });
+      await api(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ target: destination.id }) });
       setNotice(`Testing ${source} ↔ ${target}. Results refresh automatically.`);
       setRetry(r => r + 1);
     } catch (e) { setNotice(e instanceof Error ? e.message : "Test failed"); }

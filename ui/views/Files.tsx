@@ -1,6 +1,8 @@
 import { updateParams, useRouteTitle } from "../lib/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, post, rawUrl, navigate, fmtBytes, fmtAgo, fmtMode, fmtOctal, ApiError } from "../lib/api";
+import { api, post, rawUrl, navigate, routeNode, fmtBytes, fmtAgo, fmtMode, fmtOctal, ApiError } from "../lib/api";
+import { useFleet } from "../lib/fleet";
+import { NodePicker } from "../components/NodePicker";
 import { ChevronRight, ChevronDown, DotsIcon, FolderIcon } from "../lib/icons";
 
 type Entry = {
@@ -99,7 +101,7 @@ function NameDialog(props: { title: string; initial: string; action: string; onS
   );
 }
 
-function ChmodDialog(props: { entry: Entry; path: string; onDone: () => void; onClose: () => void; toast: (s: string) => void }) {
+function ChmodDialog(props: { entry: Entry; path: string; node: string; onDone: () => void; onClose: () => void; toast: (s: string) => void }) {
   const [mode, setMode] = useState(props.entry.mode & 0o777);
   const [recursive, setRecursive] = useState(false);
   const groupsDef = [
@@ -162,7 +164,7 @@ function ChmodDialog(props: { entry: Entry; path: string; onDone: () => void; on
         <button
           onClick={async () => {
             try {
-              await post("/api/fs/chmod", { path: joinPath(props.path, props.entry.name), mode: mode.toString(8).padStart(3, "0"), recursive });
+              await post("/api/fs/chmod", { path: joinPath(props.path, props.entry.name), mode: mode.toString(8).padStart(3, "0"), recursive }, props.node);
               props.onDone();
             } catch (err) {
               props.toast(String(err instanceof Error ? err.message : err));
@@ -214,6 +216,7 @@ function TreeNode(props: {
   current: string;
   defaultOpen?: boolean;
   onNavigate: (p: string) => void;
+  node: string;
 }) {
   const [open, setOpen] = useState(!!props.defaultOpen);
   const [children, setChildren] = useState<{ name: string; path: string }[] | null>(null);
@@ -221,7 +224,7 @@ function TreeNode(props: {
 
   useEffect(() => {
     if (!open || children) return;
-    api<Listing>(`/api/fs/list?path=${encodeURIComponent(props.path)}`)
+    api<Listing>(`/api/fs/list?path=${encodeURIComponent(props.path)}`, { node: props.node })
       .then((res) =>
         setChildren(
           res.entries
@@ -259,7 +262,7 @@ function TreeNode(props: {
       </div>
       {open &&
         children?.map((c) => (
-          <TreeNode key={c.path} path={c.path} name={c.name} depth={props.depth + 1} current={props.current} onNavigate={props.onNavigate} />
+          <TreeNode key={c.path} path={c.path} name={c.name} depth={props.depth + 1} current={props.current} onNavigate={props.onNavigate} node={props.node} />
         ))}
     </div>
   );
@@ -267,8 +270,17 @@ function TreeNode(props: {
 
 // ---------- the view ----------
 
+/** One machine's filesystem. The machine is part of the URL (`?node=`, absent = this one) and is
+ *  chosen with the picker beside the path, so a listing, upload or delete can never go elsewhere. */
 export function Files({ params, onLocked }: { params: URLSearchParams; onLocked: () => void }) {
   const path = params.get("path") ?? "~";
+  const node = routeNode(params);
+  const { targets } = useFleet();
+  const target = targets.find((t) => t.id === node);
+  const nodeName = target?.name ?? (node ? "that machine" : "this machine");
+  /** Every filesystem call of this view goes to `node`. */
+  const fs = useCallback(<T,>(p: string, init?: RequestInit) => api<T>(p, { ...init, node }), [node]);
+  const fsPost = useCallback(<T,>(p: string, body: unknown) => post<T>(p, body, node), [node]);
   const [listing, setListing] = useState<Listing | null>(null);
   const [error, setError] = useState<string | null>(null);
   const showHidden = params.get("hidden") === "1";
@@ -310,16 +322,16 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
     const seq = ++loadSeq.current;
     try {
       setError(null);
-      const res = await api<Listing>(`/api/fs/list?path=${encodeURIComponent(path)}`);
+      const res = await fs<Listing>(`/api/fs/list?path=${encodeURIComponent(path)}`);
       if (seq !== loadSeq.current) return; // a newer navigation superseded this fetch
       setListing(res);
       setSel(new Set());
     } catch (err) {
       if (seq !== loadSeq.current) return;
       if (err instanceof ApiError && err.status === 401) return onLocked();
-      setError(String(err instanceof Error ? err.message : err));
+      setError(`${nodeName}: ${err instanceof Error ? err.message : err}`);
     }
-  }, [path]);
+  }, [path, fs, nodeName]);
 
   useEffect(() => {
     setListing(null);
@@ -327,7 +339,7 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
     return () => { loadSeq.current++; };
   }, [load]);
 
-  const go = (p: string) => navigate("files", { path: p });
+  const go = (p: string) => navigate("files", { path: p, node: node || undefined });
 
   const visible = useMemo(() => {
     if (!listing) return [];
@@ -348,12 +360,12 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
   const doOpen = (e: Entry) => {
     const full = joinPath(listing!.path, e.name);
     if (e.type === "dir" || (e.type === "symlink" && e.targetType === "dir")) go(full);
-    else navigate("edit", { path: full });
+    else navigate("edit", { path: full, node: node || undefined });
   };
 
   const doDelete = async (names: string[], permanent: boolean) => {
     try {
-      const res = await post<{ trashed: boolean }>("/api/fs/delete", {
+      const res = await fsPost<{ trashed: boolean }>("/api/fs/delete", {
         paths: names.map((n) => joinPath(listing!.path, n)),
         permanent,
       });
@@ -371,8 +383,8 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
       for (const src of clip.paths) {
         const name = src.split("/").pop()!;
         const dst = joinPath(destDir, name);
-        if (clip.mode === "copy") await post("/api/fs/copy", { from: src, to: dst });
-        else if (src !== dst) await post("/api/fs/rename", { from: src, to: dst });
+        if (clip.mode === "copy") await fsPost("/api/fs/copy", { from: src, to: dst });
+        else if (src !== dst) await fsPost("/api/fs/rename", { from: src, to: dst });
       }
       if (clip.mode === "cut") setClip(null);
       load();
@@ -385,7 +397,7 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
     try {
       for (const src of sources) {
         const dst = joinPath(destDir, src.split("/").pop()!);
-        if (src !== dst) await post("/api/fs/rename", { from: src, to: dst });
+        if (src !== dst) await fsPost("/api/fs/rename", { from: src, to: dst });
       }
       load();
     } catch (err) {
@@ -398,7 +410,7 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
     // webkitRelativePath preserves folder structure for directory uploads.
     for (const f of files) fd.append("files", f, (f as any).webkitRelativePath || f.name);
     try {
-      await api(`/api/fs/upload?dir=${encodeURIComponent(listing!.path)}`, { method: "POST", body: fd });
+      await fs(`/api/fs/upload?dir=${encodeURIComponent(listing!.path)}`, { method: "POST", body: fd });
       toast(`Uploaded ${files.length} file${files.length > 1 ? "s" : ""}`);
       load();
     } catch (err) {
@@ -411,8 +423,8 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
       const full = joinPath(listing!.path, e.name);
       const url =
         e.type === "dir" || (e.type === "symlink" && e.targetType === "dir")
-          ? rawUrl("/api/fs/download", { path: full })
-          : rawUrl("/api/fs/read", { path: full, download: "1" });
+          ? rawUrl("/api/fs/download", { path: full }, node)
+          : rawUrl("/api/fs/read", { path: full, download: "1" }, node);
       const a = document.createElement("a");
       a.href = url;
       a.download = e.name;
@@ -425,11 +437,11 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
     setDeepResults(null);
     if (!deep || !filter) return;
     let alive = true;
-    api<{ results: string[] }>(`/api/fs/search?dir=${encodeURIComponent(path)}&q=${encodeURIComponent(filter)}`)
+    fs<{ results: string[] }>(`/api/fs/search?dir=${encodeURIComponent(path)}&q=${encodeURIComponent(filter)}`)
       .then(res => { if (alive) setDeepResults(res.results); })
       .catch(err => { if (alive) toast(String(err instanceof Error ? err.message : err)); });
     return () => { alive = false; };
-  }, [deep, path, filter]);
+  }, [deep, path, filter, fs]);
 
   // ----- selection -----
   const clickRow = (e: Entry, ev: React.MouseEvent) => {
@@ -519,7 +531,7 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
     if (entry) {
       items.push({ label: "Open", run: () => doOpen(entry) });
       if (isDirLike)
-        items.push({ label: "Open terminal here", run: () => navigate("term", { cwd: joinPath(listing.path, entry.name) }) });
+        items.push({ label: `Open terminal here on ${nodeName}`, run: () => navigate("term", { cwd: joinPath(listing.path, entry.name), node: node || undefined }) });
       items.push({ label: "Download", run: () => doDownload(visible.filter((v) => ctxTargets.includes(v.name))) });
       items.push({ sep: true });
     }
@@ -538,7 +550,7 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
         label: "Duplicate",
         run: async () => {
           const p = joinPath(listing.path, entry.name);
-          await post("/api/fs/copy", { from: p, to: p }).catch((err) => toast(String(err?.message ?? err)));
+          await fsPost("/api/fs/copy", { from: p, to: p }).catch((err) => toast(String(err?.message ?? err)));
           load();
         },
       });
@@ -583,6 +595,10 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
       {/* toolbar */}
       <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-3 py-2" onClick={(e) => e.stopPropagation()}>
         <div className="flex min-w-0 flex-1 items-center gap-1 text-sm">
+          {targets.length > 1 && (
+            <NodePicker value={node} onChange={(n) => navigate("files", { path: "~", node: n || undefined })} targets={targets} testId="files-node" title="which machine's files" className="mr-1 shrink-0" />
+          )}
+          {node && !target && <span className="mr-1 shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-300" data-testid="files-node-unknown">unknown machine {node}</span>}
           {pathEdit === null ? (
             <div className="flex min-w-0 items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none]" data-testid="breadcrumbs">
               {crumbs.map((c, i) => (
@@ -672,9 +688,9 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
             ⟳
           </button>
           <button
-            onClick={() => navigate("term", { cwd: listing?.path ?? "~" })}
+            onClick={() => navigate("term", { cwd: listing?.path ?? "~", node: node || undefined })}
             className="rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
-            title="Open terminal here"
+            title={`Open terminal here on ${nodeName}`}
           >
             ▚ Shell
           </button>
@@ -696,8 +712,8 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
         {/* directory tree (desktop) */}
         {listing && (
           <aside className="hidden w-52 shrink-0 overflow-auto border-r border-zinc-800/70 p-1.5 md:block" data-testid="file-tree">
-            <TreeNode path={listing.home} name="~" depth={0} defaultOpen current={listing.path} onNavigate={go} />
-            <TreeNode path="/" name="/" depth={0} current={listing.path} onNavigate={go} />
+            <TreeNode key={`home-${node}`} path={listing.home} name="~" depth={0} defaultOpen current={listing.path} onNavigate={go} node={node} />
+            <TreeNode key={`root-${node}`} path="/" name="/" depth={0} current={listing.path} onNavigate={go} node={node} />
           </aside>
         )}
 
@@ -926,7 +942,7 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
           action="Create"
           onClose={() => setDialog(null)}
           onSubmit={async (name) => {
-            await post("/api/fs/mkdir", { path: joinPath(listing!.path, name) }).catch((err) => toast(String(err.message ?? err)));
+            await fsPost("/api/fs/mkdir", { path: joinPath(listing!.path, name) }).catch((err) => toast(String(err.message ?? err)));
             setDialog(null);
             load();
           }}
@@ -939,7 +955,7 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
           action="Create"
           onClose={() => setDialog(null)}
           onSubmit={async (name) => {
-            await post("/api/fs/write", { path: joinPath(listing!.path, name), content: "" }).catch((err) => toast(String(err.message ?? err)));
+            await fsPost("/api/fs/write", { path: joinPath(listing!.path, name), content: "" }).catch((err) => toast(String(err.message ?? err)));
             setDialog(null);
             load();
           }}
@@ -952,7 +968,7 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
           action="Rename"
           onClose={() => setDialog(null)}
           onSubmit={async (name) => {
-            await post("/api/fs/rename", {
+            await fsPost("/api/fs/rename", {
               from: joinPath(listing!.path, dialog.entry.name),
               to: joinPath(listing!.path, name),
             }).catch((err) => toast(String(err.message ?? err)));
@@ -968,7 +984,7 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
           action="Create"
           onClose={() => setDialog(null)}
           onSubmit={async (name) => {
-            await post("/api/fs/link", {
+            await fsPost("/api/fs/link", {
               target: joinPath(listing!.path, dialog.entry.name),
               path: joinPath(listing!.path, name),
               kind: dialog.linkKind,
@@ -979,7 +995,7 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
         />
       )}
       {dialog?.kind === "chmod" && listing && (
-        <ChmodDialog entry={dialog.entry} path={listing.path} toast={toast} onClose={() => setDialog(null)} onDone={() => { setDialog(null); load(); }} />
+        <ChmodDialog entry={dialog.entry} path={listing.path} node={node} toast={toast} onClose={() => setDialog(null)} onDone={() => { setDialog(null); load(); }} />
       )}
       {dialog?.kind === "info" && listing && <InfoDialog entry={dialog.entry} path={listing.path} listing={listing} onClose={() => setDialog(null)} />}
       {dialog?.kind === "delete" && (

@@ -2,7 +2,9 @@
 import { useEffect, useRef, useState } from "react";
 import Guacamole from "guacamole-common-js";
 import RFB from "@novnc/novnc/lib/rfb";
-import { activeNode, api, token } from "../lib/api";
+import { api, desktopWsUrl, navigate, routeNode } from "../lib/api";
+import { useFleet } from "../lib/fleet";
+import { NodePicker } from "../components/NodePicker";
 
 type Status = {
   host: string;
@@ -12,8 +14,11 @@ type Status = {
   message: string;
 };
 
-/** Interactive physical desktop of the selected Cyberdeck host. */
-export function Desktop() {
+/** Interactive physical desktop of one Cyberdeck host: the machine is in the URL (`?node=`) and picked in the header. */
+export function Desktop({ params }: { params: URLSearchParams }) {
+  const node = routeNode(params);
+  const { targets } = useFleet();
+  const target = targets.find((t) => t.id === node);
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState("");
   const [connecting, setConnecting] = useState(false);
@@ -31,7 +36,7 @@ export function Desktop() {
   const refresh = async () => {
     setError("");
     try {
-      setStatus(await api<Status>("/api/desktop/status"));
+      setStatus(await api<Status>("/api/desktop/status", { node }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -58,17 +63,10 @@ export function Desktop() {
       );
       return;
     }
-    const node = activeNode();
-    const path = node
-      ? `/api/nodes/${encodeURIComponent(node)}/desktop/stream`
-      : "/api/desktop/stream";
-    const url = new URL(path, location.href);
-    url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    url.search = new URLSearchParams({
-      token: token(),
+    const url = new URL(desktopWsUrl({
       width: String(Math.round(frame.clientWidth)),
       height: String(Math.round(frame.clientHeight)),
-    }).toString();
+    }, node));
     const up = () => {
       if (alive) {
         setConnecting(false);
@@ -188,9 +186,12 @@ export function Desktop() {
     >
       <header className="flex flex-wrap items-center gap-3 border-b border-zinc-800 px-5 py-4">
         <div className="mr-auto">
-          <h1 className="text-lg font-semibold">
+          <h1 className="flex flex-wrap items-center gap-2 text-lg font-semibold">
             Desktop{" "}
-            <span className="text-zinc-500">/ {status?.host ?? "…"}</span>
+            {targets.length > 1 || (node && !target) ? (
+              <NodePicker value={node} onChange={(n) => navigate("desktop", { node: n || undefined })} targets={targets} testId="desktop-node" title="which machine's desktop" />
+            ) : null}
+            <span className="text-zinc-500">/ {status?.host ?? (target?.name ?? "…")}</span>
           </h1>
           <p className="mt-1 text-xs text-zinc-500">
             The host’s screen, keyboard and mouse

@@ -4,7 +4,7 @@
 // you can override before sending. The strip above it lists live sessions on every
 // node, which is the way back into them.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { activeNode, api, type Route } from "../lib/api";
+import { api, routeNode, type Route } from "../lib/api";
 import { planHarness, shortCwd, type Caps, type PlanOverrides, type PlanRepo, type Runner, type Tool } from "../../src/shared/harness";
 import { apiOn } from "../lib/sessions";
 import { messageRequestId, createSession, getCaps, openSession, useLiveSessions, type LiveSession } from "../lib/sessions";
@@ -21,7 +21,7 @@ function contextFor(route: Route, sessions: LiveSession[]): { cwd?: string | nul
   if (route.view === "files" && p.get("path")) return { cwd: p.get("path") };
   if (route.view === "edit" && p.get("path")) return { cwd: p.get("path")!.replace(/\/[^/]*$/, "") || "/" };
   if (route.view === "projects" && p.get("p")) return { project: p.get("p") };
-  if (route.view === "term" && p.get("session")) { const s = sessions.find((x) => x.id === p.get("session") && x.node === activeNode()); if (s && s.tool !== "seed") return { cwd: s.cwd }; }
+  if (route.view === "term" && p.get("session")) { const s = sessions.find((x) => x.id === p.get("session") && x.node === routeNode(p)); if (s && s.tool !== "seed") return { cwd: s.cwd }; }
   return {};
 }
 
@@ -57,7 +57,8 @@ export function PromptBar({ route, nodeName }: { route: Route; nodeName: string 
 
   const planNodes = useMemo(() => [{ id: "", name: nodes?.self.name ?? nodeName, online: true, caps: caps[""] ?? null }, ...(nodes?.nodes ?? []).map((n) => ({ id: n.id, name: n.name, online: n.online, caps: caps[n.id] ?? null }))], [nodes, caps, nodeName]);
   const projects = useMemo(() => (overview?.projects ?? []).map((p) => ({ slug: p.slug, name: p.name, repos: p.repos, hosts: p.hosts })), [overview]);
-  const context = useMemo(() => ({ node: activeNode(), ...contextFor(route, sessions) }), [route, sessions]);
+  // a machine-bound view (Files, a session, the Seed view) suggests its machine; otherwise the planner decides
+  const context = useMemo(() => ({ node: routeNode(route.params), ...contextFor(route, sessions) }), [route, sessions]);
   const plan = useMemo(() => planHarness({ prompt: text, context, nodes: planNodes, projects, repos: allRepos, overrides, defaultTool: pref }), [text, context, planNodes, projects, allRepos, overrides, pref]);
   const home = overview ? overview.fleetDir.replace(/\/Code\/[^/]+$/, "") : "";
   const cwdOptions = useMemo(() => Array.from(new Set([...recentCwds(), ...(home ? [`${home}/Code`] : []), ...(repos[plan.node] ?? []).map((r) => r.path), ...projects.flatMap((p) => p.repos.filter((r) => !r.includes("*")).map((r) => `~/Code/${r.replace(/\/.*$/, "")}`))])), [projects, home, focused, repos, plan.node]);
@@ -106,7 +107,7 @@ export function PromptBar({ route, nodeName }: { route: Route; nodeName: string 
           <span className="hud-label mr-1 hidden shrink-0 sm:inline">live</span>
           {live.slice(0, 24).map((s) => (
             <button key={`${s.node}:${s.id}`} onClick={() => openSession(s)} data-testid="session-chip" title={`${s.title} · ${s.nodeName} · ${shortCwd(s.cwd)} · ${s.state}${s.bells ? ` · ${s.bells} bell` : ""}`}
-              className={`flex shrink-0 items-center gap-1.5 rounded-sm border px-2 py-0.5 text-[11px] ${currentId === s.id && s.node === activeNode() ? "border-sky-500/50 bg-sky-500/10 text-zinc-100" : "border-zinc-800 text-zinc-400 hover:border-zinc-600 hover:text-zinc-100"}`}>
+              className={`flex shrink-0 items-center gap-1.5 rounded-sm border px-2 py-0.5 text-[11px] ${currentId === s.id && s.node === routeNode(route.params) ? "border-sky-500/50 bg-sky-500/10 text-zinc-100" : "border-zinc-800 text-zinc-400 hover:border-zinc-600 hover:text-zinc-100"}`}>
               <span className={`led ${s.state !== "running" ? "led-off" : s.busy ? "led-run" : s.bells ? "led-warn" : "led-on"}`} />
               {s.tool !== "shell" && <span className={`rounded px-1 text-[9px] ${s.tool === "cc" ? "bg-orange-500/15 text-orange-300" : "bg-sky-500/15 text-sky-300"}`}>{s.tool}</span>}
               <span className="max-w-[160px] truncate font-mono">{s.title}</span>

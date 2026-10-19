@@ -12,11 +12,11 @@ export function Applications({ params, onLocked, visible = true }: { params: URL
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [pairing, setPairing] = useState<{ qr: string; link: string } | null>(null);
-  const pair = async () => { try { setPairing(await api("/api/casework/pairing?url=" + encodeURIComponent(location.origin), { local: true })); } catch (e) { setError(String(e)); } };
+  const pair = async () => { try { setPairing(await api("/api/casework/pairing?url=" + encodeURIComponent(location.origin))); } catch (e) { setError(String(e)); } };
   useEffect(() => {
     if (!visible) return;
     let alive = true;
-    api<Listing>("/api/applications", { local: true }).then(r => { if (alive) { setApps(r.applications.filter(a => /^https?:\/\//.test(a.url))); setCasework(r.casework); setLoaded(true); } }).catch(e => { if (alive) { if (e instanceof ApiError && e.status === 401) onLocked(); setError(String(e)); } });
+    api<Listing>("/api/applications").then(r => { if (alive) { setApps(r.applications.filter(a => /^https?:\/\//.test(a.url))); setCasework(r.casework); setLoaded(true); } }).catch(e => { if (alive) { if (e instanceof ApiError && e.status === 401) onLocked(); setError(String(e)); } });
     return () => { alive = false; };
   }, [visible]);
   const app = apps.find(a => a.id === params.get("app"));

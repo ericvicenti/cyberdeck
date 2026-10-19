@@ -127,7 +127,7 @@ export function useVoice({ onLocked }: { onLocked?: () => void } = {}): Voice {
   // not send call control/transcript requests to a different daemon.
   const refreshConfig = useCallback(async () => {
     try {
-      setConfig(await api<VoiceConfig>("/api/voice/config", { local: true }));
+      setConfig(await api<VoiceConfig>("/api/voice/config"));
       setConfigError(undefined);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) { onLockedRef.current?.(); return; }
@@ -222,7 +222,7 @@ export function useVoice({ onLocked }: { onLocked?: () => void } = {}): Voice {
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error(window.isSecureContext ? "Microphone access is not available in this browser" : "The microphone needs HTTPS or localhost");
       // The LiveKit SDK is large; only the first call on this page pays for it.
-      const [grant, { Room, RoomEvent, Track, createAudioAnalyser }] = await Promise.all([api<LivekitGrant>("/api/voice/livekit", { local: true, method: "POST", headers: { "content-type": "application/json" }, body: "{}" }), loadLiveKit()]);
+      const [grant, { Room, RoomEvent, Track, createAudioAnalyser }] = await Promise.all([api<LivekitGrant>("/api/voice/livekit", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }), loadLiveKit()]);
       if (superseded()) return;
       // An https page may not open a plain ws:// socket (other than to localhost), and the SDK only reports a generic failure.
       // The daemon offers a wss:// twin (secureUrl) when tailscale serve publishes the call server over TLS.

@@ -1,5 +1,6 @@
 // Embedded remote browser: renders the daemon's CDP screencast on a canvas and
-// forwards pointer, keyboard and wheel input. Node-aware through browserWsUrl.
+// forwards pointer, keyboard and wheel input. The machine whose browser this is is the
+// `node` prop ("" = the daemon serving the page), through browserWsUrl.
 import { useEffect, useRef, useState } from "react";
 import { browserWsUrl } from "../lib/api";
 
@@ -8,7 +9,7 @@ export type RemoteBrowserState = {
   title: string;
   navigation: "initial" | "restore" | "user" | "page";
 };
-type Props = { profile: string; url?: string; onState?: (s: RemoteBrowserState) => void; className?: string };
+type Props = { profile: string; node?: string; url?: string; onState?: (s: RemoteBrowserState) => void; className?: string };
 type Frame = { data: string; w: number; h: number };
 type BrowserStateMessage = { t: "state"; url: string; title: string; navigationId?: number; navigationProtocol?: number };
 type PendingNavigation = { id: number; navigation: "restore" | "user" };
@@ -17,7 +18,7 @@ const KEY_MODS = (e: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shif
 // CDP wants the Windows virtual key code for non-printable keys to be recognised by pages.
 const VK: Record<string, number> = { Backspace: 8, Tab: 9, Enter: 13, Shift: 16, Control: 17, Alt: 18, Escape: 27, " ": 32, PageUp: 33, PageDown: 34, End: 35, Home: 36, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Delete: 46, Meta: 91 };
 
-export function RemoteBrowser({ profile, url, onState, className = "" }: Props) {
+export function RemoteBrowser({ profile, node = "", url, onState, className = "" }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -66,7 +67,7 @@ export function RemoteBrowser({ profile, url, onState, className = "" }: Props) 
     acknowledgedProtocolRef.current = false;
     deliveredRef.current = false;
     stateRef.current = { url: "", title: "" };
-    const ws = new WebSocket(browserWsUrl(profile));
+    const ws = new WebSocket(browserWsUrl(profile, node));
     wsRef.current = ws;
     setStatus("connecting"); setError(null);
     ws.onopen = () => { if (alive) fit(); };
@@ -111,7 +112,7 @@ export function RemoteBrowser({ profile, url, onState, className = "" }: Props) 
     ws.onclose = () => { if (alive) setStatus((s) => (s === "error" ? s : "closed")); };
     ws.onerror = () => { if (alive) setStatus("error"); };
     return () => { alive = false; readyRef.current = false; if (pageStateTimerRef.current) clearTimeout(pageStateTimerRef.current); ws.close(); wsRef.current = null; };
-  }, [profile]);
+  }, [profile, node]);
 
   // navigate when the url prop changes after connect
   useEffect(() => {

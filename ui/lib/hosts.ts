@@ -1,45 +1,41 @@
 // Run a command in a terminal on a fleet host (a name from fleet.json), from any view.
 // Natively when the host is this node or a paired online node; otherwise over ssh
-// from here using the alias fleet.json gives it.
-import { useEffect, useState } from "react";
-import { activeNode } from "./api";
+// from here using the alias fleet.json gives it. The target is always resolved from
+// the host name on the row, never from a page-wide selection, and "here" is the machine
+// serving the page, never the machine the Deck data was read from (src/shared/fleetview.ts).
 import { openTerminal, shq } from "./terms";
-import { fetchNodes, type FleetNode } from "./sessions";
-import type { HostStatus } from "./control";
+import { useFleet, type FleetNode, type OverviewSource } from "./fleet";
+import type { HostStatus, Overview } from "./control";
+import { resolveHost, servingHost } from "../../src/shared/fleetview";
+
+export { resolveHost };
 
 export function useFleetNodes(): FleetNode[] {
-  const [nodes, setNodes] = useState<FleetNode[]>([]);
-  useEffect(() => { fetchNodes().then((f) => setNodes(f.nodes ?? [])).catch(() => {}); }, []);
-  return nodes;
+  return useFleet().fleet?.nodes ?? [];
 }
 
 export type HostTarget = {
   /** fleet.json host name */
   host: string;
-  /** the host the control data came from (`status.host`), i.e. "here" */
+  /** the fleet.json name of the machine serving this page ("here"); see `useHostTargets` */
   me: string;
   hosts: HostStatus[];
   nodes: FleetNode[];
 };
 
-/** Where a command for `host` would run. */
-export function resolveHost(t: HostTarget): { kind: "local" } | { kind: "node"; id: string; name: string } | { kind: "ssh"; alias: string } | { kind: "none"; reason: string } {
-  const h = t.host.toLowerCase();
-  if (h === t.me.toLowerCase()) return { kind: "local" };
-  const n = t.nodes.find((x) => x.name.toLowerCase() === h);
-  if (n?.online) return { kind: "node", id: n.id, name: n.name };
-  const alias = t.hosts.find((x) => x.name.toLowerCase() === h)?.ssh;
-  if (alias) return { kind: "ssh", alias };
-  return { kind: "none", reason: n ? `${t.host} is offline` : `${t.host} has no ssh alias and is not a paired node` };
+/** The pieces `openOnHost` needs, with `me` derived safely from where the overview came from. */
+export function useHostTargets(ov: Overview | null, source: OverviewSource | null): { me: string; selfName: string; hosts: HostStatus[]; nodes: FleetNode[] } {
+  const { fleet } = useFleet();
+  return { me: servingHost(ov?.status?.host, source, fleet?.self.name), selfName: fleet?.self.name ?? "", hosts: ov?.status?.hosts ?? [], nodes: fleet?.nodes ?? [] };
 }
 
 /** Open a terminal running `cmd` on the host. Returns an error message, or null when a session was started. */
 export function openOnHost(t: HostTarget & { cmd?: string; cwd?: string; title: string }): string | null {
   const r = resolveHost(t);
   if (r.kind === "none") return r.reason;
-  if (r.kind === "local") { openTerminal({ node: activeNode(), cwd: t.cwd ?? "", cmd: t.cmd, title: t.title }); return null; }
+  if (r.kind === "local") { openTerminal({ node: "", cwd: t.cwd ?? "", cmd: t.cmd, title: t.title }); return null; }
   if (r.kind === "node") { openTerminal({ node: r.id, nodeName: r.name, cwd: t.cwd ?? "", cmd: t.cmd, title: t.title }); return null; }
   const remote = t.cwd ? `cd ${shq(t.cwd)} && ${t.cmd ?? "exec $SHELL -l"}` : t.cmd;
-  openTerminal({ node: activeNode(), cwd: "", cmd: remote ? `ssh -t ${r.alias} ${shq(remote)}` : `ssh ${r.alias}`, title: t.title });
+  openTerminal({ node: "", cwd: "", cmd: remote ? `ssh -t ${r.alias} ${shq(remote)}` : `ssh ${r.alias}`, title: t.title });
   return null;
 }

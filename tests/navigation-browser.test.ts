@@ -111,20 +111,26 @@ test("primary views have titles and unknown routes render a useful error on fres
   await page.reload(); await page.getByRole("heading",{name:"Page not found",exact:true}).waitFor();
 });
 
-test("node links ignore stale storage, restore in new tabs, and traverse browser history", async () => {
+test("node links ignore stale storage, restore in new tabs, traverse browser history, and never leak into other views", async () => {
   await go("files?path=%2Fhome%2Ftest&node=peer-a"); await page.getByTestId("files-table").waitFor();
-  expect(await page.getByTestId("node-switcher").inputValue()).toBe("peer-a");
+  // the machine is named in the view, next to the path; there is no page-wide selector
+  expect(await page.getByTestId("files-node").inputValue()).toBe("peer-a");
+  expect(await page.getByTestId("node-switcher").count()).toBe(0);
   expect(requests.some(p=>p.startsWith("/api/nodes/peer-a/proxy/fs/list"))).toBe(true);
   await page.evaluate(()=>localStorage.setItem("cyberdeck-active-node","peer-b"));
   const shared=page.url(), fresh=await browser.newPage();
-  await fresh.goto(shared); await fresh.getByTestId("files-table").waitFor(); expect(await fresh.getByTestId("node-switcher").inputValue()).toBe("peer-a"); await fresh.close();
+  await fresh.goto(shared); await fresh.getByTestId("files-table").waitFor(); expect(await fresh.getByTestId("files-node").inputValue()).toBe("peer-a"); await fresh.close();
   const before=await page.evaluate(()=>history.length);
-  await page.getByTestId("node-switcher").selectOption("peer-b"); await page.getByTestId("files-table").waitFor();
+  await page.getByTestId("files-node").selectOption("peer-b"); await page.getByTestId("files-table").waitFor();
   expect(await page.evaluate(()=>history.length)).toBe(before+1);
+  await page.waitForFunction(()=>new URLSearchParams(location.hash.split("?")[1]).get("node")==="peer-b");
   await page.goBack(); await page.waitForFunction(()=>new URLSearchParams(location.hash.split("?")[1]).get("node")==="peer-a");
   await page.goForward(); await page.waitForFunction(()=>new URLSearchParams(location.hash.split("?")[1]).get("node")==="peer-b");
-  await page.getByTestId("nav-services").click(); expect(await param("node")).toBe("peer-b");
-  await go("files?path=%2Fhome%2Ftest"); await page.getByTestId("files-table").waitFor(); expect(await page.getByTestId("node-switcher").inputValue()).toBe("");
+  await title("~ · Files · Peer B · Cyberdeck");
+  // another view is the fleet's, not Peer B's: the node does not travel with the navigation
+  await page.getByTestId("nav-services").click(); await title("Services · Cyberdeck"); expect(await param("node")).toBe(null);
+  await go("files?path=%2Fhome%2Ftest"); await page.getByTestId("files-table").waitFor(); expect(await page.getByTestId("files-node").inputValue()).toBe("");
+  expect(await page.evaluate(()=>localStorage.getItem("cyberdeck-active-node"))).toBe(null);
 });
 
 test("canonical aliases and repeated navigation replace or deduplicate, not add entries", async () => {
@@ -180,19 +186,31 @@ test("late session searches cannot replace a newer search", async () => {
 
 test("Data filters and cmux surfaces restore without sending terminal input", async () => {
   await go("data?root=%2Fother&q=repo"); await page.getByTestId("data-table").getByText("cache",{exact:true}).first().waitFor();
-  expect(await page.getByPlaceholder("filter…").inputValue()).toBe("repo");
+  expect(await page.getByTestId("repo-filter").inputValue()).toBe("repo");
   expect(await page.getByTestId("data-table").getByText("media",{exact:true}).count()).toBe(0);
   await go("cmux?surface=s2&scrollback=1"); await page.getByText("screen s2 scrollback=1",{exact:true}).waitFor(); await title("Second shell · cmux · Cyberdeck");
-  await page.getByTestId("cmux-surface").filter({hasText:"First shell"}).click(); await page.getByText("screen s1 scrollback=1",{exact:true}).waitFor();
+  // every machine's cmux is in the one tree (the fixture answers the same for each); pick this machine's surface
+  await page.getByTestId("cmux-host-Test").getByTestId("cmux-surface").filter({hasText:"First shell"}).click(); await page.getByText("screen s1 scrollback=1",{exact:true}).waitFor();
+  expect(await param("node")).toBe(null);
+  await page.getByTestId("cmux-host-Peer A").getByTestId("cmux-surface").filter({hasText:"Second shell"}).click(); await title("Second shell · cmux · Peer A · Cyberdeck");
+  expect(requests.some(p => p.startsWith("/api/nodes/peer-a/proxy/cmux/screen?surface=s2"))).toBe(true);
+  await page.goBack(); await page.getByText("screen s1 scrollback=1",{exact:true}).waitFor();
   await page.goBack(); await page.getByText("screen s2 scrollback=1",{exact:true}).waitFor();
   await page.reload(); await page.getByText("screen s2 scrollback=1",{exact:true}).waitFor();
 });
 
 test("terminal cwd links are read-only; session selection uses replace for defaults and leaves processes alone", async () => {
-  await go("term?cwd=%2Fhome%2Ftest"); await page.getByTestId("term-new-form").waitFor(); await title("New session · Cyberdeck");
-  expect(await page.getByPlaceholder("working directory (default: home)").inputValue()).toBe("/home/test");
+  await go("term?cwd=%2Fhome%2Ftest"); await page.getByTestId("term-new-form").waitFor(); await title("New session on Test · Cyberdeck");
+  expect(await page.locator('[data-testid="term-new-form"] input[list="cwd-options"]').inputValue()).toBe("/home/test");
+  expect(await page.getByTestId("term-new-node").inputValue()).toBe("");
   await page.reload(); await page.getByTestId("term-new-form").waitFor();
-  await go("term?session=one"); await title("Shell one · Sessions · Cyberdeck");
+  // the same link for a peer prefills the form on that machine, and still starts nothing
+  await go("term?cwd=%2Fhome%2Ftest&node=peer-a"); await page.getByTestId("term-new-form").waitFor(); await title("New session on Peer A · Cyberdeck");
+  expect(await page.getByTestId("term-new-node").inputValue()).toBe("peer-a");
+  await go("term?session=one"); await title("Shell one · Test · Sessions · Cyberdeck");
+  // the same session id on a peer is that peer's row, tagged with its machine
+  await go("term?session=one&node=peer-a"); await title("Shell one · Peer A · Sessions · Cyberdeck");
+  expect(await page.locator('[data-testid="term-tab"][data-node="peer-a"][data-session="one"]').textContent()).toContain("Peer A");
   await go("term?session=missing"); await title("Session not found · Cyberdeck");
   await page.getByText("No session missing",{exact:false}).waitFor();
 });
@@ -394,26 +412,27 @@ test("Agents late log responses cannot overwrite a newer run", async () => {
   } finally {holdLog=false;deferred.get("log")?.();deferred.delete("log");}
 });
 
-test("Desk retains its voice owner across primary views and node selection without retitling hidden pages", async () => {
-  await go("desk?tab=services&node=peer-a");
+test("Desk retains its voice owner across primary views and machine-bound views without retitling hidden pages", async () => {
+  await go("desk?tab=services");
   await page.getByTestId("voice-transcript").waitFor();
   await page.getByTestId("voice-transcript").evaluate(node => node.setAttribute("data-session-proof", "same-call-owner"));
   const configs = requests.filter(path => path === "/api/voice/config").length;
   await page.getByTestId("nav-files").click();
   await page.getByPlaceholder("filter · Enter = deep search").waitFor();
-  await page.getByTestId("node-switcher").selectOption("peer-b");
+  await page.getByTestId("files-node").selectOption("peer-b");
+  await page.getByTestId("files-table").waitFor();
   await page.getByTestId("nav-desk").click();
   await page.getByTestId("glance-fleet").waitFor();
   expect(await page.getByTestId("voice-transcript").getAttribute("data-session-proof")).toBe("same-call-owner");
   expect(requests.filter(path => path === "/api/voice/config").length).toBeGreaterThanOrEqual(configs);
   expect(requests.filter(path => path.includes("/proxy/voice/"))).toEqual([]);
   await page.getByTestId("glance-tab-agents").click();
-  await title("Agents · Desk · peer-b · Cyberdeck");
+  await title("Agents · Desk · Cyberdeck");
   await page.getByTestId("nav-data").click();
-  await title("Data · peer-b · Cyberdeck");
+  await title("Data · Cyberdeck");
   await page.goBack();
   await page.getByTestId("glance-agents").waitFor();
-  await title("Agents · Desk · peer-b · Cyberdeck");
+  await title("Agents · Desk · Cyberdeck");
   expect(await page.getByTestId("voice-transcript").getAttribute("data-session-proof")).toBe("same-call-owner");
   expect(mutations).toEqual([]);
 });
@@ -448,13 +467,14 @@ test("active Desk calls survive navigation, release push-to-talk while hidden, a
         : path.endsWith("/transcript") ? {supported:true,messages:[]} : {configured:true,agent:{name:"Fixture agent"}};
       return route.fulfill({json:body});
     });
-    await callPage.goto(`${server.url}#/desk?node=peer-a&tab=services`);
+    await callPage.goto(`${server.url}#/desk?tab=services`);
     await callPage.getByRole("button",{name:"Start call",exact:true}).click();
     await callPage.getByRole("button",{name:"End call",exact:true}).waitFor();
     expect(voiceRequests).toContain("POST /api/voice/livekit");
     expect(voiceRequests.some(path=>path.includes("/proxy/"))).toBe(false);
     await callPage.getByTestId("nav-files").click();
-    await callPage.getByTestId("node-switcher").selectOption("peer-b");
+    await callPage.getByTestId("files-node").selectOption("peer-b");
+    await callPage.getByTestId("files-table").waitFor();
     await callPage.goBack(); await callPage.goBack();
     await callPage.getByRole("button",{name:"End call",exact:true}).waitFor();
     expect(await callPage.evaluate(()=>(window as any).callProof.connections)).toBe(1);
@@ -524,13 +544,13 @@ test("Seed unavailable titles survive route and node changes and ignore late bac
     });
     await isolated.goto(`${server.url}#/seed?node=peer-a&r=agent%2Fexample`);
     while(!release)await isolated.waitForTimeout(10);
-    await isolated.getByTestId("node-switcher").selectOption("peer-b");
+    await isolated.getByTestId("seed-node").selectOption("peer-b");
     await isolated.getByRole("alert").filter({hasText:"Peer B unavailable"}).waitFor();release();await isolated.waitForTimeout(50);
     expect(await isolated.getByRole("alert").textContent()).toContain("Peer B unavailable");
     expect(await isolated.title()).toBe("Seed agents unavailable · Cyberdeck");
     await isolated.evaluate(()=>location.hash="#/seed?node=peer-b&r=agent%2Fother");await isolated.waitForTimeout(30);
     expect(await isolated.title()).toBe("Seed agents unavailable · Cyberdeck");
-    await isolated.getByTestId("nav-data").click();await isolated.waitForFunction(()=>document.title==="Data · peer-b · Cyberdeck");
+    await isolated.getByTestId("nav-data").click();await isolated.waitForFunction(()=>document.title==="Data · Cyberdeck");
   } finally {release?.();await isolated.close();}
 });
 

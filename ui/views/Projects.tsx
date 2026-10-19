@@ -1,57 +1,52 @@
 import { updateParams, useRouteTitle } from "../lib/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { api, navigate, activeNode, activeNodeName, fmtAgo, ApiError } from "../lib/api";
-import { type Overview, type Project, type Session, type ServiceRow, pill, isoAgo, globMatches, servicesForProject, serviceLogCmd, linkCommand, fleetPath, homePath } from "../lib/control";
+import { apiOn, navigate, fmtAgo } from "../lib/api";
+import { type Project, type Session, type ServiceRow, pill, isoAgo, servicesForProject, serviceLogCmd, linkCommand, fleetPath, homePath } from "../lib/control";
 import { openTerminal, launchCmd, resumeCmd } from "../lib/terms";
-import { useFleetNodes, openOnHost } from "../lib/hosts";
+import { useHostTargets, openOnHost } from "../lib/hosts";
+import { useFleetQuery, useOverview } from "../lib/fleet";
+import { unionByNode, checkoutsFor, unclaimed, groupByNode, nodeHealth, type Tagged } from "../../src/shared/fleetview";
+import { NodeStrip, NodeTag } from "../components/NodePicker";
 import { Markdown } from "./Markdown";
 
 const UNASSIGNED = "_repos";
 
-type Repo = { id: number; path: string; name: string; head_branch: string | null; dirty_files: number; untracked_files: number; stashes: number; ahead: number; risk: string; last_commit_at: number | null };
+type RepoRow = { id: number; path: string; name: string; head_branch: string | null; dirty_files: number; untracked_files: number; stashes: number; ahead: number; risk: string; last_commit_at: number | null };
+type Repo = Tagged<RepoRow>;
 
+/** Projects are fleet-wide: ONE list from the Deck checkout (the slug is the identity), with the
+ *  checkouts of every machine merged underneath each project by `${node}:${path}`. */
 export function Projects({ params, onLocked }: { params: URLSearchParams; onLocked: () => void }) {
-  const [ov, setOv] = useState<Overview | null>(null);
-  const [repos, setRepos] = useState<Repo[]>([]);
+  const { overview: ov, source, error: err } = useOverview(onLocked);
+  const repoQuery = useFleetQuery<RepoRow[]>("/api/repos", { intervalMs: 30_000, onLocked });
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const nodes = useFleetNodes();
+  // "here" is the machine serving this page, which is not the Deck source when the overview came from a peer
+  const { me, selfName, hosts, nodes } = useHostTargets(ov, source);
   const repoQ = params.get("q") ?? "";
   const setRepoQ = (q: string) => updateParams({ q }, "edit");
   const selected = params.get("p") ?? "";
 
-  const load = async () => {
-    try {
-      const [o, r] = await Promise.all([api<Overview>("/api/control/overview"), api<Repo[]>("/api/repos")]);
-      setOv(o);
-      setRepos(r);
-      setErr(null);
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 401) onLocked();
-      else setErr(e instanceof ApiError && e.status === 404 ? "No fleet dir configured on this node (set fleetDir in ~/.cyberdeck/config.json)." : String(e instanceof Error ? e.message : e));
-    }
-  };
+  // The cross-host session index is Deck's too: read it from the node that gave us the overview.
   useEffect(() => {
-    load();
-    const iv = setInterval(load, 30_000);
-    return () => clearInterval(iv);
-  }, []);
-  useEffect(() => {
-    api<Session[]>("/api/control/sessions").then(setSessions).catch(() => {});
-  }, [ov?.fleetDir]);
+    if (!source) return;
+    apiOn<Session[]>(source.node, "/api/control/sessions").then(setSessions).catch(() => {});
+  }, [ov?.fleetDir, source?.node]);
 
+  const repos: Repo[] = useMemo(() => unionByNode(repoQuery.results, (r) => r.path), [repoQuery.results]);
+  const health = useMemo(() => nodeHealth(repoQuery.results), [repoQuery.results]);
   const projects = ov?.projects ?? [];
   const showUnassigned = selected === UNASSIGNED;
   const current: Project | undefined = showUnassigned ? undefined : (selected ? projects.find((p) => p.slug === selected) : projects[0]);
   useEffect(() => { if (!selected && current) updateParams({ p: current.slug }, "replace"); }, [selected, current?.slug]);
   useRouteTitle(ov && selected && !showUnassigned && !current ? "Project not found" : current ? `${current.name} · Projects` : undefined);
   const parent = useMemo(() => (current?.parent ? projects.find((p) => p.slug === current.parent) : undefined), [projects, current]);
-  // Every indexed checkout that no project claims: the long tail Eric still thinks of as projects.
-  const unassigned = useMemo(() => repos.filter((r) => !projects.some((p) => p.repos.some((g) => globMatches(g, r.path)))).sort((a, b) => (b.last_commit_at ?? 0) - (a.last_commit_at ?? 0)), [repos, projects]);
-  const unassignedShown = useMemo(() => { const q = repoQ.trim().toLowerCase(); return q ? unassigned.filter((r) => r.path.toLowerCase().includes(q)) : unassigned; }, [unassigned, repoQ]);
+  // Every indexed checkout on any machine that no project claims: the long tail Eric still thinks of as projects.
+  const unassigned = useMemo(() => unclaimed(projects, repos), [repos, projects]);
+  const unassignedShown = useMemo(() => { const q = repoQ.trim().toLowerCase(); return q ? unassigned.filter((r) => r.path.toLowerCase().includes(q) || r.nodeName.toLowerCase().includes(q)) : unassigned; }, [unassigned, repoQ]);
   const children = useMemo(() => (current ? projects.filter((p) => p.parent === current.slug) : []), [projects, current]);
-  const projRepos = useMemo(() => (current ? repos.filter((r) => current.repos.some((g) => globMatches(g, r.path))) : []), [repos, current]);
+  const projRepos = useMemo(() => (current ? groupByNode(checkoutsFor(current, repos)) : []), [repos, current]);
+  const projRepoCount = projRepos.reduce((n, g) => n + g.rows.length, 0);
   const needles = useMemo(() => (current ? [current.name, ...current.repos.map((r) => r.replace(/[/*].*$/, ""))].filter((n) => n.length > 2).map((n) => n.toLowerCase()) : []), [current]);
   const handoffHits = useMemo(() => (ov?.todo.sections ?? []).flatMap((s) => s.entries).filter((e) => needles.some((n) => e.text.toLowerCase().includes(n))), [ov, needles]);
   const projSessions = useMemo(() => (current ? sessions.filter((s) => s.project === current.slug || (current.slug && s.project?.startsWith(current.slug + "/"))) : []), [sessions, current]);
@@ -60,30 +55,32 @@ export function Projects({ params, onLocked }: { params: URLSearchParams; onLock
   const declaredServices = useMemo(() => (current ? projects.filter((x) => x.slug === current.slug || x.slug.startsWith(current.slug + "/")).flatMap((x) => x.services ?? []) : []), [projects, current]);
   const projRuns = useMemo(() => (ov?.collab.runs ?? []).filter((r) => projTasks.some((t) => t.id === r.task)), [ov, projTasks]);
 
-  const me = ov?.status?.host ?? "";
-  const hosts = ov?.status?.hosts ?? [];
   const hostStatus = (name: string) => hosts.find((h) => h.name.toLowerCase() === name.toLowerCase());
   const onHost = (host: string, cmd: string | undefined, title: string, cwd?: string) => {
     const e = openOnHost({ host, me, hosts, nodes, cmd, cwd, title });
     if (e) setMsg(e);
   };
-  const edit = (path: string) => navigate("edit", { path });
+  // Deck files are edited where the Deck checkout is (the node the overview came from).
+  const edit = (path: string) => navigate("edit", { path, node: source?.node });
 
   return (
     <div className="h-full overflow-auto">
       <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
         <header className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h1 className="neon text-lg font-semibold uppercase tracking-[0.15em]">Projects{activeNode() ? ` on ${activeNodeName()}` : ""}</h1>
+            <h1 className="neon text-lg font-semibold uppercase tracking-[0.15em]">Projects</h1>
             <p className="text-xs text-zinc-500">
               {ov ? (
                 <>
-                  {projects.length} projects · <button className="hover:text-zinc-300 hover:underline" onClick={() => ov.fleetDir && edit(`${ov.fleetDir}/handoff/TODO.md`)}>{ov.status?.handoffOpen ?? "?"} open handoff entries</button> · fleet repo {ov.status?.repo.branch ?? ""}{ov.status?.repo.dirty ? ` (${ov.status.repo.dirty} dirty)` : ""}
+                  {projects.length} projects · <button className="hover:text-zinc-300 hover:underline" onClick={() => ov.fleetDir && edit(`${ov.fleetDir}/handoff/TODO.md`)}>{ov.status?.handoffOpen ?? "?"} open handoff entries</button> · fleet repo {ov.status?.repo.branch ?? ""}{ov.status?.repo.dirty ? ` (${ov.status.repo.dirty} dirty)` : ""}{source?.node ? <span data-testid="overview-source"> · Deck read from {source.nodeName}</span> : null}
                 </>
               ) : err ?? "loading…"}
             </p>
           </div>
-          {msg && <span className="text-[11px] text-amber-400/90" data-testid="projects-msg">{msg}</span>}
+          <div className="flex flex-wrap items-center gap-2">
+            {msg && <span className="text-[11px] text-amber-400/90" data-testid="projects-msg">{msg}</span>}
+            <NodeStrip health={health} testId="projects-nodes" />
+          </div>
         </header>
         {ov && selected && !showUnassigned && !current && <p role="alert" className="p-4">Project not found: {selected}</p>}
         {err && !ov && <div className="mt-6 hud-card p-6 text-sm text-zinc-400">{err}</div>}
@@ -96,18 +93,19 @@ export function Projects({ params, onLocked }: { params: URLSearchParams; onLock
                   onClick={() => navigate("projects", { p: p.slug })}
                   className={`hud-row flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[12px] ${current?.slug === p.slug ? "bg-sky-500/10 text-zinc-100 shadow-[inset_2px_0_0_#22d3ee]" : "text-zinc-300"}`}
                   style={{ paddingLeft: 8 + p.depth * 14 }}
+                  data-testid={`project-${p.slug}`}
                 >
                   <span className="truncate">{p.name}</span>
                   <span className={`ml-auto shrink-0 rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wider ${pill(p.status)}`}>{p.status}</span>
                 </button>
               ))}
               {projects.length === 0 && <div className="p-3 text-[12px] text-zinc-500">No projects yet. Add folders under projects/ in the fleet repo.</div>}
-              {ov.fleetDir && <button onClick={() => navigate("files", { path: `${ov.fleetDir}/projects` })} className="mt-1 w-full px-2 py-1 text-left text-[10px] text-zinc-600 hover:text-sky-400">browse projects/ →</button>}
+              {ov.fleetDir && <button onClick={() => navigate("files", { path: `${ov.fleetDir}/projects`, node: source?.node })} className="mt-1 w-full px-2 py-1 text-left text-[10px] text-zinc-600 hover:text-sky-400">browse projects/ →</button>}
               <button
                 onClick={() => navigate("projects", { p: UNASSIGNED })}
                 data-testid="project-unassigned"
                 className={`hud-row mt-1 flex w-full items-center gap-2 rounded-sm border-t border-zinc-800/60 px-2 py-1.5 text-left text-[12px] ${showUnassigned ? "bg-sky-500/10 text-zinc-100 shadow-[inset_2px_0_0_#22d3ee]" : "text-zinc-400"}`}
-                title="checkouts on this machine that no project claims"
+                title="checkouts on any machine that no project claims"
               >
                 <span className="truncate">Unassigned repos</span>
                 <span className="ml-auto shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-zinc-400">{unassigned.length}</span>
@@ -117,18 +115,19 @@ export function Projects({ params, onLocked }: { params: URLSearchParams; onLock
             {showUnassigned && (
               <section className="min-w-0 space-y-4">
                 <Panel
-                  title={`Unassigned repos on ${activeNode() ? activeNodeName() : ov.status?.host ?? "this machine"} (${unassignedShown.length}${repoQ ? ` of ${unassigned.length}` : ""})`}
-                  right={<input value={repoQ} onChange={(e) => setRepoQ(e.target.value)} placeholder="filter" data-testid="unassigned-filter" className="w-40 rounded-sm border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-100 outline-none focus:border-sky-500/60" />}
+                  title={`Unassigned repos across ${health.length} machine${health.length === 1 ? "" : "s"} (${unassignedShown.length}${repoQ ? ` of ${unassigned.length}` : ""})`}
+                  right={<input value={repoQ} onChange={(e) => setRepoQ(e.target.value)} placeholder="filter (path or machine)" data-testid="unassigned-filter" className="w-44 rounded-sm border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-100 outline-none focus:border-sky-500/60" />}
                 >
-                  <p className="pb-2 text-[11px] text-zinc-500">Every git checkout the daemon indexed here that no Deck project lists in its <span className="font-mono">repos</span>. Add a project file under <span className="font-mono">Deck/projects/</span> to claim one; or just start a session in it.</p>
-                  {unassignedShown.length === 0 && <Empty>{repos.length ? "Everything here belongs to a project." : "No repos indexed yet."}</Empty>}
+                  <p className="pb-2 text-[11px] text-zinc-500">Every git checkout a daemon indexed that no Deck project lists in its <span className="font-mono">repos</span>. Add a project file under <span className="font-mono">Deck/projects/</span> to claim one; or just start a session in it.</p>
+                  {unassignedShown.length === 0 && <Empty>{repos.length ? "Everything belongs to a project." : repoQuery.loading ? "Asking every machine…" : "No repos indexed yet."}</Empty>}
                   {unassignedShown.slice(0, 300).map((r) => (
-                    <Row key={r.id}>
+                    <Row key={`${r.node}:${r.path}`} data-testid="unassigned-row">
+                      <NodeTag name={r.nodeName} self={r.node === ""} />
                       <span className="w-56 truncate font-mono text-[11px] text-zinc-200" title={r.path}>{r.path.replace(/^.*\/Code\//, "")}</span>
                       <span className="hidden w-32 truncate text-[11px] text-zinc-400 sm:inline">{r.head_branch ?? "detached"}</span>
                       <span className="hidden min-w-0 flex-1 truncate text-[11px] text-zinc-500 md:inline">{r.dirty_files ? `${r.dirty_files} modified · ` : ""}{r.untracked_files ? `${r.untracked_files} untracked · ` : ""}{r.ahead ? `${r.ahead} local-only · ` : ""}{fmtAgo(r.last_commit_at)}</span>
                       <span className={`ml-auto rounded px-1.5 py-0.5 text-[9px] uppercase ${r.risk === "safe" ? "bg-emerald-500/15 text-emerald-400" : r.risk === "attention" ? "bg-amber-500/15 text-amber-400" : "bg-red-500/15 text-red-400"}`}>{r.risk}</span>
-                      <button onClick={() => openTerminal({ cwd: r.path, title: `sh ${r.path.split("/").pop()}` })} className="shrink-0 rounded border border-sky-500/30 px-2 py-0.5 text-[10px] text-sky-300 hover:bg-sky-500/10" title="open a shell session here">Session</button>
+                      <button onClick={() => openTerminal({ node: r.node, nodeName: r.nodeName, cwd: r.path, title: `sh ${r.path.split("/").pop()}` })} className="shrink-0 rounded border border-sky-500/30 px-2 py-0.5 text-[10px] text-sky-300 hover:bg-sky-500/10" title={`open a shell session here on ${r.nodeName}`}>Session</button>
                     </Row>
                   ))}
                   {unassignedShown.length > 300 && <div className="pt-2 text-[10px] text-zinc-600">showing 300; narrow the filter</div>}
@@ -166,7 +165,7 @@ export function Projects({ params, onLocked }: { params: URLSearchParams; onLock
                             {/^https?:\/\//.test(l) ? (
                               <a href={l} target="_blank" rel="noreferrer" className="text-sky-400 hover:underline">{l}</a>
                             ) : cmd ? (
-                              <button onClick={() => openTerminal({ node: activeNode(), cwd: "", cmd, title: cmd.replace(/^\S+\s+/, "") })} className="text-sky-400 hover:underline" title="open in a terminal">
+                              <button onClick={() => openTerminal({ node: "", cwd: "", cmd, title: cmd.replace(/^\S+\s+/, "") })} className="text-sky-400 hover:underline" title={`open in a terminal on ${selfName || "this machine"}`}>
                                 <span className="font-mono">{cmd}</span>{l.slice(cmd.length)}
                               </button>
                             ) : l}
@@ -186,20 +185,25 @@ export function Projects({ params, onLocked }: { params: URLSearchParams; onLock
                   )}
                 </div>
 
-                <Panel title={`Repos on this machine (${projRepos.length})`} right={<button onClick={() => navigate("data")} className="text-[10px] text-zinc-500 hover:text-sky-400">all repos →</button>}>
-                  {projRepos.length === 0 && <Empty>No checkouts matching {current.repos.join(", ") || "(no repos listed)"} here.</Empty>}
-                  {projRepos.map((r) => (
-                    <Row key={r.id} onClick={() => navigate("files", { path: r.path })}>
-                      <span className="w-52 truncate font-mono text-[11px] text-zinc-200">{r.path.replace(/^.*\/Code\//, "")}</span>
-                      <span className="w-40 truncate text-[11px] text-zinc-400">{r.head_branch ?? "detached"}</span>
-                      <span className="hidden text-[11px] text-zinc-500 sm:inline">{r.dirty_files ? `${r.dirty_files} modified · ` : ""}{r.untracked_files ? `${r.untracked_files} untracked · ` : ""}{r.ahead ? `${r.ahead} local-only · ` : ""}{r.stashes ? `${r.stashes} stashes · ` : ""}{fmtAgo(r.last_commit_at)}</span>
-                      <span className="ml-auto flex shrink-0 items-center gap-1">
-                        <Action onClick={() => openTerminal({ node: activeNode(), cwd: r.path, title: r.name })} title="shell here">$</Action>
-                        <Action onClick={() => openTerminal({ node: activeNode(), cwd: r.path, cmd: launchCmd("cc"), title: `cc ${r.name}` })} title="start Claude Code here" tone="orange">cc</Action>
-                        <Action onClick={() => openTerminal({ node: activeNode(), cwd: r.path, cmd: launchCmd("cx"), title: `cx ${r.name}` })} title="start Codex here" tone="sky">cx</Action>
-                        <span className={`rounded px-1.5 py-0.5 text-[9px] uppercase ${r.risk === "safe" ? "bg-emerald-500/15 text-emerald-400" : r.risk === "attention" ? "bg-amber-500/15 text-amber-400" : "bg-red-500/15 text-red-400"}`}>{r.risk}</span>
-                      </span>
-                    </Row>
+                <Panel title={`Checkouts (${projRepoCount})`} right={<button onClick={() => navigate("data")} className="text-[10px] text-zinc-500 hover:text-sky-400">all repos →</button>}>
+                  {projRepoCount === 0 && <Empty>No checkouts matching {current.repos.join(", ") || "(no repos listed)"} on any reachable machine{health.some((h) => h.state === "error" || h.state === "offline") ? " (some machines did not answer)" : repoQuery.loading ? " yet (asking every machine…)" : ""}.</Empty>}
+                  {projRepos.map((g) => (
+                    <div key={g.node} data-testid={`checkouts-${g.nodeName}`}>
+                      <div className="flex items-center gap-2 pt-2 text-[10px] uppercase tracking-wider text-zinc-500"><NodeTag name={g.nodeName} self={g.node === ""} />{g.rows.length} checkout{g.rows.length === 1 ? "" : "s"}</div>
+                      {g.rows.map((r) => (
+                        <Row key={`${r.node}:${r.path}`} onClick={() => navigate("files", { path: r.path, node: r.node })}>
+                          <span className="w-52 truncate font-mono text-[11px] text-zinc-200">{r.path.replace(/^.*\/Code\//, "")}</span>
+                          <span className="w-40 truncate text-[11px] text-zinc-400">{r.head_branch ?? "detached"}</span>
+                          <span className="hidden text-[11px] text-zinc-500 sm:inline">{r.dirty_files ? `${r.dirty_files} modified · ` : ""}{r.untracked_files ? `${r.untracked_files} untracked · ` : ""}{r.ahead ? `${r.ahead} local-only · ` : ""}{r.stashes ? `${r.stashes} stashes · ` : ""}{fmtAgo(r.last_commit_at)}</span>
+                          <span className="ml-auto flex shrink-0 items-center gap-1">
+                            <Action onClick={() => openTerminal({ node: r.node, nodeName: r.nodeName, cwd: r.path, title: r.name })} title={`shell here on ${r.nodeName}`}>$</Action>
+                            <Action onClick={() => openTerminal({ node: r.node, nodeName: r.nodeName, cwd: r.path, cmd: launchCmd("cc"), title: `cc ${r.name}` })} title={`start Claude Code here on ${r.nodeName}`} tone="orange">cc</Action>
+                            <Action onClick={() => openTerminal({ node: r.node, nodeName: r.nodeName, cwd: r.path, cmd: launchCmd("cx"), title: `cx ${r.name}` })} title={`start Codex here on ${r.nodeName}`} tone="sky">cx</Action>
+                            <span className={`rounded px-1.5 py-0.5 text-[9px] uppercase ${r.risk === "safe" ? "bg-emerald-500/15 text-emerald-400" : r.risk === "attention" ? "bg-amber-500/15 text-amber-400" : "bg-red-500/15 text-red-400"}`}>{r.risk}</span>
+                          </span>
+                        </Row>
+                      ))}
+                    </div>
                   ))}
                 </Panel>
 
@@ -240,20 +244,24 @@ export function Projects({ params, onLocked }: { params: URLSearchParams; onLock
 
                 <Panel title={`Sessions (${projSessions.length})`} right={<button onClick={() => navigate("agents", { q: current.slug })} className="text-[10px] text-zinc-500 hover:text-sky-400">search sessions →</button>}>
                   {projSessions.length === 0 && <Empty>No indexed sessions for this project.</Empty>}
-                  {projSessions.slice(0, 15).map((s) => (
-                    <Row key={`${s.host}-${s.id}`} onClick={() => onHost(s.host, resumeCmd(s.tool, s.id), `${s.tool} ${s.title.slice(0, 18)}`, s.cwd)}>
-                      <span className="w-16 text-[11px] text-zinc-400"><HostLink host={s.host} /></span>
-                      <span className={`rounded px-1 text-[10px] ${s.tool === "cc" ? "bg-orange-500/15 text-orange-300" : "bg-sky-500/15 text-sky-300"}`}>{s.tool}</span>
-                      <span className="w-14 text-[10px] text-zinc-500">{isoAgo(s.updated)}</span>
-                      <span className="truncate text-[12px] text-zinc-200" title={s.title}>{s.title}</span>
-                      <span className="ml-auto flex shrink-0 items-center gap-2">
-                        {s.host.toLowerCase() === me.toLowerCase() ? (
-                          <button onClick={(e) => { e.stopPropagation(); navigate("files", { path: s.cwd }); }} className="hidden truncate font-mono text-[10px] text-zinc-600 hover:text-sky-400 sm:inline" title="browse this directory">{homePath(s.cwd)}</button>
-                        ) : <span className="hidden truncate font-mono text-[10px] text-zinc-600 sm:inline">{homePath(s.cwd)}</span>}
-                        <Action title={`resume in a terminal on ${s.host}`} tone="sky">resume</Action>
-                      </span>
-                    </Row>
-                  ))}
+                  {projSessions.slice(0, 15).map((s) => {
+                    const n = nodes.find((x) => x.name.toLowerCase() === s.host.toLowerCase());
+                    const browsable = s.host.toLowerCase() === me.toLowerCase() ? "" : n?.online ? n.id : null;
+                    return (
+                      <Row key={`${s.host}-${s.id}`} onClick={() => onHost(s.host, resumeCmd(s.tool, s.id), `${s.tool} ${s.title.slice(0, 18)}`, s.cwd)}>
+                        <span className="w-16 text-[11px] text-zinc-400"><HostLink host={s.host} /></span>
+                        <span className={`rounded px-1 text-[10px] ${s.tool === "cc" ? "bg-orange-500/15 text-orange-300" : "bg-sky-500/15 text-sky-300"}`}>{s.tool}</span>
+                        <span className="w-14 text-[10px] text-zinc-500">{isoAgo(s.updated)}</span>
+                        <span className="truncate text-[12px] text-zinc-200" title={s.title}>{s.title}</span>
+                        <span className="ml-auto flex shrink-0 items-center gap-2">
+                          {browsable != null ? (
+                            <button onClick={(e) => { e.stopPropagation(); navigate("files", { path: s.cwd, node: browsable }); }} className="hidden truncate font-mono text-[10px] text-zinc-600 hover:text-sky-400 sm:inline" title={`browse this directory on ${s.host}`}>{homePath(s.cwd)}</button>
+                          ) : <span className="hidden truncate font-mono text-[10px] text-zinc-600 sm:inline">{homePath(s.cwd)}</span>}
+                          <Action title={`resume in a terminal on ${s.host}`} tone="sky">resume</Action>
+                        </span>
+                      </Row>
+                    );
+                  })}
                 </Panel>
               </section>
             )}
@@ -293,8 +301,8 @@ export const HostLink = ({ host }: { host: string }) => (
 
 const TONES = { zinc: "border-zinc-700 text-zinc-300 hover:bg-zinc-800", sky: "border-sky-500/30 text-sky-300 hover:bg-sky-500/10", orange: "border-orange-500/30 text-orange-300 hover:bg-orange-500/10", amber: "border-amber-500/30 text-amber-300 hover:bg-amber-500/10" };
 /** Small inline action button; stops the row click. */
-export const Action = ({ children, onClick, title, tone = "zinc", disabled }: { children: React.ReactNode; onClick?: () => void; title?: string; tone?: keyof typeof TONES; disabled?: boolean }) => (
-  <button onClick={onClick ? (e) => { e.stopPropagation(); onClick(); } : undefined} title={title} disabled={disabled} className={`shrink-0 rounded border px-2 py-0.5 text-[10px] disabled:opacity-40 ${TONES[tone]}`}>{children}</button>
+export const Action = ({ children, onClick, title, tone = "zinc", disabled, ...data }: { children: React.ReactNode; onClick?: () => void; title?: string; tone?: keyof typeof TONES; disabled?: boolean; "data-testid"?: string; "data-route"?: string }) => (
+  <button onClick={onClick ? (e) => { e.stopPropagation(); onClick(); } : undefined} title={title} disabled={disabled} {...data} className={`shrink-0 rounded border px-2 py-0.5 text-[10px] disabled:opacity-40 ${TONES[tone]}`}>{children}</button>
 );
 
 export function Panel({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
@@ -305,7 +313,7 @@ export function Panel({ title, children, right }: { title: string; children: Rea
     </div>
   );
 }
-export const Row = ({ children, onClick, active, id }: { children: React.ReactNode; onClick?: () => void; active?: boolean; id?: string }) => (
-  <div id={id} onClick={onClick} className={`hud-row flex items-center gap-2 border-b border-zinc-800/60 px-1 py-1.5 last:border-0 ${onClick ? "cursor-pointer" : ""} ${active ? "bg-sky-500/10 shadow-[inset_2px_0_0_#22d3ee]" : ""}`}>{children}</div>
+export const Row = ({ children, onClick, active, id, "data-testid": testId }: { children: React.ReactNode; onClick?: () => void; active?: boolean; id?: string; "data-testid"?: string }) => (
+  <div id={id} data-testid={testId} onClick={onClick} className={`hud-row flex items-center gap-2 border-b border-zinc-800/60 px-1 py-1.5 last:border-0 ${onClick ? "cursor-pointer" : ""} ${active ? "bg-sky-500/10 shadow-[inset_2px_0_0_#22d3ee]" : ""}`}>{children}</div>
 );
 export const Empty = ({ children }: { children: React.ReactNode }) => <div className="py-2 text-[11px] text-zinc-500">{children}</div>;

@@ -32,12 +32,24 @@ use `bun` for everything.
   Codex falls back to the newest transcript's `rate_limits`), disks, system, prompts-per-day, repo redundancy
   and the backup placeholder (`config.backup`, ROADMAP M2). 60 s usage cache; `CYBERDECK_USAGE_NET=0` keeps
   tests off the keychain and the network. UI: `ui/views/Home.tsx` + `ui/components/Widgets.tsx`.
-  Home is fleet-wide: it reads this node with `api(path, { local: true })` (never rerouted by the node switcher)
-  and every paired node through `/api/nodes/:id/proxy/dashboard`, then lists each machine by name (Storage,
-  Systems, Repo safety; Activity and safety totals are sums; Deck hosts without a node appear in Systems).
+  Home is fleet-wide: it reads this node's own numbers and every paired node's through
+  `/api/nodes/:id/proxy/dashboard`, then lists each machine by name (Storage, Systems, Repo safety; Activity and
+  safety totals are sums; Deck hosts without a node appear in Systems).
   Limit resets: Codex credits are listed/spent through the official `codex app-server` (`src/daemon/codexrpc.ts`,
   routes `/api/usage/codex/resets|reset`, stub `tests/fixtures/codex/app-server.ts` via `CYBERDECK_CODEX_APP_SERVER`);
   Claude's is only granted to Claude Code, so the button opens a `claude '/limit-reset'` session.
+- **Fleet-first views, no page-wide machine selection** (`docs/FLEET.md` §7). `ui/lib/api.ts` addresses a node
+  explicitly on every call (`api(path, { node })`, `apiOn`, `post(path, body, node)`, `rawUrl(path, params, node)`;
+  `""` = the daemon serving the page, else `/api/nodes/:id/proxy/…`); `routeNode(params)` reads a view's own
+  `?node=` and `navigate()` never carries `node` from one view to the next. `ui/lib/fleet.ts` has the shared node list
+  (`useFleet`, `refreshNodes` after pairing), `useFleetQuery` (ask every online node, keep each node's last good answer
+  and its own error) and `useOverview` (the Deck from this node, else the first peer with the checkout; `source` says
+  which). `src/shared/fleetview.ts` holds the pure merge rules: host-bound rows are `${node}:${key}`, projects are never
+  unioned, `servingHost`/`resolveHost` separate "the machine serving the page" from "the machine the Deck was read from".
+  Fleet-wide views: Projects (one list, every machine's checkouts grouped under each project), Sessions, cmux, Data
+  (`?node=` filter: absent = every machine, `self` = this one), Agents, Services, Home. Machine-bound views carry the
+  node in their URL and pick it in place with `ui/components/NodePicker.tsx`: Files, Editor, Cloud, Desktop, Seed.
+  Tests: `tests/fleetview.test.ts`, e2e "fleet: …", `tests/navigation-browser.test.ts`.
 - `docs/` — the knowledgebase. `docs/BRIEF.md` is the authoritative vision;
   `docs/ARCHITECTURE.md` is canonical for schema/API; `docs/ROADMAP.md` tracks milestones.
   Keep docs in sync when changing schema or routes.

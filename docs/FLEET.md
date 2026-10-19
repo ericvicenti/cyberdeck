@@ -353,9 +353,14 @@ say "offline since Tuesday".
 This is the whole feature: because local UI and remote peers speak the same RPC and every
 handler is caller-agnostic, remote management costs one `dst` field and a router branch.
 
-The UI's node switcher (top-left, per `docs/UX.md`) just sets the default `dst` for the
-current view; fleet-wide screens (redundancy dashboard) fan out the same request to all
-nodes with `Promise.allSettled` semantics and render per-node staleness.
+There is no page-wide node selection in the UI (it used to be a dropdown in the title bar,
+removed 2026-10-19): fleet-wide screens (Projects, Sessions, cmux, Data, Home) fan out the
+same request to every online node (`ui/lib/fleet.ts` `useFleetQuery`) and render per-node
+staleness, and a screen bound to one machine (Files, Editor, Cloud, Desktop, Seed) names its
+`dst` in its own URL (`?node=<id>`) and picks it in place. Every link states its machine; a
+link without one means the serving machine. Actions on a Deck row (a task, a service, an
+indexed session) resolve their host to a node (`src/shared/fleetview.ts` `resolveHost`), never
+to a selection.
 
 ### 6.2 HTTP proxying (escape hatch)
 

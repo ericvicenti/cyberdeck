@@ -12,7 +12,7 @@ export function useAudio(pollMs = 5000) {
   const busy = useRef(false);
   const load = async () => {
     if (busy.current) return;
-    try { setState(await api<AudioState>("/api/audio", { local: true })); setError(""); }
+    try { setState(await api<AudioState>("/api/audio")); setError(""); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
   useEffect(() => { void load(); const t = setInterval(() => void load(), pollMs); return () => clearInterval(t); }, [pollMs]);
@@ -21,7 +21,7 @@ export function useAudio(pollMs = 5000) {
     try {
       // Show the intent at once; the daemon's answer replaces it.
       if (patch.volume !== undefined) setState((s) => (s ? { ...s, volume: patch.volume! } : s));
-      setState(await api<AudioState>("/api/audio", { local: true, method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) }));
+      setState(await api<AudioState>("/api/audio", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) }));
       setError("");
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { busy.current = false; }

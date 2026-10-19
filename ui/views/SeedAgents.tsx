@@ -7,12 +7,18 @@ import { updateParams, useRouteTitle } from "../lib/navigation";
 import { SeedAgentsProvider, SeedAgentsView, seedAgentsRouteFromPath, seedAgentsRouteToPath, type SeedAgentsRoute } from "@seed-hypermedia/agents-ui";
 import "@seed-hypermedia/agents-ui/styles.css";
 import "./seed-agents.css";
-import { activeNode, navigate } from "../lib/api";
+import { navigate, routeNode } from "../lib/api";
+import { useFleet } from "../lib/fleet";
+import { NodePicker } from "../components/NodePicker";
 import { seedHash, useSeedAgentsHost } from "../lib/seed-agents";
 
-/** The whole agents UI at the route in the hash (`#/seed?r=…`). */
+/** The whole agents UI at the route in the hash (`#/seed?r=…[&node=<id>]`): the Seed identity and agents
+ *  server of one machine, named in the URL and picked in the bar above the view. */
 export default function SeedAgents({ params }: { params: URLSearchParams }) {
   const path = params.get("r") ?? "";
+  const node = routeNode(params);
+  const { targets } = useFleet();
+  const target = targets.find((t) => t.id === node);
   const parsed = useMemo(() => {
     try {
       const route = seedAgentsRouteFromPath(path);
@@ -25,16 +31,26 @@ export default function SeedAgents({ params }: { params: URLSearchParams }) {
     if (parsed && path !== parsed.canonical) updateParams({ r: parsed.canonical || null }, "replace");
   }, [path, parsed]);
   useRouteTitle(parsed ? undefined : "Page not found · Seed");
-  if (!parsed) return <section className="p-6"><h1>Page not found</h1><p>This Seed link is not recognised.</p><button onClick={() => navigate("seed")}>Open Seed agents</button></section>;
+  if (!parsed) return <section className="p-6"><h1>Page not found</h1><p>This Seed link is not recognised.</p><button onClick={() => navigate("seed", { node: node || undefined })}>Open Seed agents</button></section>;
   const route = parsed.route;
   return (
-    <SeedAgentsEmbed
-      route={route}
-      title={seedRouteTitle(route)}
-      onRouteChange={(_next, mode, r) => {
-        navigate("seed", r ? { r } : {}, mode);
-      }}
-    />
+    <div className="flex h-full min-h-0 flex-col">
+      {(targets.length > 1 || (node && !target)) && (
+        <div className="hud-chrome flex items-center gap-2 border-b px-3 py-1 text-[11px] text-zinc-500" data-testid="seed-node-bar">
+          <span className="hud-label">Seed agents on</span>
+          <NodePicker value={node} onChange={(n) => navigate("seed", { node: n || undefined })} targets={targets} testId="seed-node" title="whose Seed identity and agents server" />
+          {node && !target && <span className="text-amber-300" data-testid="seed-node-unknown">unknown machine {node}</span>}
+        </div>
+      )}
+      <SeedAgentsEmbed
+        node={node}
+        route={route}
+        title={seedRouteTitle(route)}
+        onRouteChange={(_next, mode, r) => {
+          navigate("seed", { ...(r ? { r } : {}), node: node || undefined }, mode);
+        }}
+      />
+    </div>
   );
 }
 
@@ -51,7 +67,7 @@ function seedRouteTitle(route: SeedAgentsRoute): string {
 type RouteChange = (route: SeedAgentsRoute, mode: "push" | "replace", path: string) => void;
 
 /** The agents UI at one route, for other views to embed (Sessions shows Seed sessions with it). */
-export function SeedAgentsEmbed({ route, onRouteChange, node = activeNode(), title }: { route: SeedAgentsRoute; onRouteChange?: RouteChange; node?: string; title?: string }) {
+export function SeedAgentsEmbed({ route, onRouteChange, node = "", title }: { route: SeedAgentsRoute; onRouteChange?: RouteChange; node?: string; title?: string }) {
   const { host, session, error, retry } = useSeedAgentsHost(node);
   useRouteTitle(title ? error ? "Seed agents unavailable"
     : host && session && !session.available ? "Seed identity unavailable"

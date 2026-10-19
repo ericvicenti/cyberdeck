@@ -1,28 +1,23 @@
-import { readRoute, updateParams } from "./navigation";
 export { parseHash, navigate, updateParams, routeHash, type Route } from "./navigation";
 export const token = () => localStorage.getItem("cyberdeck-token") ?? "";
 
-// ---- active node: "" = local, otherwise a paired node id. All API helpers
-// route through the local daemon's proxy when a remote node is active. ----
-export const activeNode = (): string => readRoute().params.get("node") ?? "";
-const nodeNames = new Map<string, string>();
-export const activeNodeName = (): string => nodeNames.get(activeNode()) ?? activeNode();
-export function rememberNodeNames(nodes: { id: string; name: string }[]) {
-  for (const node of nodes) nodeNames.set(node.id, node.name);
-}
+// ---- node addressing ----
+// Every request names the machine it is for. "" is the daemon serving this page; any
+// other value is a paired node id, reached through that daemon's authenticated proxy
+// (/api/nodes/:id/proxy/...). There is no page-wide "active node": a view that is bound
+// to one machine carries it in its own URL (`?node=<id>`) or picks it in place, and a
+// view that spans the fleet asks every machine (ui/lib/fleet.ts).
+export type NodeId = string;
 
-export function setActiveNode(id: string, name: string): void {
-  nodeNames.set(id, name);
-  updateParams({ node: id });
-}
-
-/** Map "/api/<rest>" onto the active node (via proxy) or leave local. */
-export function scoped(path: string): string {
-  const node = activeNode();
+/** Map "/api/<rest>" onto a node ("" = local). Fleet management routes are always local. */
+export function nodePath(node: NodeId, path: string): string {
   if (!node || !path.startsWith("/api/")) return path;
-  if (path.startsWith("/api/fleet") || path.startsWith("/api/nodes/")) return path; // fleet mgmt is always local
+  if (path.startsWith("/api/fleet") || path.startsWith("/api/nodes/")) return path;
   return `/api/nodes/${encodeURIComponent(node)}/proxy/${path.slice("/api/".length)}`;
 }
+
+/** The node a view's URL names ("" when absent = this machine). */
+export const routeNode = (params: URLSearchParams): NodeId => params.get("node") ?? "";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -30,12 +25,12 @@ export class ApiError extends Error {
   }
 }
 
-/** `local: true` always talks to the daemon serving this page, even when a remote node is active. */
-export type ApiInit = RequestInit & { local?: boolean };
+/** `node`: which machine answers (default "" = the daemon serving this page). */
+export type ApiInit = RequestInit & { node?: NodeId };
 
 export async function api<T>(path: string, init?: ApiInit): Promise<T> {
-  const { local, ...rest } = init ?? {};
-  const res = await fetch(local ? path : scoped(path), {
+  const { node = "", ...rest } = init ?? {};
+  const res = await fetch(nodePath(node, path), {
     ...rest,
     headers: { authorization: `Bearer ${token()}`, ...rest.headers },
   });
@@ -49,38 +44,40 @@ export async function api<T>(path: string, init?: ApiInit): Promise<T> {
   return res.json();
 }
 
-export const post = <T,>(path: string, body: unknown): Promise<T> =>
+/** Fetch against a specific node. */
+export const apiOn = <T,>(node: NodeId, path: string, init?: RequestInit): Promise<T> => api<T>(path, { ...init, node });
+
+export const post = <T,>(path: string, body: unknown, node: NodeId = ""): Promise<T> =>
   api<T>(path, {
+    node,
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+export const postOn = <T,>(node: NodeId, path: string, body: unknown): Promise<T> => post<T>(path, body, node);
 
+/** WebSocket URL on this daemon (the event bus and other local-only sockets). */
 export const wsUrl = (path: string, params: Record<string, string> = {}): string => {
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  const q = new URLSearchParams({ token: token(), ...params });
-  return `${proto}://${location.host}${scoped(path)}?${q}`;
-};
-
-/** Terminal WS path, node-aware (/api/term locally, /api/nodes/:id/term remotely). */
-export const termWsUrl = (params: Record<string, string> = {}): string => {
-  const node = activeNode();
-  const path = node ? `/api/nodes/${encodeURIComponent(node)}/term` : "/api/term";
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const q = new URLSearchParams({ token: token(), ...params });
   return `${proto}://${location.host}${path}?${q}`;
 };
 
-/** Remote-browser screencast WS, node-aware (/api/browser/:p/stream locally, /api/nodes/:id/browser/:p/stream remotely). */
-export const browserWsUrl = (profile: string): string => {
-  const node = activeNode();
-  const path = node ? `/api/nodes/${encodeURIComponent(node)}/browser/${encodeURIComponent(profile)}/stream` : `/api/browser/${encodeURIComponent(profile)}/stream`;
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${location.host}${path}?${new URLSearchParams({ token: token() })}`;
-};
+/** Ephemeral terminal WS (/api/term locally, /api/nodes/:id/term on a peer). */
+export const termWsUrl = (params: Record<string, string> = {}, node: NodeId = ""): string =>
+  wsUrl(node ? `/api/nodes/${encodeURIComponent(node)}/term` : "/api/term", params);
 
-export const rawUrl = (path: string, params: Record<string, string> = {}): string =>
-  `${scoped(path)}?${new URLSearchParams({ ...params, token: token() })}`;
+/** Remote-browser screencast WS (/api/browser/:p/stream locally, /api/nodes/:id/browser/:p/stream on a peer). */
+export const browserWsUrl = (profile: string, node: NodeId = ""): string =>
+  wsUrl(node ? `/api/nodes/${encodeURIComponent(node)}/browser/${encodeURIComponent(profile)}/stream` : `/api/browser/${encodeURIComponent(profile)}/stream`);
+
+/** Desktop stream WS (/api/desktop/stream locally, /api/nodes/:id/desktop/stream on a peer). */
+export const desktopWsUrl = (params: Record<string, string> = {}, node: NodeId = ""): string =>
+  wsUrl(node ? `/api/nodes/${encodeURIComponent(node)}/desktop/stream` : "/api/desktop/stream", params);
+
+/** A plain URL (for <img>, <a download>, <video>) on a node, token in the query. */
+export const rawUrl = (path: string, params: Record<string, string> = {}, node: NodeId = ""): string =>
+  `${nodePath(node, path)}?${new URLSearchParams({ ...params, token: token() })}`;
 
 // ---- formatting ----
 export function fmtBytes(n: number): string {
