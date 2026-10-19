@@ -804,6 +804,10 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
                   <tr
                     key={e.name}
                     draggable
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`Open ${e.name}`}
+                    data-tv-activate="double"
                     data-testid={`row-${e.name}`}
                     className={`cursor-default select-none ${sel.has(e.name) ? "bg-emerald-900/25" : "hover:bg-zinc-900/50"}`}
                     onClick={(ev) => clickRow(e, ev)}

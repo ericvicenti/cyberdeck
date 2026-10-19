@@ -5,6 +5,7 @@ import { useFleetQuery, useOverview, projectDirs } from "../lib/fleet";
 import { nodeHealth } from "../../src/shared/fleetview";
 import { NodePicker, NodeStrip, NodeTag } from "../components/NodePicker";
 import { Panel, Empty } from "./Projects";
+import { confirmAction } from "../lib/tv/confirm";
 
 type Node = { kind: "window" | "workspace" | "pane" | "surface"; ref: string; uuid?: string; title?: string; type?: string; selected: boolean; focused: boolean; current: boolean; active: boolean; tty?: string; url?: string; children: Node[] };
 type Tree = { available: boolean; running?: boolean; current?: string | null; error?: string; tree: Node[] };
@@ -144,7 +145,7 @@ export function Cmux({ params, onLocked }: { params: URLSearchParams; onLocked: 
                 <div className="flex flex-wrap items-center gap-1.5">
                   <label className="flex items-center gap-1 text-[10px] text-zinc-500"><input type="checkbox" checked={scrollback} onChange={(e) => setScrollback(e.target.checked)} />scrollback</label>
                   {ws && selected && <button onClick={() => act("focus", () => postOn(selected.node, "/api/cmux/select", { workspace: ws.ref }))} className="hud-badge px-2 py-1 text-zinc-300 hover:text-zinc-100">Focus in cmux</button>}
-                  {ws && selected && <button onClick={() => { if (confirm(`Close workspace ${ws.title ?? ws.ref} on ${selected.nodeName}?`)) act("close", () => postOn(selected.node, "/api/cmux/close", { workspace: ws.ref })); }} className="hud-badge neon-red px-2 py-1">Close</button>}
+                  {ws && selected && <button onClick={async () => { if (await confirmAction(`Close workspace ${ws.title ?? ws.ref} on ${selected.nodeName}?`)) act("close", () => postOn(selected.node, "/api/cmux/close", { workspace: ws.ref })); }} className="hud-badge neon-red px-2 py-1">Close</button>}
                 </div>
               }
             >

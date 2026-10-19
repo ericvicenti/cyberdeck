@@ -95,7 +95,8 @@ export function routeTitle(route = readRoute()): string {
     : route.view === "term" ? p.get("session")
     : route.view === "cmux" ? p.get("surface")
     : route.view === "agents" ? p.get("run") || p.get("task")
-    : route.view === "cloud" ? p.get("conversation") || p.get("profile") : null;
+    : route.view === "cloud" ? p.get("conversation") || p.get("profile")
+    : route.view === "spotify" ? p.get("id") || p.get("shelf") : null;
   if (detail) title = `${detail} · ${title}`;
   if (route.view === "applications" && p.get("app")) {
     title = p.get("app") === "vimm" ? `${p.get("tab") === "steam" ? "PC games · " : ""}The Vault` : p.get("app") === "afterglow" ? "Afterglow" : `${p.get("app")} · Applications`;

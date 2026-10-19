@@ -10,7 +10,7 @@ export function registerKioskRoutes(app: Hono, cfg: CyberdeckConfig, upgradeWebS
   let connecting: Promise<Browser> | undefined;
   const manager = { async get(): Promise<Profile> {
     if (!browser?.isConnected()) {
-      connecting ??= import("playwright").then(({ chromium }) => chromium.connectOverCDP("http://127.0.0.1:9223", { timeout: 8000 }));
+      connecting ??= import("playwright").then(({ chromium }) => chromium.connectOverCDP("http://127.0.0.1:9223", { timeout: 8000, noDefaults: true }));
       try { browser = await connecting; } finally { connecting = undefined; }
     }
     const context = browser.contexts()[0];

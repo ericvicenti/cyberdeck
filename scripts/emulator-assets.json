@@ -1,0 +1,143 @@
+{
+  "version": "4.2.3",
+  "assets": [
+    {
+      "path": "emulator.min.js",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/emulator.min.js",
+      "sha256": "6aec3fd7bb2721255801b0a6af02e47e78b05e28a1822b1f213aacbd348abaee",
+      "bytes": 426343
+    },
+    {
+      "path": "emulator.min.css",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/emulator.min.css",
+      "sha256": "16406c60b2dc3b04ae9b115e308613e6f567a0cc7068e21d9d0c1e5030fb395e",
+      "bytes": 25630
+    },
+    {
+      "path": "compression/extract7z.js",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/compression/extract7z.js",
+      "sha256": "4ac9933b995a516cb6b3ca4027db860278372a20c21c405d93ceb1998498853a",
+      "bytes": 280155
+    },
+    {
+      "path": "compression/extractzip.js",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/compression/extractzip.js",
+      "sha256": "3cc825428724213acd43d30552a78008e0869b2326de17dee240dbff9ee2f629",
+      "bytes": 196199
+    },
+    {
+      "path": "cores/nestopia-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/cores/nestopia-wasm.data",
+      "sha256": "051de1b67a5b582b8a1bac6b99471d4f9f883ce3b3603d00330c1a066e546375",
+      "bytes": 1219547
+    },
+    {
+      "path": "cores/nestopia-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/cores/nestopia-legacy-wasm.data",
+      "sha256": "d3b1e6d3f0abd55a174d666303e51e06a208c257207ebeb734982a32595e1ac7",
+      "bytes": 1218931
+    },
+    {
+      "path": "cores/reports/nestopia.json",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/cores/reports/nestopia.json",
+      "sha256": "b85bf8f126f0f0a08ee4fac3e0d358c32da5a5db918b4bee4bd610dd445dc5ef",
+      "bytes": 122
+    },
+    {
+      "path": "cores/snes9x-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/cores/snes9x-wasm.data",
+      "sha256": "eaa0bcfce67673809886e50387a80a616b719502175db64c090d04c9d75958ee",
+      "bytes": 1093765
+    },
+    {
+      "path": "cores/snes9x-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/cores/snes9x-legacy-wasm.data",
+      "sha256": "7d427a575cefad98ff400493fa1d7e892da63fe7bab68979babd9cea0bfaaf3b",
+      "bytes": 1092437
+    },
+    {
+      "path": "cores/reports/snes9x.json",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/cores/reports/snes9x.json",
+      "sha256": "dc7ac963eb7935a7ac78956235ac0b8912ec785c57026336825aa2ed8031b3ad",
+      "bytes": 120
+    },
+    {
+      "path": "cores/gambatte-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/cores/gambatte-wasm.data",
+      "sha256": "ad67c7bf57f8f8b62606048e6ea498afac5b5abc76ad8de5f9dfc2a6719374bb",
+      "bytes": 967156
+    },
+    {
+      "path": "cores/gambatte-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/cores/gambatte-legacy-wasm.data",
+      "sha256": "940a7381d51223c0be0c0f98d1a988d42cc98d03c27b392cbd29cb9f357b5f62",
+      "bytes": 967022
+    },
+    {
+      "path": "cores/reports/gambatte.json",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/cores/reports/gambatte.json",
+      "sha256": "a240a47bd6b2a38a6c46ee63c80bdcd24befbd50474453df4898d49282bd5f57",
+      "bytes": 122
+    },
+    {
+      "path": "cores/mgba-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/cores/mgba-wasm.data",
+      "sha256": "01fcaf6d4296ef1db6676e0c69400c4474e24572d0b2b99cc097e4ae885e02d7",
+      "bytes": 1055616
+    },
+    {
+      "path": "cores/mgba-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/cores/mgba-legacy-wasm.data",
+      "sha256": "e300d2f368c82bf61d77c972c36e367cf16408ec3d50beede080337519a3d696",
+      "bytes": 1054993
+    },
+    {
+      "path": "cores/reports/mgba.json",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/cores/reports/mgba.json",
+      "sha256": "08219f6c855a9d996f04ed21169bb0c5ac64d469a8a536468b9876205b5c268d",
+      "bytes": 118
+    },
+    {
+      "path": "cores/genesis_plus_gx-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/cores/genesis_plus_gx-wasm.data",
+      "sha256": "190297a6f86757405090f1a2266f67dfe1a570a528c583434ed3641a5664f768",
+      "bytes": 1203661
+    },
+    {
+      "path": "cores/genesis_plus_gx-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/cores/genesis_plus_gx-legacy-wasm.data",
+      "sha256": "2a1edeb68d7ec882149ed3cd5d3aa95a6ac231ebabaf82cdb56175a8b62967cc",
+      "bytes": 1204803
+    },
+    {
+      "path": "cores/reports/genesis_plus_gx.json",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/cores/reports/genesis_plus_gx.json",
+      "sha256": "5936a8ce8d7f010d5bfdd8c3bba2b2414f103b3a703121e56f2724b24dbe7ff3",
+      "bytes": 129
+    },
+    {
+      "path": "cores/mupen64plus_next-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/cores/mupen64plus_next-wasm.data",
+      "sha256": "2da1cbce9fda395e3ae83ca5787353baa159142d45ef3ea90f108b92524f76cc",
+      "bytes": 1451795
+    },
+    {
+      "path": "cores/mupen64plus_next-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/cores/mupen64plus_next-legacy-wasm.data",
+      "sha256": "425072f4bf94eec02633cbe9b84f47d6803dc0ec1b3c3b8de3ebbd2eb5617c3f",
+      "bytes": 1451870
+    },
+    {
+      "path": "cores/reports/mupen64plus_next.json",
+      "url": "https://cdn.emulatorjs.org/4.2.3/data/cores/reports/mupen64plus_next.json",
+      "sha256": "270105553cec57fd1058c50e0541b8b89dbd30b2323fd70682036f6919b805cc",
+      "bytes": 153
+    },
+    {
+      "path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/EmulatorJS/EmulatorJS/v4.2.3/LICENSE",
+      "sha256": "a617fab6d251b3302b1cb2c1c94f52d1c584f6fcb2fc218ec1a475bc08053a61",
+      "bytes": 35111
+    }
+  ]
+}

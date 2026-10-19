@@ -1,4 +1,11 @@
 import { registerNativeSpotifyRoutes } from "./api/spotify-native";
+import { registerMusicRoutes } from "./api/music";
+import { registerMusicVisualizerRoutes } from "./api/music-visualizer";
+import { Steam, registerSteamRoutes } from "./api/steam";
+import { registerVaultDownloadRoutes } from "./api/vault-download";
+import { registerVaultRomRoutes } from "./api/vault-roms";
+import { registerVimmRoutes } from "./api/vimm";
+import { Games, registerGameRoutes } from "./api/games";
 import { registerDesktopRoutes } from "./api/desktop";
 import { registerKioskRoutes } from "./api/kiosk";
 import { registerAudioRoutes, audioBackend, type AudioBackend } from "./api/audio";
@@ -210,8 +217,15 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   });
 
   // Web applications configured on this machine plus the example apps that run in the Casework Desk app.
+  registerVimmRoutes(app);
+  registerVaultRomRoutes(app, (cfg as typeof cfg & { games?: { dir?: string } }).games?.dir);
+  registerVaultDownloadRoutes(app);
+  registerSteamRoutes(app, new Steam(cfg.nodeName));
   app.get("/api/applications", (c) => c.json({ applications: cfg.applications ?? [], casework: { apps: casework?.apps() ?? [], devices: casework?.devices() ?? [], kiosk: Boolean(cfg.kiosk?.enabled) } }));
   registerKioskRoutes(app, cfg, upgradeWebSocket, (c) => Boolean(authByReq.get(c.req.raw)));
+  registerGameRoutes(app, new Games(cfg));
+  registerMusicRoutes(app, db);
+  registerMusicVisualizerRoutes(app);
   registerAudioRoutes(app, opts.audio ?? audioBackend());
   registerFsRoutes(app);
   registerMediaRoutes(app, token);

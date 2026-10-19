@@ -11,6 +11,8 @@ export interface CyberdeckConfig {
   /** Optional applications and physical fullscreen browser on this machine. */
   applications?: { id: string; name: string; description: string; url: string }[];
   kiosk?: { enabled: boolean };
+  /** Retro games: ROMs in <dir>/snes and <dir>/n64 (default ~/Games), played with RetroArch. */
+  games?: { dir?: string; retroarch?: string; coreDirs?: string[] };
   /** Casework Seed bridge behind the kitchen sink's Agent tab (`/api/seed/*`); the token file defaults to
    *  ~/Library/Application Support/CaseworkSeed/bridge-token. */
   casework?: { url?: string; tokenFile?: string };

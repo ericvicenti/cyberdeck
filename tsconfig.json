@@ -12,5 +12,5 @@
     "resolveJsonModule": true,
     "isolatedModules": true
   },
-  "include": ["src", "ui"]
+  "include": ["src", "ui", "desktop"]
 }

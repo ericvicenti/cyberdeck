@@ -5,6 +5,7 @@ import { type ServiceProbe, isoAgo, projectsForService, projectsOnHost, serviceL
 import { useHostTargets, openOnHost, resolveHost } from "../lib/hosts";
 import { useOverview } from "../lib/fleet";
 import { Panel, Empty, ServiceLine, Action } from "./Projects";
+import { confirmAction } from "../lib/tv/confirm";
 
 /** Every host in the Deck manifest with its last probe. The probe is Deck data (the same on every
  *  machine); it is read from this node or, when this node has no Deck checkout, from a peer. A
@@ -113,7 +114,7 @@ export function Services({ params, onLocked }: { params: URLSearchParams; onLock
                       active={focusSvc === r.service && focusHost.toLowerCase() === r.host.toLowerCase()}
                       projects={projectsForService(r, projects)}
                       onLogs={() => { const c = serviceLogCmd(r); if (c) onHost(r.host, c, `${r.service} @ ${r.host}`); }}
-                      onRestart={serviceRestartCmd(r) ? () => { if (confirm(`Restart ${r.service} on ${r.host}?`)) onHost(r.host, serviceRestartCmd(r)!, `restart ${r.service}`); } : undefined}
+                      onRestart={serviceRestartCmd(r) ? async () => { if (await confirmAction(`Restart ${r.service} on ${r.host}?`)) onHost(r.host, serviceRestartCmd(r)!, `restart ${r.service}`); } : undefined}
                     />
                   ))}
                 </Panel>

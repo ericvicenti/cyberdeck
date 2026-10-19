@@ -8,6 +8,7 @@ import { recentCwds, rememberCwd, shortCwd } from "../lib/terms";
 import { attachUrl, createSession, getCaps, removeSession, renameSession, useLiveSessions, type LiveSession } from "../lib/sessions";
 import { useOverview, projectDirs, targetsOf } from "../lib/fleet";
 import { NodePicker, NodeTag } from "../components/NodePicker";
+import { confirmAction } from "../lib/tv/confirm";
 import "@xterm/xterm/css/xterm.css";
 
 // Local and paired-node Seed sessions render Seed's own UI, loaded on first use.
@@ -169,7 +170,7 @@ export function Term({ params, onLocked }: { params: URLSearchParams; onLocked?:
   }, [answered, sessions, active, adding, activeNode]);
 
   const close = async (s: LiveSession) => {
-    if (s.state === "running" && !confirm(s.tool === "seed" ? `Delete conversation “${s.title}” on ${s.nodeName} and its messages?` : `Kill session “${s.title}” on ${s.nodeName}? Anything running in it stops.`)) return;
+    if (s.state === "running" && !(await confirmAction(s.tool === "seed" ? `Delete conversation “${s.title}” on ${s.nodeName} and its messages?` : `Kill session “${s.title}” on ${s.nodeName}? Anything running in it stops.`))) return;
     try { await removeSession(s.node, s.id); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); return; }
     const rest = sessions.filter((x) => !(x.id === s.id && x.node === s.node));
     replace(s.node, all.filter((x) => x.node === s.node && x.id !== s.id));

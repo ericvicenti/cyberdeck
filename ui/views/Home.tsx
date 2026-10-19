@@ -5,6 +5,8 @@ import { NetworkMap } from "../components/NetworkMap";
 import { useEffect, useState } from "react";
 import { api, post, navigate, fmtBytes, fmtAgo, ApiError } from "../lib/api";
 import { useOverview, refreshNodes } from "../lib/fleet";
+import { pairingOrigin } from "../lib/pairing";
+import { confirmAction } from "../lib/tv/confirm";
 import { ServerIcon, FolderIcon, TerminalIcon, GitIcon, GridIcon } from "../lib/icons";
 import type { Dashboard, UsageSummary } from "../../src/daemon/api/dashboard";
 import type { CodexResets } from "../../src/daemon/codexrpc";
@@ -252,7 +254,7 @@ function CaseworkCard() {
   const [err, setErr] = useState("");
   const [copied, setCopied] = useState("");
   const load = async () => {
-    try { setPairing(await api<CaseworkPairing>(`/api/casework/pairing?url=${encodeURIComponent(location.origin)}`)); setErr(""); }
+    try { setPairing(await api<CaseworkPairing>(`/api/casework/pairing?url=${encodeURIComponent(await pairingOrigin())}`)); setErr(""); }
     catch (e) { setErr(e instanceof ApiError && e.status === 403 ? "sign in with the token or over the tailnet to see the pairing key" : String(e)); }
   };
   useEffect(() => { void load(); const t = setInterval(() => void load(), 15_000); return () => clearInterval(t); }, []);
@@ -272,7 +274,7 @@ function CaseworkCard() {
               <div className="flex items-center gap-2"><span className="w-12 text-zinc-500">url</span><span className="truncate text-zinc-200">{pairing.url}</span><button onClick={() => copy("url", pairing.url)} className="hud-chip">{copied === "url" ? "copied" : "copy"}</button></div>
               <div className="flex items-center gap-2"><span className="w-12 text-zinc-500">key</span><span className="truncate text-zinc-200">{pairing.key}</span><button onClick={() => copy("key", pairing.key)} className="hud-chip">{copied === "key" ? "copied" : "copy"}</button></div>
               <div className="flex items-center gap-2"><span className="w-12 text-zinc-500">link</span><button onClick={() => copy("link", pairing.link)} className="hud-chip">{copied === "link" ? "copied" : "copy pairing link"}</button>
-                <button onClick={async () => { if (!confirm("Rotate the Casework key? Paired devices must re-pair.")) return; await post("/api/casework/rotate", {}); await load(); }} className="hud-chip text-red-300">rotate key</button></div>
+                <button onClick={async () => { if (!(await confirmAction("Rotate the Casework key? Paired devices must re-pair."))) return; await post("/api/casework/rotate", {}); await load(); }} className="hud-chip text-red-300">rotate key</button></div>
               <div className="mt-1 text-zinc-500">devices: {pairing.devices.length ? pairing.devices.map((d) => d.info?.name ?? d.info?.model ?? d.id.slice(0, 8)).join(", ") : "none connected"}</div>
             </div>
           ) : null}

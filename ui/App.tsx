@@ -8,6 +8,7 @@ import { RetainedView } from "./components/RetainedView";
 import { Spotify } from "./views/Spotify";
 import { Cloud } from "./views/Cloud";
 import { Applications } from "./views/Applications";
+import { Controls } from "./views/Controls";
 import { ScreenRemote } from "./views/ScreenRemote";
 import { Home } from "./views/Home";
 import { Desk } from "./views/Desk";
@@ -29,6 +30,7 @@ const SeedAgents = lazy(() => import("./views/SeedAgents"));
 
 const NAV = [
   { view: "fleet", label: "Home", icon: ServerIcon },
+  { view: "controls", label: "Controls", icon: GridIcon },
   { view: "desktop", label: "Desktop", icon: GridIcon },
   { view: "applications", label: "Applications", icon: GridIcon },
   { view: "spotify", label: "Spotify", icon: MusicIcon },
@@ -100,6 +102,7 @@ export function App() {
   const view = (
     <>
       {!knownRoute && <section className="p-6"><h1 className="text-xl">Page not found</h1><p className="my-3">No Cyberdeck view named “{route.view}”.</p><button onClick={() => navigate("fleet")}>Go home</button></section>}
+      {route.view === "controls" && <Controls />}
       {route.view === "desktop" && <Suspense fallback={<div className="p-6">Loading desktop…</div>}><Desktop params={route.params} key={`desktop-${nodeId}`} /></Suspense>}
       {route.view === "fleet" && <Home onLocked={lock} />}
       {route.view === "projects" && <Projects params={route.params} onLocked={lock} />}
@@ -155,7 +158,7 @@ export function App() {
 
         <main className="min-w-0 flex-1 overflow-hidden">{view}
           <RetainedView visible={route.view === "applications"} params={route.params}>{(params, visible) => <Applications params={params} visible={visible} onLocked={lock} />}</RetainedView>
-          <RetainedView visible={route.view === "desk"} params={route.params}>{(params, visible) => <Desk params={params} visible={visible} onLocked={lock} />}</RetainedView>{spotifyOpened && <Spotify visible={route.view === "spotify"} params={route.view === "spotify" ? route.params : undefined} />}</main>
+          <RetainedView visible={route.view === "desk"} params={route.params}>{(params, visible) => <Desk params={params} visible={visible} onLocked={lock} />}</RetainedView>{spotifyOpened && <Spotify visible={route.view === "spotify"} params={route.params} />}</main>
       </div>
 
       {/* sticky prompt bar: start sessions from anywhere; live sessions strip */}

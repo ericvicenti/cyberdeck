@@ -125,9 +125,9 @@ export function AfterglowFrame({
   return (
     <section className="flex h-full flex-col" aria-label={name}>
       <div className="flex shrink-0 items-center gap-4 border-b border-zinc-800 px-4 py-2 text-sm">
-        <button onClick={() => navigate("applications")} className="text-cyan-300">
+        <a data-tv-frame-back href={routeHash("applications", readRoute().params.has("node") ? { node: readRoute().params.get("node")! } : {})} className="text-cyan-300">
           ← Applications
-        </button>
+        </a>
         <strong>{name}</strong>
         <span className="flex-1" />
         <button
@@ -142,7 +142,12 @@ export function AfterglowFrame({
         ref={frame}
         data-testid="afterglow-frame"
         referrerPolicy="origin"
-        onLoad={sendRoute}
+        data-tv-autofocus
+        onLoad={event => {
+          sendRoute();
+          const input = window as Window & { __cyberdeckInputBridge?: unknown; __cyberdeckTV?: { focusElement: (el: HTMLElement) => void } };
+          if (visible && input.__cyberdeckInputBridge) input.__cyberdeckTV?.focusElement(event.currentTarget);
+        }}
         title={name}
         src={src}
         allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
