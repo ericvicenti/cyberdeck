@@ -21,15 +21,15 @@ export function Applications({ params, onLocked }: { params: URLSearchParams; on
   }, []);
   const app = apps.find(a => a.id === params.get("app"));
   const example = casework?.apps.find(a => a.id === params.get("app"));
-  const missing = loaded && !!params.get("app") && !app && !example && !["vimm", "steam"].includes(params.get("app")!);
-  useRouteTitle(missing ? "Application not found" : app?.id !== "afterglow" ? (app?.name ?? example?.name) : undefined);
+  const missing = loaded && !!params.get("app") && !app && !example;
+  useRouteTitle(missing ? "Application not found" : example || app?.id === "afterglow" ? undefined : app?.name);
   if (missing) return <section className="p-6"><h1 className="text-xl">Application not found</h1><p className="my-3">“{params.get("app")}” is not configured on this machine.</p><button onClick={() => navigate("applications")}>← Applications</button></section>;
   if (example) return <section className="flex h-full flex-col" aria-label={example.name}>
     <div className="flex shrink-0 items-center gap-4 border-b border-zinc-800 px-4 py-2 text-sm">
       <button onClick={() => navigate("applications")} className="text-cyan-300">← Applications</button>
       <strong>{example.name}</strong><span className="text-zinc-500">Casework example app</span>
     </div>
-    <div className="min-h-0 flex-1"><CaseworkConsole app={example} onLocked={onLocked} /></div>
+    <div className="min-h-0 flex-1"><CaseworkConsole app={example} params={params} onLocked={onLocked} /></div>
   </section>;
   if (app?.id === "afterglow") return <AfterglowFrame key={app.url} url={app.url} params={params} name={app.name} />;
   if (app) return <section className="flex h-full flex-col" aria-label={app.name}>

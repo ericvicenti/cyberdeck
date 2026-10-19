@@ -631,17 +631,18 @@ export function Files({ params, onLocked }: { params: URLSearchParams; onLocked:
         </div>
 
         <div className="flex items-center gap-2">
+          <form onSubmit={(event) => { event.preventDefault(); if (filter) doDeepSearch(); }}>
           <input
             value={filter}
             onChange={(e) => {
               setFilter(e.target.value);
               setDeepResults(null);
             }}
-            onKeyDown={(e) => e.key === "Enter" && filter && doDeepSearch()}
             placeholder="filter · Enter = deep search"
             className="w-32 rounded-lg border border-zinc-800 sm:w-52 bg-zinc-900 px-3 py-1.5 text-xs outline-none focus:border-zinc-600"
             data-testid="files-filter"
           />
+          </form>
           <label className="flex items-center gap-1.5 text-xs text-zinc-400">
             <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} className="accent-emerald-500" data-testid="toggle-hidden" />
             hidden

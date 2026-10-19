@@ -4,7 +4,8 @@
 // same-origin proxy, opened by the cookie GET /api/seed-agents/session sets. See src/daemon/api/seed-agents.ts.
 import { useEffect, useState } from "react";
 import type { SeedAgentsHost, SeedAgentsRoute } from "@seed-hypermedia/agents-ui";
-import { api, navigate } from "./api";
+import { api, navigate, activeNode } from "./api";
+import { routeHash } from "./navigation";
 
 export type SeedAgentsSession = {
   available: boolean;
@@ -59,8 +60,8 @@ export function useSeedAgentsHost(node = ""): { host: SeedAgentsHost | null; ses
 }
 
 /** The Seed view's hash URL for a route: `#/seed?r=<path>`, where path is Seed's own `/hm/agents/<path>`. */
-export function seedHash(path: string): string {
-  return `#/seed${path ? `?r=${encodeURIComponent(path)}` : ""}`;
+export function seedHash(path: string, node = activeNode()): string {
+  return routeHash("seed", { ...(path ? { r: path } : {}), ...(node ? { node } : {}) });
 }
 
 export function openSeedRoute(path: string): void {

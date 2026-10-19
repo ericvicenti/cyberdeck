@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { navigate } from "../lib/api";
+import { claimRouteTitle, routeHash, readRoute } from "../lib/navigation";
 
 const DEFAULT_ROUTE = "discover";
 
@@ -14,8 +15,7 @@ function cleanTitle(value: unknown): string | null {
 }
 
 function applicationHash(params: URLSearchParams): string {
-  const query = params.toString();
-  return `#/applications${query ? `?${query}` : ""}`;
+  return routeHash("applications", params);
 }
 
 /**
@@ -58,12 +58,12 @@ export function AfterglowFrame({
   }, [origin]);
 
   useEffect(() => {
-    let assignedTitle = `${name} · Cyberdeck`;
-    document.title = assignedTitle;
+    let releaseTitle = claimRouteTitle(name);
 
     const receive = (event: MessageEvent) => {
       if (event.source !== frame.current?.contentWindow || event.origin !== origin) return;
 
+      if (readRoute().view !== "applications" || readRoute().params.get("app") !== currentParams.current.get("app")) return;
       const data = event.data;
       const incoming = cleanRoute(data?.route);
       if (!incoming) return;
@@ -89,8 +89,8 @@ export function AfterglowFrame({
       if ((data.type === "afterglow:title" || data.type === "afterglow:navigation") && incoming === activeRoute) {
         const childTitle = cleanTitle(data.title);
         if (childTitle) {
-          assignedTitle = `${childTitle} · Cyberdeck`;
-          document.title = assignedTitle;
+          releaseTitle();
+          releaseTitle = claimRouteTitle(childTitle);
         }
       }
     };
@@ -98,7 +98,7 @@ export function AfterglowFrame({
     window.addEventListener("message", receive);
     return () => {
       window.removeEventListener("message", receive);
-      if (document.title === assignedTitle) document.title = "Cyberdeck";
+      releaseTitle();
     };
   }, [name, origin, sendRoute]);
 

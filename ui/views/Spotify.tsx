@@ -25,6 +25,12 @@ import {
   readSpotifyArchive,
   saveSpotifyRecord,
 } from "../lib/spotify-storage";
+import { readRoute, routeHash, useRouteTitle, writeRoute } from "../lib/navigation";
+import {
+  spotifyLocation,
+  spotifyRouteParams,
+  type SpotifyLocation,
+} from "../lib/spotify-navigation";
 import {
   MusicIcon,
   PauseIcon,
@@ -65,7 +71,13 @@ const playable = (t: SpotifyTrack | null | undefined): t is SpotifyTrack =>
   !!t?.id && !!t.uri && !t.is_local && t.type !== "episode";
 
 /** Cyberdeck's persistent custom music surface; stays mounted while navigating the deck. */
-export function Spotify({ visible }: { visible: boolean }) {
+export function Spotify({
+  visible,
+  params,
+}: {
+  visible: boolean;
+  params: URLSearchParams;
+}) {
   const [connected, setConnected] = useState(spotifyConnected);
   const clientId = spotifyClientId();
   const [error, setError] = useState("");
@@ -85,6 +97,7 @@ export function Spotify({ visible }: { visible: boolean }) {
   const [playlistNext, setPlaylistNext] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [shelf, setShelf] = useState<Shelf>(emptyShelf);
+  const [resolvedRouteKey, setResolvedRouteKey] = useState("");
   const [back, setBack] = useState<Shelf[]>([]);
   const [devices, setDevices] = useState<SpotifyDevice[]>([]);
   const [selected, setSelected] = useState("");
@@ -109,6 +122,8 @@ export function Spotify({ visible }: { visible: boolean }) {
   const sdkGeneration = useRef(0);
   const accountGeneration = useRef(0);
   const viewGeneration = useRef(0);
+  const routeGeneration = useRef(0);
+  const immersiveClosing = useRef(false);
   const accountRef = useRef("");
   const lastListen = useRef("");
   const archiveWrites = useRef(Promise.resolve());
@@ -120,6 +135,45 @@ export function Spotify({ visible }: { visible: boolean }) {
   } catch (e) {
     originError = (e as Error).message;
   }
+  const routeKey = params.toString();
+  const currentLocation = spotifyLocation(params).location;
+  const navigateMusic = (
+    next: Pick<SpotifyLocation, "shelf"> &
+      Partial<
+        Pick<
+          SpotifyLocation,
+          "id" | "query" | "page" | "immersive" | "radio"
+        >
+      >,
+    mode: "push" | "replace" = "push",
+  ) =>
+    writeRoute(
+      "spotify",
+      spotifyRouteParams(readRoute().params, next),
+      mode,
+    );
+  const navigateEntity = (entity: Card) =>
+    navigateMusic({ shelf: entity.kind, id: entity.id });
+  const navigateCollection = (kind: string) =>
+    navigateMusic({ shelf: kind as SpotifyLocation["shelf"] });
+  const navigateSearch = (value = query.trim(), radio = false) =>
+    navigateMusic({ shelf: "search", query: value, radio });
+  const closeImmersive = () => {
+    if (immersiveClosing.current) return;
+    immersiveClosing.current = true;
+    setImmersive(false);
+    const next = spotifyRouteParams(readRoute().params, {
+      shelf: currentLocation.shelf,
+      id: currentLocation.id,
+      query: currentLocation.query,
+      page: currentLocation.page,
+      radio: currentLocation.radio,
+    });
+    const nextHash = routeHash("spotify", next);
+    if (history.state?.cyberdeckSpotifyImmersiveFrom === nextHash)
+      history.back();
+    else writeRoute("spotify", next, "replace");
+  };
 
   const report = (e: unknown) => {
     if (alive.current) {
@@ -299,13 +353,13 @@ export function Spotify({ visible }: { visible: boolean }) {
   useEffect(() => {
     const escape = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setImmersive(false);
+        if (immersive) closeImmersive();
         setAddTrack(null);
         setCreateOpen(false);
       }
     };
     const fullscreen = () => {
-      if (!document.fullscreenElement) setImmersive(false);
+      if (!document.fullscreenElement && immersive) closeImmersive();
     };
     document.addEventListener("keydown", escape);
     document.addEventListener("fullscreenchange", fullscreen);
@@ -313,7 +367,7 @@ export function Spotify({ visible }: { visible: boolean }) {
       document.removeEventListener("keydown", escape);
       document.removeEventListener("fullscreenchange", fullscreen);
     };
-  }, []);
+  }, [immersive, routeKey]);
   useEffect(() => {
     if (!visible) {
       setVideoActive(false);
@@ -513,7 +567,10 @@ export function Spotify({ visible }: { visible: boolean }) {
     await spotifyApi(`/me/player/${path}?${q}`, method);
     await refreshPlayback();
   };
-  const show = async (load: () => Promise<Shelf>, replace = false) => {
+  const show = async (
+    load: () => Promise<Shelf>,
+    replace = false,
+  ): Promise<Shelf | undefined> => {
     const version = ++viewGeneration.current;
     setLoading(true);
     setError("");
@@ -524,13 +581,14 @@ export function Spotify({ visible }: { visible: boolean }) {
       if (!replace) setBack((old) => [...old, shelf]);
       setShelf(next);
       content.current?.scrollTo({ top: 0 });
+      return next;
     } catch (e) {
       if (version === viewGeneration.current) report(e);
     } finally {
       if (version === viewGeneration.current) setLoading(false);
     }
   };
-  const openEntity = (entity: Card) =>
+  const openEntity = (entity: Card, replace = false) =>
     show(async () => {
       if (entity.kind === "artist") {
         const [artist, albums] = await Promise.all([
@@ -585,7 +643,7 @@ export function Spotify({ visible }: { visible: boolean }) {
         cards: [],
         next: page?.next,
       };
-    });
+    }, replace);
   const loadArchive = async () => {
     await archiveWrites.current;
     try {
@@ -597,7 +655,7 @@ export function Spotify({ visible }: { visible: boolean }) {
       return readSpotifyArchive(account, true);
     }
   };
-  const collection = (kind: string) =>
+  const collection = (kind: string, replace = false) =>
     show(async () => {
       if (kind === "history") {
         const records = await loadArchive();
@@ -670,8 +728,8 @@ export function Spotify({ visible }: { visible: boolean }) {
         cards: data.artists.items.map((a) => ({ ...a, kind: "artist" })),
         next: data.artists.next,
       };
-    });
-  const search = (q = query.trim(), radio = false) =>
+    }, replace);
+  const search = (q = query.trim(), radio = false, replace = false) =>
     show(async () => {
       const params = new URLSearchParams({
         q,
@@ -710,14 +768,14 @@ export function Spotify({ visible }: { visible: boolean }) {
             .map((p) => ({ ...p!, kind: "playlist" as const })),
         ],
       };
-    });
-  const more = async () => {
-    if (!shelf.next) return;
+    }, replace);
+  const loadMore = async (current: Shelf): Promise<Shelf> => {
+    if (!current.next) return current;
     const version = viewGeneration.current;
-    const data = await readApi<any>(spotifyPagePath(shelf.next));
-    if (version !== viewGeneration.current) return;
-    if (shelf.kind === "search") {
-      const url = new URL(shelf.next);
+    const data = await readApi<any>(spotifyPagePath(current.next));
+    if (version !== viewGeneration.current) return current;
+    if (current.kind === "search") {
+      const url = new URL(current.next);
       url.searchParams.set(
         "offset",
         String(Number(url.searchParams.get("offset") || 0) + 10),
@@ -728,44 +786,115 @@ export function Spotify({ visible }: { visible: boolean }) {
           kind: key.slice(0, -1) as Card["kind"],
         })),
       );
-      setShelf((old) => ({
-        ...old,
-        tracks: [...old.tracks, ...(data.tracks?.items || []).filter(playable)],
-        cards: [...old.cards, ...cards],
+      return {
+        ...current,
+        tracks: [
+          ...current.tracks,
+          ...(data.tracks?.items || []).filter(playable),
+        ],
+        cards: [...current.cards, ...cards],
         next: Object.values(data).some((page: any) => !!page?.next)
           ? url.toString()
           : null,
-      }));
-      return;
+      };
     }
-    const page = shelf.kind === "artists" ? data.artists : data;
+    const page = current.kind === "artists" ? data.artists : data;
     const additions: SpotifyTrack[] = ["liked", "recent", "playlist"].includes(
-      shelf.kind,
+      current.kind,
     )
       ? page.items.map((i: PlaylistItem) => i.item ?? i.track).filter(playable)
-      : shelf.kind === "album"
+      : current.kind === "album"
         ? page.items
             .filter(playable)
-            .map((t: SpotifyTrack) => ({ ...t, album: shelf.entity }))
+            .map((t: SpotifyTrack) => ({ ...t, album: current.entity }))
         : [];
     const cards: Card[] =
-      shelf.kind === "artist"
+      current.kind === "artist"
         ? page.items.map((a: SpotifyAlbum) => ({ ...a, kind: "album" }))
-        : shelf.kind === "albums"
+        : current.kind === "albums"
           ? page.items.map((i: { album: SpotifyAlbum }) => ({
               ...i.album,
               kind: "album",
             }))
-          : shelf.kind === "artists"
+          : current.kind === "artists"
             ? page.items.map((a: SpotifyArtist) => ({ ...a, kind: "artist" }))
             : [];
-    setShelf((old) => ({
-      ...old,
-      tracks: [...old.tracks, ...additions],
-      cards: [...old.cards, ...cards],
+    return {
+      ...current,
+      tracks: [...current.tracks, ...additions],
+      cards: [...current.cards, ...cards],
       next: page.next,
-    }));
+    };
   };
+  const more = async () => {
+    const version = viewGeneration.current;
+    const next = await loadMore(shelf);
+    if (version !== viewGeneration.current) return;
+    setShelf(next);
+    navigateMusic({
+      shelf: currentLocation.shelf,
+      id: currentLocation.id,
+      query: currentLocation.query,
+      page: currentLocation.page + 1,
+      immersive,
+    });
+  };
+  useEffect(() => {
+    if (!visible || location.hash !== routeHash("spotify", params)) return;
+    const parsed = spotifyLocation(params);
+    if (routeHash("spotify", parsed.canonical) !== location.hash) {
+      writeRoute("spotify", parsed.canonical, "replace");
+      return;
+    }
+    const requested = parsed.location;
+    immersiveClosing.current = false;
+    setQuery(requested.query);
+    setImmersive(requested.immersive);
+    setBack([]);
+    setResolvedRouteKey("");
+    if (!connected || !account) return;
+    const generation = ++routeGeneration.current;
+    const restore = async () => {
+      let next: Shelf | undefined;
+      if (requested.shelf === "home") {
+        viewGeneration.current++;
+        setLoading(false);
+        setShelf(emptyShelf);
+        next = emptyShelf;
+      } else if (["artist", "album", "playlist"].includes(requested.shelf)) {
+        next = await openEntity(
+          {
+            id: requested.id,
+            uri: `spotify:${requested.shelf}:${requested.id}`,
+            name: "",
+            images: [],
+            kind: requested.shelf as Card["kind"],
+          },
+          true,
+        );
+      } else if (requested.shelf === "search") {
+        next = await search(requested.query, requested.radio, true);
+      } else {
+        next = await collection(requested.shelf, true);
+      }
+      if (!next || generation !== routeGeneration.current) return;
+      for (let page = 1; page < requested.page && next.next; page++) {
+        next = await loadMore(next);
+        if (generation !== routeGeneration.current) return;
+      }
+      if (generation !== routeGeneration.current) return;
+      setShelf(next);
+      setResolvedRouteKey(routeKey);
+    };
+    void restore();
+  }, [visible, connected, account, routeKey]);
+  useRouteTitle(
+    visible && location.hash === routeHash("spotify", params) && resolvedRouteKey === routeKey
+      ? shelf.kind === "home"
+        ? "Spotify"
+        : `${shelf.title} · Spotify`
+      : undefined,
+  );
   const toggleSave = async (uri: string) => {
     let wasSaved = saved[uri];
     if (wasSaved === undefined)
@@ -920,10 +1049,24 @@ export function Spotify({ visible }: { visible: boolean }) {
   const fullscreen = async () => {
     setVideoActive(false);
     if (immersive) {
+      closeImmersive();
       setImmersive(false);
       if (document.fullscreenElement === root.current)
         await document.exitFullscreen();
     } else {
+      const next = spotifyRouteParams(readRoute().params, {
+        ...currentLocation,
+        immersive: true,
+      });
+      const hash = routeHash("spotify", next);
+      if (location.hash !== hash) {
+        history.pushState(
+          { cyberdeckSpotifyImmersiveFrom: location.hash },
+          "",
+          hash,
+        );
+        window.dispatchEvent(new HashChangeEvent("hashchange"));
+      }
       setImmersive(true);
       if (root.current?.requestFullscreen)
         try {
@@ -941,7 +1084,7 @@ export function Spotify({ visible }: { visible: boolean }) {
           className="music-text"
           onClick={() => {
             setImmersive(false);
-            void openEntity({ ...a, kind: "artist" });
+            navigateEntity({ ...a, kind: "artist" });
           }}
         >
           {a.name}
@@ -984,7 +1127,7 @@ export function Spotify({ visible }: { visible: boolean }) {
             className="music-thumb"
             aria-label={`Open album ${t.album?.name || t.name}`}
             disabled={!t.album?.id}
-            onClick={() => void openEntity({ ...t.album, kind: "album" })}
+            onClick={() => navigateEntity({ ...t.album, kind: "album" })}
           >
             {t.album?.images?.[0] ? (
               <img src={t.album.images[0].url} alt="" />
@@ -1026,7 +1169,7 @@ export function Spotify({ visible }: { visible: boolean }) {
               <button onClick={() => setAddTrack(t)}>Add to playlist</button>
               <button
                 onClick={() =>
-                  void search(
+                  navigateSearch(
                     `${t.name} ${t.artists[0]?.name || ""} radio`,
                     true,
                   )
@@ -1089,7 +1232,7 @@ export function Spotify({ visible }: { visible: boolean }) {
           key={`${c.uri}:${i}`}
           aria-label={`Open ${c.kind} ${c.name}`}
           className={`music-card ${c.kind === "artist" ? "music-artist" : ""}`}
-          onClick={() => void openEntity(c)}
+          onClick={() => navigateEntity(c)}
         >
           <div className="music-card-art">
             {c.images?.[0] ? (
@@ -1243,11 +1386,7 @@ export function Spotify({ visible }: { visible: boolean }) {
                     key={kind}
                     aria-current={shelf.kind === kind ? "page" : undefined}
                     disabled={!account}
-                    onClick={() =>
-                      kind === "home"
-                        ? void show(async () => emptyShelf)
-                        : void collection(kind)
-                    }
+                    onClick={() => navigateCollection(kind)}
                   >
                     {label}
                     <span aria-hidden="true">→</span>
@@ -1271,7 +1410,7 @@ export function Spotify({ visible }: { visible: boolean }) {
                 {playlists.map((p) => (
                   <button
                     key={p.id}
-                    onClick={() => void openEntity({ ...p, kind: "playlist" })}
+                    onClick={() => navigateEntity({ ...p, kind: "playlist" })}
                   >
                     {p.name}
                   </button>
@@ -1301,14 +1440,14 @@ export function Spotify({ visible }: { visible: boolean }) {
                     const [, kind, id] = uri.split(":");
                     if (kind === "track") void run(() => playUri(uri));
                     else
-                      void openEntity({
+                      navigateEntity({
                         id: id!,
                         uri,
                         name: "",
                         images: [],
                         kind: kind as Card["kind"],
                       });
-                  } else void search();
+                  } else navigateSearch();
                 }}
               >
                 <span aria-hidden="true">⌕</span>
@@ -1326,16 +1465,11 @@ export function Spotify({ visible }: { visible: boolean }) {
                 </button>
               </form>
               <div className="music-shelf-heading">
-                {back.length > 0 && (
+                {shelf.kind !== "home" && (
                   <button
                     className="music-button"
                     aria-label="Back in music"
-                    onClick={() => {
-                      viewGeneration.current++;
-                      setLoading(false);
-                      setShelf(back[back.length - 1]!);
-                      setBack((old) => old.slice(0, -1));
-                    }}
+                    onClick={() => navigateMusic({ shelf: "home" })}
                   >
                     ←
                   </button>
@@ -1405,7 +1539,7 @@ export function Spotify({ visible }: { visible: boolean }) {
                           <button
                             className="music-button"
                             onClick={() =>
-                              void search(`${shelf.title} radio`, true)
+                              navigateSearch(`${shelf.title} radio`, true)
                             }
                           >
                             Radio mixes
@@ -1444,7 +1578,7 @@ export function Spotify({ visible }: { visible: boolean }) {
                           </p>
                           <button
                             className="music-button music-primary"
-                            onClick={() => void collection("recent")}
+                            onClick={() => navigateCollection("recent")}
                           >
                             Pick up where you left off
                           </button>
@@ -1715,7 +1849,7 @@ export function Spotify({ visible }: { visible: boolean }) {
                     onClick={() => {
                       setImmersive(false);
                       if (track?.album)
-                        void openEntity({ ...track.album, kind: "album" });
+                        navigateEntity({ ...track.album, kind: "album" });
                     }}
                   >
                     {track?.album?.name}
@@ -1856,7 +1990,7 @@ export function Spotify({ visible }: { visible: boolean }) {
                 aria-label="Show queue"
                 onClick={() => {
                   setImmersive(false);
-                  void collection("queue");
+                  navigateCollection("queue");
                 }}
               >
                 Queue
@@ -1989,7 +2123,7 @@ export function Spotify({ visible }: { visible: boolean }) {
                         "POST",
                         { name: playlistName.trim(), public: false },
                       );
-                      await openEntity({ ...p, kind: "playlist" });
+                      navigateEntity({ ...p, kind: "playlist" });
                     }
                     await loadPlaylists();
                     setCreateOpen(false);

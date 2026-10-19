@@ -4,7 +4,7 @@ import { useEffect } from "react";
  * Missing node means the serving machine, never a preference from another tab. */
 export interface Route { view: string; params: URLSearchParams }
 export const VIEW_NAMES: Record<string, string> = {
-  fleet: "Home", controls: "Controls", applications: "Applications", spotify: "Spotify",
+  desktop: "Desktop", seed: "Seed", fleet: "Home", controls: "Controls", applications: "Applications", spotify: "Spotify",
   desk: "Desk", projects: "Projects", agents: "Agents", services: "Services", data: "Data",
   files: "Files", edit: "Editor", term: "Sessions", cmux: "cmux", cloud: "Cloud", remote: "Screen remote",
 };
@@ -85,7 +85,8 @@ export function routeTitle(route = readRoute()): string {
     : route.view === "term" ? p.get("session")
     : route.view === "cmux" ? p.get("surface")
     : route.view === "agents" ? p.get("run") || p.get("task")
-    : route.view === "cloud" ? p.get("conversation") || p.get("profile") : null;
+    : route.view === "cloud" ? p.get("conversation") || p.get("profile")
+    : route.view === "spotify" ? p.get("id") || p.get("shelf") : null;
   if (detail) title = `${detail} · ${title}`;
   if (route.view === "applications" && p.get("app")) {
     title = p.get("app") === "vimm" ? `${p.get("tab") === "steam" ? "PC games · " : ""}The Vault` : p.get("app") === "afterglow" ? "Afterglow" : `${p.get("app")} · Applications`;

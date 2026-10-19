@@ -84,6 +84,7 @@ type Pending = {
   clientId: string;
   redirect: string;
   created: number;
+  returnHash?: string;
 };
 const read = <T>(key: string): T | null => {
   try {
@@ -125,6 +126,18 @@ export async function pkceChallenge(verifier: string): Promise<string> {
     .replace(/=+$/, "");
 }
 /** Begin Spotify authorization with the public app ID and PKCE. */
+// Keep only view parameters in the tab-local OAuth continuation. Never allow an
+// external return URL, authorization code, token, or unrelated application.
+export function spotifyReturnHash(hash: string): string {
+  if (!/^#\/spotify(?:\?|$)/.test(hash)) return "#/spotify";
+  const source = new URLSearchParams(hash.split("?")[1] || ""), params = new URLSearchParams();
+  for (const key of ["node", "q", "playlists", "shelf", "id", "page", "immersive", "radio"]) {
+    const value = source.get(key)?.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 300);
+    if (value) params.set(key, value);
+  }
+  params.sort();
+  return "#/spotify" + (params.size ? "?" + params : "");
+}
 export async function connectSpotify(clientId: string): Promise<void> {
   clientId = clientId.trim();
   if (!/^[a-f0-9]{32}$/i.test(clientId))
@@ -138,6 +151,7 @@ export async function connectSpotify(clientId: string): Promise<void> {
     clientId,
     redirect,
     created: Date.now(),
+    returnHash: spotifyReturnHash(location.hash),
   };
   const challenge = await pkceChallenge(pending.verifier);
   sessionStorage.setItem(PREFIX + "pending", JSON.stringify(pending));
@@ -200,31 +214,13 @@ export function finishSpotifyLogin(): Promise<boolean> {
   callback = (async () => {
     const pending = read<Pending>("pending");
     // Remove authorization codes before loading external scripts or artwork.
-    history.replaceState(null, "", location.pathname + "#/spotify");
+    const valid = !!pending && query.get("state") === pending.state && Date.now() - pending.created <= 600000 && pending.redirect === spotifyRedirect();
+    history.replaceState(null, "", location.pathname + (valid ? spotifyReturnHash(pending.returnHash || "") : "#/spotify"));
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
     sessionStorage.removeItem(PREFIX + "pending");
-    if (
-      !pending ||
-      query.get("state") !== pending.state ||
-      Date.now() - pending.created > 600000 ||
-      pending.redirect !== spotifyRedirect()
-    )
-      throw new Error(
-        "Spotify sign-in could not be verified. Please connect again from this tab.",
-      );
-    if (query.has("error"))
-      throw new Error(
-        "Spotify connection was canceled. You can connect again when ready.",
-      );
-    await tokenRequest(
-      new URLSearchParams({
-        grant_type: "authorization_code",
-        code: query.get("code")!,
-        redirect_uri: pending.redirect,
-        client_id: pending.clientId,
-        code_verifier: pending.verifier,
-      }),
-      pending.clientId,
-    );
+    if (!valid || !pending) throw new Error("Spotify sign-in could not be verified. Please connect again from this tab.");
+    if (query.has("error")) throw new Error("Spotify connection was canceled. You can connect again when ready.");
+    await tokenRequest(new URLSearchParams({ grant_type: "authorization_code", code: query.get("code")!, redirect_uri: pending.redirect, client_id: pending.clientId, code_verifier: pending.verifier }), pending.clientId);
     return true;
   })();
   return callback;
