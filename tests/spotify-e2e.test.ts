@@ -745,7 +745,9 @@ test("catalog navigation, playlist editing, queue, library, radio and video stay
     await page
       .getByRole("button", { name: "Close video playback", exact: true })
       .click();
-    expect(page.url()).toBe(base + "/#/spotify");
+    // closing the video leaves the listening room where it was (the playlist's own URL)
+    expect(page.url().startsWith(base + "/#/spotify")).toBe(true);
+    expect(page.url()).not.toContain("video");
     expect(
       await page.getByTestId("spotify-app").locator('a[href^="http"]').count(),
     ).toBe(0);
@@ -958,7 +960,7 @@ test("SDK audio tap saves non-silent playable audio and journal replays without 
   await page.getByRole("button", { name: /Play saved Test song/ }).click();
   await page.waitForFunction(() => {
     const a = document.querySelector(
-      ".music-recordings audio",
+      '[data-testid="saved-recording-audio"]',
     ) as HTMLAudioElement;
     return a && !a.paused && a.currentTime > 0.3;
   });
