@@ -10,6 +10,10 @@ open ~/Applications/Casework.app
 
 The native SwiftUI/AppKit launcher, Afterglow poster shelves/library/series pages, remote keyboard and AVKit player have no web renderer. Afterglow opens directly into Ready to watch, film and series shelves; selecting a downloaded film or episode starts playback without a second Play screen. Native Games uses ARM64 RetroArch and checksum-pinned Libretro cores. N64 uses ParaLLEl with the Ari64 dynamic recompiler and Glide64; the Mupen64Plus-Next/OpenGL-core path produced black frames on Clipper and is not selected. Web-only applications, full Cyberdeck and Afterglow's YouTube/music/playlists/advanced functions use an explicitly labelled, on-demand WebKit compatibility view. This is not a full native port of every app or the Expo server-delivered React Native modules. Compatibility navigation covers ordinary HTML controls; arbitrary canvas games still need their own gamepad implementation.
 
+## System-audio visualizer
+
+The **Visualizer** tile on Casework's home screen works without Spotify: it analyzes audio playing on this Mac from any app. Afterglow → Music → Visualizer (or V) uses the same capture; Spotify metadata is only used for the transport/title, never for audio samples. The fullscreen circular spectrum uses ScreenCaptureKit system-audio capture and Accelerate FFT, decays to stillness in silence, and honors Reduce Motion. Capture starts on entry and stops on exit. On first use macOS asks for Screen Recording permission; if denied, grant Casework access in System Settings → Privacy & Security → Screen & System Audio Recording, restart Casework, then press Retry. Streaming from a different computer is not captured: playback must actually reach Clipper's audio output. Do not run `install.sh` over a running Clipper app; build/test in a separate app path first.
+
 ## Controller
 
 - D-pad/left stick moves; A selects; B returns; Y or Home goes to Casework; X opens search.
@@ -37,3 +41,60 @@ Games discovers a paired node with the existing Vault API (currently Enuc), fall
 For video decode QA, launch with `--verify`: saved viewing positions are not changed; `/state` includes decoded-frame counts and GET `/video-frame` returns an actual AVFoundation frame. `game-screenshot` requests RetroArch's own framebuffer capture. These diagnostics are disabled in normal launches. Do not use Watch/download actions in smoke tests; play existing completed files or generated fixtures. Verification screenshots/logs remain outside the repository under Casework's Application Support folder.
 
 Architecture references: [AVKit](https://developer.apple.com/documentation/avkit/avplayerview), [GameController](https://developer.apple.com/documentation/gamecontroller), [RetroArch CLI](https://docs.libretro.com/guides/cli-intro/). Source `controller.js` provides spatial focus and native keyboard handoff only inside compatibility views. The home screen never loads WebKit. The existing Casework icon is reused from the mobile client. Close compatibility views before measuring native idle memory/CPU.
+
+## Spotify in native Afterglow
+
+Music opens a native SwiftUI listening room: the existing Afterglow Spotify shelf,
+account playlists/albums/liked songs, catalog search, playlist tracks, queue, Connect
+device selection, play/pause, next/previous, shuffle/repeat, volume and scrubbing.
+D-pad/A/B navigate every action; Start pauses, shoulders change tracks, X searches.
+Space/K and J/L control playback; pointer and physical typing hide controller hints.
+Starting a film pauses music started through Casework. Music can continue while browsing.
+
+**Connect Spotify** opens the existing Spotify OAuth application in the system browser.
+Casework uses PKCE and saves its own renewable login in macOS Keychain. Closing the
+browser does not disconnect the player. Account → Disconnect removes this Mac's saved
+login; Connect Spotify can reconnect or change accounts. First-time login still requires
+Spotify's browser consent. The existing signed-in Cyberdeck browser bridge remains a
+fallback until you establish a native login; no browser credentials are copied.
+
+The authenticated daemon hands off a one-time authorization code through
+`/api/spotify/native/*`, using the existing `http://127.0.0.1:4777/` redirect. Codes expire
+in ten minutes, are claimed once, and never enter persistent state or Casework events.
+The PKCE verifier and access/refresh tokens stay in the native process/Keychain. Native
+requests refresh automatically, coalesce simultaneous renewals, and honor rate limits.
+
+Playback uses the chosen Spotify Connect device. Clipper is selected automatically only
+when its Spotify app is available; other speakers require an explicit device selection.
+Sign into Spotify on Clipper once for local audio. The existing public Cyberdeck client ID
+is reused; no new developer app is needed. Premium/Spotify access restrictions still
+apply. The native UI has no embedded Spotify browser or DRM implementation. The separate
+Afterglow web application's saved-link embed remains its existing player.
+
+`music-fixture.py` serves isolated provider responses on loopback4779. Only the combination
+`--verify --music-fixture` enables that backend; `music-smoke.py` exercises actual native
+navigation and transport commands without changing Spotify or Afterglow account data.
+Restore `spotify-device`/`spotify-device-name` preferences after fixture runs. The browser
+bridge also has an isolated real-Chromium test for authentication, command delivery,
+plain-text Spotify mutation replies, rejected routes and credential non-disclosure.
+
+## Electric Sky visualizer
+
+Music includes a native Canvas visualizer: five flowing circular spectrum ribbons,
+with a full rainbow and soft colored halos. The rings expand with captured audio energy. Choose **Visualizer** with the controller or mouse, or press
+**V**, for the immersive view; **B/Escape** returns to the library without stopping music.
+D-pad/A still select the transport controls, Start pauses, and shoulders change tracks.
+Search leaves the immersive view and opens the normal input-aware search field.
+Animation is capped at30fps, freezes while paused/inactive, and respects Reduce Motion.
+Its spectrum follows local system audio through ScreenCaptureKit and Accelerate FFT;
+Spotify Connect provides track/transport metadata, not PCM. See the capture permission
+and standalone Visualizer instructions above.
+
+Native authorization checks (use a temporary executable; no real account needed):
+
+```sh
+swiftc -parse-as-library Support.swift SpotifyAuth.swift spotify-auth-test.swift -o /tmp/casework-spotify-auth-test -framework AppKit -framework GameController -framework Network -framework Security -framework CryptoKit
+/tmp/casework-spotify-auth-test
+# From repository root:
+bun test tests/spotify-native.test.ts
+```

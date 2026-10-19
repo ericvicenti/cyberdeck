@@ -21,6 +21,7 @@ export type SpotifyLocation = {
   page: number;
   immersive: boolean;
   radio: boolean;
+  recording: string;
 };
 
 /** Parse and canonicalize only the URL state owned by the listening room. */
@@ -44,6 +45,10 @@ export function spotifyLocation(params: URLSearchParams): {
   const resolvedShelf: SpotifyShelf = (entity && !id) || (shelf === "search" && !query) ? "home" : shelf;
   const radio = resolvedShelf === "search" && canonical.get("radio") === "1";
 
+  const rawRecording = (canonical.get("recording") || "").trim();
+  const recording = resolvedShelf === "history" && rawRecording.length <= 512 && !/[\u0000-\u001f]/.test(rawRecording) ? rawRecording : "";
+  canonical.delete("recording");
+  if (recording) canonical.set("recording", recording);
   canonical.delete("shelf");
   canonical.delete("id");
   canonical.delete("q");
@@ -66,6 +71,7 @@ export function spotifyLocation(params: URLSearchParams): {
       page: resolvedShelf === "home" ? 1 : page,
       immersive,
       radio,
+      recording,
     },
     canonical,
   };
@@ -74,13 +80,14 @@ export function spotifyLocation(params: URLSearchParams): {
 export function spotifyRouteParams(
   current: URLSearchParams,
   next: Pick<SpotifyLocation, "shelf"> &
-    Partial<Pick<SpotifyLocation, "id" | "query" | "page" | "immersive" | "radio">>,
+    Partial<Pick<SpotifyLocation, "id" | "query" | "page" | "immersive" | "radio" | "recording">>,
 ) {
   const params = new URLSearchParams(current);
-  for (const key of ["shelf", "id", "q", "page", "immersive", "radio"])
+  for (const key of ["shelf", "id", "q", "page", "immersive", "radio", "recording"])
     params.delete(key);
   if (next.shelf !== "home") params.set("shelf", next.shelf);
   if (next.id) params.set("id", next.id);
+  if (next.recording && next.shelf === "history") params.set("recording", next.recording);
   if (next.query) params.set("q", next.query.trim());
   if ((next.page || 1) > 1) params.set("page", String(next.page));
   if (next.immersive) params.set("immersive", "1");

@@ -61,11 +61,17 @@ export function RemoteBrowser({ profile, url, onState, className = "" }: Props) 
   // connect
   useEffect(() => {
     let alive = true;
+    readyRef.current = false;
+    pendingRef.current = null;
+    acknowledgedProtocolRef.current = false;
+    deliveredRef.current = false;
+    stateRef.current = { url: "", title: "" };
     const ws = new WebSocket(browserWsUrl(profile));
     wsRef.current = ws;
     setStatus("connecting"); setError(null);
-    ws.onopen = () => { fit(); };
+    ws.onopen = () => { if (alive) fit(); };
     ws.onmessage = (ev) => {
+      if (!alive) return;
       let m: any; try { m = JSON.parse(String(ev.data)); } catch { return; }
       if (m.t === "frame") { setStatus("live"); draw(m as Frame); }
       else if (m.t === "state" && typeof m.url === "string" && typeof m.title === "string") {

@@ -1,5 +1,5 @@
 import { useRouteTitle } from "../lib/navigation";
-import { AfterglowFrame } from "./AfterglowFrame";
+import { ApplicationFrames } from "./ApplicationFrames";
 import { Vault } from "./Vault";
 import { pairingOrigin } from "../lib/pairing";
 import { useEffect, useState } from "react";
@@ -11,24 +11,26 @@ type Application = { id: string; name: string; description: string; url: string 
 let lastApp = "";
 /** `casework.apps` are the example apps that run natively in the Casework Desk app (the kitchen sink). */
 type Listing = { applications: Application[]; casework?: { apps: CaseworkApp[]; devices: { id: string }[]; kiosk: boolean } };
-export function Applications({ params, onLocked }: { params: URLSearchParams; onLocked: () => void }) {
+export function Applications({ params, onLocked, visible = true }: { params: URLSearchParams; onLocked: () => void; visible?: boolean }) {
   const [apps, setApps] = useState<Application[]>([]);
   const [casework, setCasework] = useState<Listing["casework"]>();
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
-  const [retry, setRetry] = useState(0);
   const [pairing, setPairing] = useState<{ qr: string; link: string } | null>(null);
   const pair = async () => { try { setPairing(await api("/api/casework/pairing?url=" + encodeURIComponent(await pairingOrigin()), { local: true })); } catch (e) { setError(String(e)); } };
   useEffect(() => {
+    if (!visible) return;
     let alive = true;
     api<Listing>("/api/applications", { local: true }).then(r => { if (alive) { setApps(r.applications.filter(a => /^https?:\/\//.test(a.url))); setCasework(r.casework); setLoaded(true); } }).catch(e => { if (alive) { if (e instanceof ApiError && e.status === 401) onLocked(); setError(String(e)); } });
     return () => { alive = false; };
-  }, []);
+  }, [visible]);
   const app = apps.find(a => a.id === params.get("app"));
   if (params.get("app")) lastApp = params.get("app")!;
   const example = casework?.apps.find(a => a.id === params.get("app"));
   const missing = loaded && !!params.get("app") && !app && !example && !["vimm", "steam"].includes(params.get("app")!);
-  useRouteTitle(missing ? "Application not found" : example || app?.id === "afterglow" ? undefined : app?.name);
+  useRouteTitle(!visible ? undefined : missing ? "Application not found" : example || app?.id === "afterglow" ? undefined : app?.name);
+  const content = () => {
+  if (!visible) return null;
   if (missing) return <section className="p-6"><h1 className="text-xl">Application not found</h1><p className="my-3">“{params.get("app")}” is not configured on this machine.</p><button onClick={() => navigate("applications")}>← Applications</button></section>;
   if (params.get("app") === "vimm") return <Vault params={params} onLocked={onLocked} />;
   if (params.get("app") === "steam") return <Vault params={new URLSearchParams("tab=steam")} onLocked={onLocked} />;
@@ -39,15 +41,7 @@ export function Applications({ params, onLocked }: { params: URLSearchParams; on
     </div>
     <div className="min-h-0 flex-1"><CaseworkConsole app={example} params={params} onLocked={onLocked} /></div>
   </section>;
-  if (app?.id === "afterglow") return <AfterglowFrame key={app.url} url={app.url} params={params} name={app.name} />;
-  if (app) return <section className="flex h-full flex-col" aria-label={app.name}>
-    <div className="flex shrink-0 items-center gap-4 border-b border-zinc-800 px-4 py-2 text-sm">
-      <button data-tv-frame-back onClick={() => navigate("applications")} className="text-cyan-300">← Applications</button>
-      <strong>{app.name}</strong><span className="flex-1" />
-      <button onClick={() => setRetry(n => n + 1)}>Reload</button>
-    </div>
-    <iframe key={`${app.id}-${retry}`} data-tv-autofocus onLoad={e => { if (window.__cyberdeckInputBridge) window.__cyberdeckTV?.focusElement(e.currentTarget); }} title={app.name} src={app.url} allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowFullScreen className="min-h-0 w-full flex-1 border-0 bg-black" />
-  </section>;
+  if (app) return null;
   return <section className="h-full overflow-auto p-6"><h1 className="text-2xl font-semibold">Applications</h1><p className="mt-2 text-sm text-zinc-400">Your apps in Cyberdeck.</p><button className="mt-4 mr-3 rounded-lg border border-zinc-700 px-4 py-2 text-sm" onClick={() => navigate("controls")}>Controller & keyboard controls</button>
     <button className="mt-4 rounded-lg border border-cyan-700 px-4 py-2 text-sm text-cyan-300" onClick={pair}>Connect Casework remote</button>
     {pairing && <div role="dialog" aria-label="Connect Casework" className="mt-4 max-w-md rounded-xl border border-zinc-700 bg-zinc-900 p-5"><h2 className="text-lg">Connect buoy</h2><p className="my-3 text-sm text-zinc-400">In Casework, open Server settings → Scan pairing QR → Use this server. Keep Tailscale connected. {casework?.kiosk ? "This gives control of this machine’s whole Cyberdeck screen, with the deck and its example apps underneath." : "The device then runs the whole deck, with the example apps under Apps."}</p><div className="max-w-72 [&>svg]:h-auto [&>svg]:w-full" dangerouslySetInnerHTML={{ __html: pairing.qr }} /><button className="mt-3 text-cyan-300" onClick={() => setPairing(null)}>Done</button></div>}
@@ -61,4 +55,7 @@ export function Applications({ params, onLocked }: { params: URLSearchParams; on
     </button>)}</div>{loaded && !apps.length && !casework?.apps.length && <p className="mt-6 text-zinc-400">No additional applications configured on this machine.</p>}
     <GamesSection />
   </section>;
+  };
+  return <>{content()}<ApplicationFrames app={app} params={params} visible={visible} /></>;
+
 }

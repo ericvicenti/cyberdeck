@@ -22,7 +22,10 @@ out=pathlib.Path.home()/'Library/Application Support/Casework'
 (out/'qa-player-keyboard.png').write_bytes(call('/snapshot',raw=True))
 action('up');assert call()['player']['controlSelection']==2
 action('right');assert call()['player']['controlSelection']==3
-before=call()['player']['originalTime'];action('select');settle();time.sleep(1)
+before=call()['player']['originalTime'];action('select');settle()
+for _ in range(20):
+ if call()['player']['originalTime']>=before+8:break
+ time.sleep(.25)
 assert call()['player']['originalTime']>=before+8
 (out/'qa-player-controller.png').write_bytes(call('/snapshot',raw=True))
 action('menu');assert call()['player']['menu'];action('back');assert not call()['player']['menu']

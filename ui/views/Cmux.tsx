@@ -36,11 +36,14 @@ export function Cmux({ params, onLocked }: { params: URLSearchParams; onLocked: 
   const all = useMemo(() => (tree ? flatten(tree.tree) : []), [tree]);
   const surfaces = useMemo(() => all.filter((n) => n.kind === "surface"), [all]);
   useEffect(() => { if (!surface && surfaces.length) updateParams({ surface: (surfaces.find((s) => s.active) ?? surfaces.find((s) => s.selected) ?? surfaces[0]).ref }, "replace"); }, [surface, surfaces]);
-  useRouteTitle(surface && tree ? `${surfaces.find(s => s.ref === surface)?.title ?? surface} · cmux` : undefined);
+  const selectedSurface = surfaces.find(s => s.ref === surface);
+  const missingSurface = !!surface && !!tree?.available && !!tree.running && !selectedSurface;
+  useRouteTitle(missingSurface ? "Surface not found · cmux" : tree && (!tree.available || !tree.running) ? "cmux unavailable" : selectedSurface ? `${selectedSurface.title ?? surface} · cmux` : undefined);
   const workspaceOf = (ref: string): Node | undefined => { for (const w of all.filter((n) => n.kind === "workspace")) if (flatten(w.children).some((n) => n.ref === ref)) return w; return undefined; };
 
   useEffect(() => {
-    if (!surface) return;
+    setScreen("");
+    if (!surface || !selectedSurface) return;
     let alive = true;
     const tick = async () => {
       try { const r = await api<{ text: string }>(`/api/cmux/screen?surface=${encodeURIComponent(surface)}&lines=${scrollback ? 1000 : 200}${scrollback ? "&scrollback=1" : ""}`); if (alive) setScreen(r.text); } catch (e) { if (alive) setScreen(`(${e instanceof Error ? e.message : e})`); }
@@ -48,7 +51,7 @@ export function Cmux({ params, onLocked }: { params: URLSearchParams; onLocked: 
     tick();
     const iv = setInterval(() => { if (document.visibilityState === "visible") tick(); }, 1500);
     return () => { alive = false; clearInterval(iv); };
-  }, [surface, scrollback]);
+  }, [surface, scrollback, !!selectedSurface]);
   useEffect(() => { if (screenRef.current) screenRef.current.scrollTop = screenRef.current.scrollHeight; }, [screen]);
 
   const act = async (label: string, fn: () => Promise<unknown>) => {
@@ -90,6 +93,7 @@ export function Cmux({ params, onLocked }: { params: URLSearchParams; onLocked: 
             <button onClick={() => setCreating((v) => !v)} className="hud-badge neon px-3 py-1.5 hover:bg-sky-500/10">New workspace</button>
           </div>
         </header>
+        {missingSurface && <p role="alert" className="mt-4">Surface not found: {surface}. Select an available surface.</p>}
         {creating && (
           <form className="hud-card mt-4 grid gap-2 p-4 sm:grid-cols-[160px_1fr_1fr_auto]" onSubmit={(e) => { e.preventDefault(); act("new workspace", () => post("/api/cmux/workspace", { ...form, focus: false })); setCreating(false); }}>
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="name" className="rounded-sm border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-100 outline-none" />

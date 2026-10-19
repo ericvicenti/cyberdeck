@@ -119,6 +119,7 @@ export async function readMusicAudio(id: string): Promise<Blob | undefined> {
 /** Merge node backups into the local index and retry finalized browser-only recordings. */
 export async function refreshMusicRecordings(
   account: string,
+  { sync = true }: { sync?: boolean } = {},
 ): Promise<MusicRecording[]> {
   const local = await readMusicRecordings(account);
   const remote = await api<{ recordings: MusicRecording[] }>(
@@ -136,7 +137,7 @@ export async function refreshMusicRecordings(
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error);
   });
-  for (const record of local.filter((r) => r.finalized && !r.synced)) {
+  for (const record of local.filter((r) => sync && r.finalized && !r.synced)) {
     const audio = await readMusicAudio(record.id);
     if (audio) await syncMusicRecording(record, audio);
   }
@@ -150,7 +151,7 @@ export async function getMusicRecordingAudio(
   const local = await readMusicAudio(record.id);
   if (local) return local;
   const response = await fetch(
-    `/api/music/recordings/${record.id}?${new URLSearchParams({ account: record.account })}`,
+    `/api/music/recordings/${encodeURIComponent(record.id)}?${new URLSearchParams({ account: record.account })}`,
     {
       headers: { authorization: `Bearer ${token()}` },
       signal: AbortSignal.timeout(60000),

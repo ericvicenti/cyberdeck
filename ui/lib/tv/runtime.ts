@@ -725,6 +725,12 @@ export function installTVInput(
     }
   }
   const onKey = (e: KeyboardEvent) => {
+    // Physical text editing belongs to the field, including Enter and editor shortcuts.
+    if (document.documentElement.dataset.inputMode === "keyboard" &&
+        editable(document.activeElement as HTMLElement) && e.key !== "Escape") return;
+    // The visible live Desk owns Space while its push-to-talk call is armed.
+    const talk = document.querySelector<HTMLElement>('[data-testid="talk-button"][data-phase="live"][data-mode="push-to-talk"]');
+    if (e.key === " " && talk && isVisible(talk)) return;
     if (document.documentElement.hasAttribute("data-vault-playing")) return;
     if (!e.isTrusted && e.key === "Escape") return;
     if (e.altKey || e.ctrlKey || e.metaKey || e.isComposing) return;

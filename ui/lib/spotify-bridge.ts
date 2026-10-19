@@ -1,4 +1,4 @@
-import { spotifyApi, spotifyConnected } from './spotify';
+import { spotifyApi, spotifyConnected, connectSpotify, spotifyClientId } from './spotify';
 import { token } from './api';
 
 // Reuse the signed-in tab; never export Spotify credentials to a node or client.
@@ -43,4 +43,12 @@ export function startSpotifyBridge() {
 }
 if (typeof window !== 'undefined' && !(window as any).__afterglowSpotifyBridge) {
   (window as any).__afterglowSpotifyBridge = true; startSpotifyBridge();
+  // Explicit native Connect button reuses this app's existing PKCE callback.
+  if (new URLSearchParams(location.search).get('afterglowSpotify') === 'connect') {
+    history.replaceState(null, '', location.pathname + '#/spotify');
+    if (!spotifyConnected()) void connectSpotify(spotifyClientId()).catch(error => {
+      const show = () => { const banner = document.createElement('p'); banner.setAttribute('role', 'alert'); banner.textContent = String(error.message || error); document.body.prepend(banner); };
+      if (document.body) show(); else document.addEventListener('DOMContentLoaded', show, {once:true});
+    });
+  }
 }

@@ -1,3 +1,4 @@
+import { useRouteTitle } from "../lib/navigation";
 import { confirmAction } from '../lib/tv/confirm';
 import { useEffect, useMemo, useState } from "react";
 import { api, post, wsUrl, navigate, activeNode, activeNodeName, fmtAgo, ApiError } from "../lib/api";
@@ -53,6 +54,9 @@ export function Services({ params, onLocked }: { params: URLSearchParams; onLock
   const hosts = ov?.status?.hosts ?? [];
   const projects = ov?.projects ?? [];
   const me = ov?.status?.host ?? "";
+  const missingHost = !!ov && !!focusHost && !hosts.some(h => h.name.toLowerCase() === focusHost.toLowerCase());
+  const missingService = !!probe && !!focusSvc && !missingHost && !probe.rows.some(r => r.service === focusSvc && (!focusHost || r.host.toLowerCase() === focusHost.toLowerCase()));
+  useRouteTitle(err && !ov ? "Services unavailable" : missingHost ? "Host not found · Services" : missingService ? "Service not found · Services" : undefined);
   const down = (probe?.rows ?? []).filter((r) => r.ok === false).length;
   const onHost = (host: string, cmd: string | undefined, title: string) => {
     const e = openOnHost({ host, me, hosts, nodes, cmd, title });
@@ -74,6 +78,7 @@ export function Services({ params, onLocked }: { params: URLSearchParams; onLock
           <button onClick={probeNow} disabled={busy || !ov} data-testid="probe-now" className="hud-badge neon px-3 py-1.5 hover:bg-sky-500/10 disabled:opacity-40">{busy ? "Probing…" : "Probe now"}</button>
         </header>
         {err && !ov && <div className="mt-6 hud-card p-6 text-sm text-zinc-400">{err}</div>}
+        {missingService && <p role="alert" className="mt-4">Service not found: {focusSvc}{focusHost ? ` on ${focusHost}` : ""}.</p>}
         <div className="mt-5 space-y-3">
           {hosts.filter((h) => !focusHost || h.name.toLowerCase() === focusHost.toLowerCase()).map((h) => {
             const rows = byHost.get(h.name) ?? [];

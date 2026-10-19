@@ -2,7 +2,8 @@
 // tools and MCP servers, system prompt, collaborators and settings. Cyberdeck only supplies the host
 // (ui/lib/seed-agents.ts) and keeps the route in its hash URL (#/seed?r=<path>). The published
 // package keeps this view aligned with the UI Seed ships without copying that UI into Cyberdeck.
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
+import { updateParams, useRouteTitle } from "../lib/navigation";
 import { SeedAgentsProvider, SeedAgentsView, seedAgentsRouteFromPath, seedAgentsRouteToPath, type SeedAgentsRoute } from "@seed-hypermedia/agents-ui";
 import "@seed-hypermedia/agents-ui/styles.css";
 import "./seed-agents.css";
@@ -12,23 +13,50 @@ import { seedHash, useSeedAgentsHost } from "../lib/seed-agents";
 /** The whole agents UI at the route in the hash (`#/seed?r=…`). */
 export default function SeedAgents({ params }: { params: URLSearchParams }) {
   const path = params.get("r") ?? "";
-  const route = useMemo(() => seedAgentsRouteFromPath(path), [path]);
+  const parsed = useMemo(() => {
+    try {
+      const route = seedAgentsRouteFromPath(path);
+      const canonical = seedAgentsRouteToPath(route);
+      if (path.replace(/^\/+/, "") && !canonical) return null;
+      return { route, canonical };
+    } catch { return null; }
+  }, [path]);
+  useEffect(() => {
+    if (parsed && path !== parsed.canonical) updateParams({ r: parsed.canonical || null }, "replace");
+  }, [path, parsed]);
+  useRouteTitle(parsed ? undefined : "Page not found · Seed");
+  if (!parsed) return <section className="p-6"><h1>Page not found</h1><p>This Seed link is not recognised.</p><button onClick={() => navigate("seed")}>Open Seed agents</button></section>;
+  const route = parsed.route;
   return (
     <SeedAgentsEmbed
       route={route}
+      title={seedRouteTitle(route)}
       onRouteChange={(_next, mode, r) => {
-        if (mode === "replace") history.replaceState(null, "", seedHash(r));
-        else navigate("seed", r ? { r } : {});
+        navigate("seed", r ? { r } : {}, mode);
       }}
     />
   );
 }
 
+function seedRouteTitle(route: SeedAgentsRoute): string {
+  switch (route.key) {
+    case "agents": return "Seed";
+    case "agent-server": return `${route.serverUrl} · Seed server`;
+    case "agent-session": return `${route.sessionId} · Seed session`;
+    case "agent-run": return `${route.runId} · Seed run`;
+    case "agent": return `${route.memoryPath || route.triggerId || route.tab || "sessions"} · ${route.agentId} · Seed`;
+  }
+}
+
 type RouteChange = (route: SeedAgentsRoute, mode: "push" | "replace", path: string) => void;
 
 /** The agents UI at one route, for other views to embed (Sessions shows Seed sessions with it). */
-export function SeedAgentsEmbed({ route, onRouteChange, node = activeNode() }: { route: SeedAgentsRoute; onRouteChange?: RouteChange; node?: string }) {
+export function SeedAgentsEmbed({ route, onRouteChange, node = activeNode(), title }: { route: SeedAgentsRoute; onRouteChange?: RouteChange; node?: string; title?: string }) {
   const { host, session, error, retry } = useSeedAgentsHost(node);
+  useRouteTitle(title ? error ? "Seed agents unavailable"
+    : host && session && !session.available ? "Seed identity unavailable"
+    : host && session && !session.reachable ? "Seed server unavailable"
+    : title : undefined);
   if (error) {
     return (
       <div className="m-4 hud-card p-4 text-sm" role="alert">
@@ -55,7 +83,7 @@ export function SeedAgentsEmbed({ route, onRouteChange, node = activeNode() }: {
         host={host}
         route={route}
         onRouteChange={onRouteChange && ((next, mode) => onRouteChange(next, mode, seedAgentsRouteToPath(next)))}
-        openRouteInNewWindow={(next) => window.open(seedHash(seedAgentsRouteToPath(next)), "_blank", "noopener")}
+        openRouteInNewWindow={(next) => window.open(seedHash(seedAgentsRouteToPath(next), node), "_blank", "noopener")}
       >
         <SeedAgentsView className="min-h-0 flex-1 overflow-auto" />
       </SeedAgentsProvider>

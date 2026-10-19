@@ -4,21 +4,22 @@ import SwiftUI
 // LazyVGrid/ScrollViewReader rendering a previous page even though the model moved on.
 struct CinemaView: View {
     @ObservedObject var model: Workspace
+    let page: Page
     private let accent = Color(red: 0.98, green: 0.33, blue: 0.25)
     private var featured: Tile? {
-        if let feature = model.page.feature { return feature }
-        if model.page.tiles.indices.contains(model.selection), model.page.tiles[model.selection].image != nil { return model.page.tiles[model.selection] }
-        return model.page.tiles.first(where: { $0.image != nil })
+        if let feature = page.feature { return feature }
+        if page.tiles.indices.contains(model.selection), page.tiles[model.selection].image != nil { return page.tiles[model.selection] }
+        return page.tiles.first(where: { $0.image != nil })
     }
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 24) {
                 Text("AFTERGLOW").font(.system(size: 24, weight: .black, design: .rounded)).tracking(4).foregroundStyle(accent)
                 Spacer()
-                if let navigation = model.page.shelves.first {
+                if let navigation = page.shelves.first {
                     ForEach(navigation.start..<(navigation.start + navigation.count), id: \.self) { index in
-                        Button { model.selection = index; model.input("select") } label: {
-                            Text(model.page.tiles[index].title).font(.system(size: 16, weight: .semibold))
+                        Button { guard model.page.id == page.id else { return }; model.selection = index; model.input("select") } label: {
+                            Text(page.tiles[index].title).font(.system(size: 16, weight: .semibold))
                                 .padding(.horizontal, 13).padding(.vertical, 11)
                                 .background(model.selection == index && model.inputMode != .pointer ? accent : .clear)
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -30,15 +31,15 @@ struct CinemaView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 32) {
                         hero
-                        ForEach(Array(model.page.shelves.dropFirst().enumerated()), id: \.offset) { _, row in
+                        ForEach(Array(page.shelves.dropFirst().enumerated()), id: \.offset) { _, row in
                             VStack(alignment: .leading, spacing: 15) {
                                 Text(row.title).font(.system(size: 25, weight: .bold)).padding(.horizontal, 48)
                                 ScrollViewReader { horizontal in
                                     ScrollView(.horizontal) {
                                         HStack(alignment: .top, spacing: 22) {
                                             ForEach(row.start..<(row.start + row.count), id: \.self) { index in
-                                                CinemaPoster(tile: model.page.tiles[index], selected: model.selection == index && model.inputMode != .pointer, accent: accent) {
-                                                    model.selection = index; model.input("select")
+                                                CinemaPoster(tile: page.tiles[index], selected: model.selection == index && model.inputMode != .pointer, accent: accent) {
+                                                    guard model.page.id == page.id else { return }; model.selection = index; model.input("select")
                                                 }.id(index)
                                             }
                                         }.padding(.horizontal, 48).padding(.vertical, 10)
@@ -51,13 +52,13 @@ struct CinemaView: View {
                                 }
                             }.id(row.start)
                         }
-                        if model.page.shelves.count < 2 && !model.busy {
+                        if page.shelves.count < 2 && !model.busy {
                             Text("Nothing here yet. Browse Films or Series to find something to watch.").foregroundStyle(.secondary).padding(48)
                         }
                     }.padding(.bottom, 30)
                 }.scrollIndicators(.hidden)
                 .onChange(of: model.selection) { _, value in
-                    guard let row = model.page.shelves.first(where: { value >= $0.start && value < $0.start + $0.count }) else { return }
+                    guard let row = page.shelves.first(where: { value >= $0.start && value < $0.start + $0.count }) else { return }
                     withAnimation(.easeOut(duration: 0.18)) { vertical.scrollTo(row.start, anchor: row.start == 0 ? .top : .center) }
                 }
             }
@@ -81,7 +82,7 @@ struct CinemaView: View {
             LinearGradient(colors: [.black.opacity(0.05), .black.opacity(0.9)], startPoint: .top, endPoint: .bottom)
             LinearGradient(colors: [.black.opacity(0.7), .clear], startPoint: .leading, endPoint: .trailing)
             VStack(alignment: .leading, spacing: 16) {
-                Text(model.page.title == "Afterglow" ? "YOUR OWN LITTLE CINEMA" : model.page.title.uppercased()).font(.system(size: 13, weight: .bold)).tracking(3).foregroundStyle(accent)
+                Text(page.title == "Afterglow" ? "YOUR OWN LITTLE CINEMA" : page.title.uppercased()).font(.system(size: 13, weight: .bold)).tracking(3).foregroundStyle(accent)
                 Text(featured?.title ?? "Something good is waiting.").font(.system(size: 46, weight: .bold, design: .rounded)).lineLimit(2)
                 Text(featured?.subtitle ?? "Films, series and your library.").font(.system(size: 18)).foregroundStyle(.white.opacity(0.8)).lineLimit(3).frame(maxWidth: 750, alignment: .leading)
             }.padding(.horizontal, 48).padding(.bottom, 32)

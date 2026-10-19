@@ -39,7 +39,7 @@ import {
   SkipFwdIcon,
 } from "../lib/icons";
 import "./spotify.css";
-import { SpotifyRecordings } from "./SpotifyRecordings";
+import { SpotifyRecordings, useRecordingPlayback } from "./SpotifyRecordings";
 import { SpotifyVisualizer } from "./SpotifyVisualizer";
 
 type Card = (SpotifyAlbum | SpotifyArtist | SpotifyPlaylist) & {
@@ -143,7 +143,7 @@ export function Spotify({
       Partial<
         Pick<
           SpotifyLocation,
-          "id" | "query" | "page" | "immersive" | "radio"
+          "id" | "query" | "page" | "immersive" | "radio" | "recording"
         >
       >,
     mode: "push" | "replace" = "push",
@@ -169,6 +169,7 @@ export function Spotify({
       query: currentLocation.query,
       page: currentLocation.page,
       radio: currentLocation.radio,
+      recording: currentLocation.recording,
     });
     const nextHash = routeHash("spotify", next);
     if (history.state?.cyberdeckSpotifyImmersiveFrom === nextHash)
@@ -841,7 +842,7 @@ export function Spotify({
     });
   };
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || location.hash !== routeHash("spotify", params)) return;
     const parsed = spotifyLocation(params);
     if (routeHash("spotify", parsed.canonical) !== location.hash) {
       writeRoute("spotify", parsed.canonical, "replace");
@@ -890,7 +891,7 @@ export function Spotify({
     void restore();
   }, [visible, connected, account, routeKey]);
   useRouteTitle(
-    visible && resolvedRouteKey === routeKey
+    visible && !currentLocation.recording && location.hash === routeHash("spotify", params) && resolvedRouteKey === routeKey
       ? shelf.kind === "home"
         ? "Spotify"
         : `${shelf.title} · Spotify`
@@ -1249,6 +1250,9 @@ export function Spotify({
       ))}
     </div>
   );
+  const recordingPlayback = useRecordingPlayback(account, startSavedAudio);
+  const selectRecording = (recording: string) => navigateMusic({ shelf: "history", recording });
+  useRouteTitle(visible && currentLocation.recording && !account ? "Recording unavailable · Saved audio · Spotify" : undefined);
   return (
     <section
       ref={root}
@@ -1258,6 +1262,7 @@ export function Spotify({
       aria-label="Spotify music"
       data-testid="spotify-app"
     >
+      {recordingPlayback.element}
       <header className="music-header">
         <div>
           <span className="music-eyebrow">CYBERDECK / MUSIC</span>
@@ -1307,6 +1312,7 @@ export function Spotify({
           {notice}
         </div>
       )}
+      {currentLocation.recording && !account && <section className="music-alert" aria-label="Recording details"><h2>Recording unavailable</h2><p>Sign in with the account that saved this recording, or open the link in the browser where it was saved.</p></section>}
       {!connected ? (
         <div className="music-welcome">
           <div className="music-welcome-art" aria-hidden="true">
@@ -1364,7 +1370,7 @@ export function Spotify({
             </details>
             {originError && <p role="alert">{originError}</p>}
             {account && (
-              <SpotifyRecordings account={account} onStart={startSavedAudio} />
+              <SpotifyRecordings account={account} playback={recordingPlayback} recordingId={currentLocation.recording} visible={visible} onSelect={selectRecording} />
             )}
           </div>
         </div>
@@ -1497,7 +1503,10 @@ export function Spotify({
                   </p>
                   <SpotifyRecordings
                     account={account}
-                    onStart={startSavedAudio}
+                    playback={recordingPlayback}
+                    recordingId={currentLocation.recording}
+                    visible={visible}
+                    onSelect={selectRecording}
                   />
                 </>
               )}
