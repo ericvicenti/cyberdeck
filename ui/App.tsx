@@ -4,6 +4,7 @@ import { refreshRouteTitle, routeHash } from "./lib/navigation";
 import { useEffect, useLayoutEffect, useState } from "react";
 import { parseHash, navigate, api, activeNode, activeNodeName, setActiveNode, rememberNodeNames, type Route } from "./lib/api";
 import { ShieldIcon, ServerIcon, FolderIcon, TerminalIcon, GitIcon, LayersIcon, BotIcon, PulseIcon, GridIcon, CloudIcon, MicIcon, MusicIcon, SeedIcon } from "./lib/icons";
+import { RetainedView } from "./components/RetainedView";
 import { Spotify } from "./views/Spotify";
 import { Cloud } from "./views/Cloud";
 import { Applications } from "./views/Applications";
@@ -93,7 +94,6 @@ export function App() {
     };
   }, [locked]);
 
-  if (route.view === "remote") return <ScreenRemote />;
   if (locked) return <TokenGate />;
   const lock = () => { if (location.hash === routeHash(route.view, route.params)) setLocked(true); };
   const isActive = (v: string) => route.view === v || (v === "files" && route.view === "edit");
@@ -112,8 +112,6 @@ export function App() {
       {!knownRoute && <section className="p-6"><h1 className="text-xl">Page not found</h1><p className="my-3">No Cyberdeck view named “{route.view}”.</p><button onClick={() => navigate("fleet")}>Go home</button></section>}
       {route.view === "desktop" && <Suspense fallback={<div className="p-6">Loading desktop…</div>}><Desktop key={`desktop-${nodeGen}-${nodeId}`} /></Suspense>}
       {route.view === "fleet" && <Home onLocked={lock} key={`fleet-${nodeGen}`} />}
-      {route.view === "applications" && <Applications params={route.params} onLocked={lock} />}
-      {route.view === "desk" && <Desk onLocked={lock} key={`desk-${nodeGen}-${nodeId}`} />}
       {route.view === "projects" && <Projects params={route.params} onLocked={lock} key={`projects-${nodeGen}-${nodeId}`} />}
       {route.view === "seed" && <Suspense fallback={<div className="p-6 text-xs text-zinc-500">Loading Seed agents…</div>}><SeedAgents params={route.params} /></Suspense>}
       {route.view === "agents" && <Agents params={route.params} onLocked={lock} key={`agents-${nodeGen}-${nodeId}`} />}
@@ -128,7 +126,9 @@ export function App() {
   );
 
   return (
-    <div className="scanlines flex h-[100dvh] flex-col overflow-hidden bg-zinc-950 text-zinc-200">
+    <>
+    {route.view === "remote" && <ScreenRemote />}
+    <div style={route.view === "remote" ? { display: "none" } : undefined} inert={route.view === "remote"} className="scanlines flex h-[100dvh] flex-col overflow-hidden bg-zinc-950 text-zinc-200">
       {/* title bar: game HUD */}
       <header className="hud-chrome flex h-9 shrink-0 items-center gap-2 border-b px-3">
         <ShieldIcon size={15} className="neon" />
@@ -136,7 +136,7 @@ export function App() {
         <span className="hidden text-[10px] uppercase tracking-widest text-zinc-600 sm:inline">/ {NAV.find((n) => isActive(n.view))?.label ?? route.view}</span>
         <div className="hidden items-center gap-1.5 pl-3 md:flex" data-testid="hud-chips">
           <span className="hud-chip text-zinc-300"><span className="led led-on" />{nodeId ? activeNodeName() : fleet?.self.name ?? "local"}</span>
-          <span className="hud-chip text-zinc-300"><span className={`led ${onlineCount === (fleet?.nodes.length ?? 0) ? "led-on" : "led-warn"}`} />fleet {onlineCount}/{fleet?.nodes.length ?? 0}</span>
+          <button type="button" data-testid="header-fleet" className="hud-chip text-zinc-300 hover:text-zinc-100" onClick={() => navigate("fleet")} title="Open Fleet overview"><span className={`led ${onlineCount === (fleet?.nodes.length ?? 0) ? "led-on" : "led-warn"}`} />fleet {onlineCount}/{fleet?.nodes.length ?? 0}</button>
           <button className="hud-chip text-zinc-300 hover:text-zinc-100" onClick={() => navigate("agents")}><span className={`led ${hud?.running ? "led-run" : "led-off"}`} />tasks {hud ? `${hud.tasks} open` : "—"}{hud?.running ? ` · ${hud.running} run` : ""}</button>
           <button className={`hud-chip ${hud?.down ? "neon-red" : "text-zinc-300"} hover:text-zinc-100`} onClick={() => navigate("services")}><span className={`led ${hud?.down ? "led-err" : hud?.down === 0 ? "led-on" : "led-off"}`} />svc {hud?.down == null ? "—" : hud.down ? `${hud.down} down` : "ok"}</button>
           {cmuxCount != null && <button className="hud-chip text-zinc-300 hover:text-zinc-100" onClick={() => navigate("cmux")}><span className="led led-on" />cmux {cmuxCount}</button>}
@@ -181,7 +181,9 @@ export function App() {
           ))}
         </aside>
 
-        <main className="min-w-0 flex-1 overflow-hidden">{view}{spotifyOpened && <Spotify visible={route.view === "spotify"} />}</main>
+        <main className="min-w-0 flex-1 overflow-hidden">{view}
+          <RetainedView visible={route.view === "applications"} params={route.params}>{(params, visible) => <Applications params={params} visible={visible} onLocked={lock} />}</RetainedView>
+          <RetainedView visible={route.view === "desk"} params={route.params}>{(params, visible) => <Desk params={params} visible={visible} onLocked={lock} />}</RetainedView>{spotifyOpened && <Spotify visible={route.view === "spotify"} params={route.view === "spotify" ? route.params : undefined} />}</main>
       </div>
 
       {/* sticky prompt bar: start sessions from anywhere; live sessions strip */}
@@ -218,5 +220,6 @@ export function App() {
         ))}
       </nav>
     </div>
+    </>
   );
 }

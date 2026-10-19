@@ -51,8 +51,12 @@ struct WorkspaceView: View {
                     CompatibilityView(browser: browser)
                     if !model.message.isEmpty { Text(model.message).padding(12) }
                 }
+            } else if model.standaloneVisualizer {
+                StandaloneVisualizer(model: model)
+            } else if model.page.music {
+                MusicView(model: model, music: model.music, page: model.page).id(model.page.id)
             } else if model.page.cinema {
-                CinemaView(model: model).id(model.page.id)
+                CinemaView(model: model, page: model.page).id(model.page.id)
             } else {
                 VStack(alignment: .leading, spacing: 24) {
                     HStack(alignment: .top) {
@@ -145,6 +149,11 @@ struct WorkspaceView: View {
         appMenu.addItem(withTitle: "Toggle Fullscreen", action: #selector(toggleFullscreen), keyEquivalent: "f").target = self
         appMenu.addItem(withTitle: "Home", action: #selector(goHome), keyEquivalent: "h").target = self
         appMenu.addItem(.separator()); appMenu.addItem(withTitle: "Quit Casework", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let editItem = NSMenuItem(); menu.addItem(editItem)
+        let editMenu = NSMenu(title: "Edit"); editItem.submenu = editMenu
+        for (title, action, key) in [("Cut", "cut:", "x"), ("Copy", "copy:", "c"), ("Paste", "paste:", "v"), ("Select All", "selectAll:", "a")] {
+            editMenu.addItem(withTitle: title, action: NSSelectorFromString(action), keyEquivalent: key)
+        }
         NSApp.mainMenu = menu
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "Casework"; window.minSize = NSSize(width: 960, height: 620)
@@ -160,7 +169,12 @@ struct WorkspaceView: View {
             }
             let wasController = self.workspace.inputMode == .controller
             self.workspace.noteInput(.keyboard)
-            if event.modifierFlags.contains(.command) { return event }
+            if event.modifierFlags.contains(.command) {
+                if wasController, self.workspace.keyboardText != nil, event.charactersIgnoringModifiers?.lowercased() == "v", let pasted = NSPasteboard.general.string(forType: .string) {
+                    self.workspace.type(pasted); return nil
+                }
+                return event
+            }
             if self.workspace.keyboardText != nil {
                 if event.keyCode == 53 { self.workspace.back(); return nil }
                 // Preserve the first physical key while SwiftUI swaps the virtual keyboard for a TextField.
@@ -176,6 +190,10 @@ struct WorkspaceView: View {
             let actions: [UInt16: String] = [123: "left", 124: "right", 125: "down", 126: "up", 36: "select", 76: "select", 53: "back", 115: "home", 116: "previous", 121: "next"]
             if let action = actions[event.keyCode] { self.workspace.input(action); return nil }
             let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
+            if self.workspace.page.music && key == "v" { if !event.isARepeat { self.workspace.input("visualizer") }; return nil }
+            if self.workspace.page.music && [" ", "k", "j", "l"].contains(key) {
+                if !event.isARepeat { self.workspace.input(["j": "previous", "l": "next"][key] ?? "pause") }; return nil
+            }
             if self.workspace.player != nil {
                 let shortcuts = [" ": "pause", "k": "pause", "j": "previous", "l": "next", "m": "mute", "c": "captions", "f": "fullscreen", "o": "menu"]
                 if let action = shortcuts[key] { if !event.isARepeat || ["j", "l"].contains(key) { self.workspace.input(action) }; return nil }

@@ -4,7 +4,7 @@ import { useEffect } from "react";
  * Missing node means the serving machine, never a preference from another tab. */
 export interface Route { view: string; params: URLSearchParams }
 export const VIEW_NAMES: Record<string, string> = {
-  fleet: "Home", controls: "Controls", applications: "Applications", spotify: "Spotify",
+  desktop: "Desktop", seed: "Seed", fleet: "Home", controls: "Controls", applications: "Applications", spotify: "Spotify",
   desk: "Desk", projects: "Projects", agents: "Agents", services: "Services", data: "Data",
   files: "Files", edit: "Editor", term: "Sessions", cmux: "cmux", cloud: "Cloud", remote: "Screen remote",
 };

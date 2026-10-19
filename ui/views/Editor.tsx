@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouteTitle } from "../lib/navigation";
 import { EditorView, keymap, lineNumbers, highlightActiveLine } from "@codemirror/view";
 import { EditorState, Compartment } from "@codemirror/state";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
@@ -209,6 +210,9 @@ export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked
 
   const [state, setState] = useState<"loading" | "text" | "binary" | "error">("loading");
   const [error, setError] = useState("");
+  const [loadedPath, setLoadedPath] = useState("");
+  const currentPath = useRef(path);
+  currentPath.current = path;
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -217,21 +221,27 @@ export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked
   const view = useRef<EditorView | null>(null);
   const langCompartment = useRef(new Compartment());
 
+  useRouteTitle(!path ? "Choose a file · Editor" : loadedPath === path && state === "error" ? `${path} unavailable · Editor` : undefined);
   const save = useCallback(async () => {
-    if (!view.current) return;
+    const editor = view.current;
+    if (!editor || currentPath.current !== path) return;
+    const current = () => currentPath.current === path && view.current === editor;
     setSaving(true);
     try {
-      await post("/api/fs/write", { path, content: view.current.state.doc.toString() });
+      await post("/api/fs/write", { path, content: editor.state.doc.toString() });
+      if (!current()) return;
       setDirty(false);
       setSavedAt(Date.now());
     } catch (err) {
-      setError(String(err instanceof Error ? err.message : err));
+      if (current()) setError(String(err instanceof Error ? err.message : err));
     } finally {
-      setSaving(false);
+      if (current()) setSaving(false);
     }
   }, [path]);
 
   useEffect(() => {
+    setState("loading"); setError(""); setLoadedPath(""); setDirty(false); setSavedAt(null); setSaving(false);
+    if (!path) return;
     if (media) {
       setState("text"); // media handled by render below; no editor needed
       return;
@@ -241,6 +251,7 @@ export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked
       try {
         const res = await api<{ content: string; size: number }>(`/api/fs/text?path=${encodeURIComponent(path)}`);
         if (cancelled) return;
+        setLoadedPath(path);
         setSize(res.size);
         setState("text");
         const lang = languages.find((l) => l.extensions.includes(ext) || l.filename?.test(name));
@@ -282,6 +293,7 @@ export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked
       } catch (err) {
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 401) return onLocked();
+        setLoadedPath(path);
         if (err instanceof ApiError && err.status === 415) setState("binary");
         else {
           setState("error");
@@ -305,6 +317,7 @@ export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked
     return () => window.removeEventListener("beforeunload", onBefore);
   }, [dirty]);
 
+  if (!path) return <section className="p-6"><h1>Choose a file</h1><p className="mt-3">Open a file from Files to preview or edit it.</p><button className="mt-3 text-cyan-300" onClick={() => navigate("files")}>Open Files</button></section>;
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-zinc-800 px-3 py-2 sm:px-4">
@@ -343,7 +356,7 @@ export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked
         )}
       </div>
 
-      {error && <div className="m-4 rounded-lg border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">{error}</div>}
+      {loadedPath === path && error && <div role="alert" className="m-4 rounded-lg border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">{error}</div>}
 
       {media === "image" && (
         <div className="flex flex-1 items-center justify-center overflow-auto p-8">

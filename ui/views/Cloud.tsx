@@ -1,4 +1,4 @@
-import { updateParams, useRouteTitle } from "../lib/navigation";
+import { routeHash, updateParams, useRouteTitle } from "../lib/navigation";
 // Cloud AI: ChatGPT and Claude accounts driven through the node's remote browser,
 // with every conversation archived into the Deck repo.
 import { useEffect, useState } from "react";
@@ -28,6 +28,7 @@ const STATUS: Record<ProviderState["status"], { led: string; text: string }> = {
 export function Cloud({ params, onLocked }: { params: URLSearchParams; onLocked: () => void }) {
   const [sum, setSum] = useState<Summary | null>(null);
   const [profiles, setProfiles] = useState<Profiles | null>(null);
+  const [profilesError, setProfilesError] = useState("");
   const profile = params.get("profile") ?? "chatgpt";
   const navUrl = params.get("url") ?? undefined;
   const q = params.get("q") ?? "";
@@ -44,7 +45,7 @@ export function Cloud({ params, onLocked }: { params: URLSearchParams; onLocked:
 
   const load = async () => {
     try { setSum(await api<Summary>("/api/cloud")); } catch (e) { if (e instanceof ApiError && e.status === 401) onLocked(); }
-    try { setProfiles(await api<Profiles>("/api/browser/profiles")); } catch {}
+    try { setProfiles(await api<Profiles>("/api/browser/profiles")); setProfilesError(""); } catch (e) { if (e instanceof ApiError && e.status === 401) onLocked(); setProfilesError("Browser unavailable"); }
   };
   useEffect(() => { load(); const iv = setInterval(load, 8000); return () => clearInterval(iv); }, []);
 
@@ -68,11 +69,15 @@ export function Cloud({ params, onLocked }: { params: URLSearchParams; onLocked:
       .catch(e => { if (alive) { if (e instanceof ApiError && e.status === 401) onLocked(); setDocError(e instanceof ApiError && e.status === 404 ? "Conversation not found" : String(e)); } });
     return () => { alive = false; };
   }, [conversation, provider]);
+  const invalidUrl = navUrl !== undefined && (() => { try { const target = new URL(navUrl); return !["https:", "http:"].includes(target.protocol) || /[\u0000-\u001f]/.test(navUrl); } catch { return true; } })();
+  const browserError = invalidUrl ? "Invalid browser URL" : profilesError || (profiles && !profiles.available ? "Browser unavailable" : profiles && !profiles.profiles.some(p => p.name === profile) ? "Browser profile not found" : "");
   const currentBrowserState = browserState?.profile === profile ? browserState : null;
   const browserTitle = currentBrowserState?.title || (() => { try { return currentBrowserState?.url ? new URL(currentBrowserState.url).hostname : ""; } catch { return ""; } })();
-  useRouteTitle(conversation ? `${docError || doc?.frontmatter.title || sel?.title || conversation} · Cloud` : browserTitle ? `${browserTitle} · Cloud` : undefined);
+  useRouteTitle(conversation ? `${docError || doc?.frontmatter.title || sel?.title || conversation} · Cloud` : browserError ? `${browserError} · Cloud` : browserTitle ? `${browserTitle} · Cloud` : undefined);
 
   const onBrowserState = (value: RemoteBrowserState) => {
+    // A page event arriving between hashchange and React cleanup belongs to the old view.
+    if (location.hash !== routeHash("cloud", params)) return;
     setBrowserState({ profile, url: value.url, title: value.title });
     if (!/^https?:\/\//.test(value.url)) return;
     const current = new URLSearchParams(location.hash.split("?")[1] ?? "").get("url");
@@ -134,8 +139,10 @@ export function Cloud({ params, onLocked }: { params: URLSearchParams; onLocked:
             </div>
           }
         >
-          {profiles && !profiles.available ? (
-            <Empty>Browser unavailable on {where}: {profiles.reason}</Empty>
+          {browserError ? (
+            <div role="alert"><Empty>{browserError}{profiles?.reason ? `: ${profiles.reason}` : ""}</Empty></div>
+          ) : !profiles ? (
+            <Empty>Loading browser profiles…</Empty>
           ) : (
             <RemoteBrowser key={profile} profile={profile} url={navUrl} onState={onBrowserState} />
           )}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { navigate } from "../lib/api";
+import { claimRouteTitle, routeHash, readRoute, writeRoute } from "../lib/navigation";
 
 const DEFAULT_ROUTE = "discover";
 
@@ -14,8 +15,7 @@ function cleanTitle(value: unknown): string | null {
 }
 
 function applicationHash(params: URLSearchParams): string {
-  const query = params.toString();
-  return `#/applications${query ? `?${query}` : ""}`;
+  return routeHash("applications", params);
 }
 
 /**
@@ -27,12 +27,15 @@ export function AfterglowFrame({
   url,
   params,
   name,
+  visible = true,
 }: {
   url: string;
   params: URLSearchParams;
   name: string;
+  visible?: boolean;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
+  const pendingRoute = useRef<string | null>(null);
   const currentParams = useRef(params);
   currentParams.current = params;
 
@@ -48,6 +51,8 @@ export function AfterglowFrame({
   });
 
   const sendRoute = useCallback(() => {
+    if (!visible || location.hash !== applicationHash(currentParams.current)) return;
+    pendingRoute.current = cleanRoute(currentParams.current.get("route")) || DEFAULT_ROUTE;
     frame.current?.contentWindow?.postMessage(
       {
         type: "cyberdeck:navigate",
@@ -55,15 +60,16 @@ export function AfterglowFrame({
       },
       origin,
     );
-  }, [origin]);
+  }, [origin, visible]);
 
   useEffect(() => {
-    let assignedTitle = `${name} · Cyberdeck`;
-    document.title = assignedTitle;
+    if (!visible) return;
+    let releaseTitle = claimRouteTitle(name);
 
     const receive = (event: MessageEvent) => {
       if (event.source !== frame.current?.contentWindow || event.origin !== origin) return;
 
+      if (location.hash !== applicationHash(currentParams.current)) return;
       const data = event.data;
       const incoming = cleanRoute(data?.route);
       if (!incoming) return;
@@ -72,6 +78,11 @@ export function AfterglowFrame({
         sendRoute();
         return;
       }
+
+      // Parent Back/Forward wins over child events queued for the old route.
+      // A title/navigation acknowledgement for the requested route reopens it.
+      if (pendingRoute.current && incoming !== pendingRoute.current) return;
+      if (data.type === "afterglow:title" || data.type === "afterglow:navigation") pendingRoute.current = null;
 
       if (data.type === "afterglow:navigation") {
         const next = new URLSearchParams(currentParams.current);
@@ -89,8 +100,8 @@ export function AfterglowFrame({
       if ((data.type === "afterglow:title" || data.type === "afterglow:navigation") && incoming === activeRoute) {
         const childTitle = cleanTitle(data.title);
         if (childTitle) {
-          assignedTitle = `${childTitle} · Cyberdeck`;
-          document.title = assignedTitle;
+          releaseTitle();
+          releaseTitle = claimRouteTitle(childTitle);
         }
       }
     };
@@ -98,11 +109,18 @@ export function AfterglowFrame({
     window.addEventListener("message", receive);
     return () => {
       window.removeEventListener("message", receive);
-      if (document.title === assignedTitle) document.title = "Cyberdeck";
+      releaseTitle();
     };
-  }, [name, origin, sendRoute]);
+  }, [name, origin, sendRoute, visible]);
 
-  useEffect(sendRoute, [route, sendRoute]);
+  const hash = applicationHash(params);
+  useEffect(() => {
+    if (!visible || location.hash !== hash || params.get("route") === route) return;
+    const canonical = new URLSearchParams(params);
+    canonical.set("route", route);
+    writeRoute("applications", canonical, "replace");
+  }, [hash, route, visible]);
+  useEffect(sendRoute, [hash, sendRoute]);
 
   return (
     <section className="flex h-full flex-col" aria-label={name}>
