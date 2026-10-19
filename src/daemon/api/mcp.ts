@@ -257,14 +257,27 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
     {
       risk: z.enum(["at-risk", "attention", "safe", "all"]).default("at-risk").describe("Which risk class to list; default at-risk"),
       kind: z.enum(["any", "unpushed", "remote-less", "dirty"]).default("any").describe("unpushed = local commits no remote has; remote-less = no remote at all; dirty = uncommitted or untracked files"),
-      node: z.string().optional().describe("Name of a paired node to ask instead of this one"),
+      node: z.string().optional().describe("Name of a paired node to ask instead of this one; `all` asks this node and every paired node together (rows carry `node`)"),
       query: z.string().optional().describe("Substring of the repo path"),
       limit: z.number().int().min(1).max(REPOS_MAX_LIMIT).default(REPOS_DEFAULT_LIMIT),
       brief: BRIEF,
     },
     async ({ risk, kind, node, query, limit, brief }) => {
-      let rows: RepoOut[];
-      if (node && node.toLowerCase() !== cfg.nodeName.toLowerCase()) {
+      let rows: (RepoOut & { node?: string })[];
+      const unreachable: string[] = [];
+      const fleet = node !== undefined && ["all", "fleet", "*"].includes(node.toLowerCase());
+      if (fleet) {
+        // Every node at once, each tagged; a peer that does not answer is named, not fatal.
+        const local = (db.query("SELECT * FROM repos ORDER BY path").all() as RepoRow[]).map(parseRepo).map((r) => ({ ...r, node: cfg.nodeName }));
+        const remote = await Promise.all(peers().map(async (peer) => {
+          try {
+            const res = await peerFetch(peer, "/api/repos", { signal: AbortSignal.timeout(10_000) });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return ((await res.json()) as RepoOut[]).map((r) => ({ ...r, node: peer.name }));
+          } catch { unreachable.push(peer.name); return [] as (RepoOut & { node: string })[]; }
+        }));
+        rows = [...local, ...remote.flat()];
+      } else if (node && node.toLowerCase() !== cfg.nodeName.toLowerCase()) {
         const peer = peers().find((n) => n.name.toLowerCase() === node.toLowerCase());
         if (!peer) return fail(`No paired node named "${node}". Paired: ${peers().map((n) => n.name).join(", ") || "none"}.`);
         try {
@@ -291,8 +304,14 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
       const breakdown = kind === "any" && (unpushed.length || remoteless.length)
         ? [unpushed.length ? `${unpushed.length} with unpushed commits (${listOf(unpushed.map((r) => r.name), 4)})` : "", remoteless.length ? `${remoteless.length} with no remote (${listOf(remoteless.map((r) => r.name), 4)})` : ""].filter(Boolean).join(", ")
         : "";
-      const sentence = `${node ?? cfg.nodeName} has ${filtered.length} ${label}${kindLabel}${q ? ` matching "${query}"` : ""}${breakdown ? `: ${breakdown}` : filtered.length ? `, such as ${listOf(filtered.slice(0, 3).map((r) => r.name), 3)}` : ""}.`;
-      return spoken(sentence, { node: node ?? cfg.nodeName, risk, kind, total: filtered.length, unpushed: unpushed.length, remoteless: remoteless.length, items: filtered.slice(0, limit) }, brief, { node: node ?? cfg.nodeName, risk, kind, total: filtered.length, unpushed: unpushed.length, remoteless: remoteless.length });
+      const where = fleet ? "the fleet" : node ?? cfg.nodeName;
+      // Fleet-wide: the count per node, by name, is what the owner wants to hear ("yacht 3, enuc 1").
+      const perNode = fleet ? [...new Set(filtered.map((r) => r.node!))].map((n) => { const own = filtered.filter((r) => r.node === n); return `${n} ${own.length} (${listOf(own.map((r) => r.name), 3)})`; }) : [];
+      const tail = fleet ? (perNode.length ? `: ${perNode.join(", ")}` : "") : breakdown ? `: ${breakdown}` : filtered.length ? `, such as ${listOf(filtered.slice(0, 3).map((r) => r.name), 3)}` : "";
+      const missing = unreachable.length ? ` ${listOf(unreachable)} did not answer.` : "";
+      const sentence = `${where} has ${filtered.length} ${label}${kindLabel}${q ? ` matching "${query}"` : ""}${tail}.${missing}`;
+      const nodeOut = fleet ? "all" : node ?? cfg.nodeName;
+      return spoken(sentence, { node: nodeOut, risk, kind, total: filtered.length, unpushed: unpushed.length, remoteless: remoteless.length, ...(fleet ? { nodes: [cfg.nodeName, ...peers().map((n) => n.name)], unreachable } : {}), items: filtered.slice(0, limit) }, brief, { node: nodeOut, risk, kind, total: filtered.length, unpushed: unpushed.length, remoteless: remoteless.length });
     }
   );
 

@@ -134,6 +134,28 @@ describe("mcp tools", () => {
     expect(unknown.content[0].text).toContain("No paired node");
     await client.close();
   });
+  test("repos node=all asks every paired node, tags the rows and names the peer that did not answer", async () => {
+    // bare is a reachable peer with one unpushed repo; "ghost" is paired but gone.
+    bare.db.query(`INSERT INTO repos (path, name, head_branch, dirty_files, ahead, remotes, risk, risk_reasons, scanned_at)
+      VALUES ('/srv/Code/far', 'far', 'main', 0, 2, '["origin"]', 'at-risk', '["unpushed"]', 1)`).run();
+    srv.db.query("INSERT INTO nodes (id, name, url, token, added_at) VALUES (?, ?, ?, ?, ?)").run("n-bare", "bare", bare.base, TEST_TOKEN, Date.now());
+    srv.db.query("INSERT INTO nodes (id, name, url, token, added_at) VALUES (?, ?, ?, ?, ?)").run("n-ghost", "ghost", "http://127.0.0.1:9", "x", Date.now());
+    const client = await connect(srv.base);
+    try {
+      const all = parsed(await call(client, "repos", { node: "all", kind: "unpushed" }));
+      expect(all).toMatchObject({ node: "all", total: 2, unpushed: 2, nodes: ["test-node", "bare", "ghost"], unreachable: ["ghost"] });
+      expect(all.items.map((r: any) => `${r.node}/${r.name}`).sort()).toEqual(["bare/far", "test-node/Livedemo"]);
+      expect(all.brief).toBe("the fleet has 2 repos at risk with unpushed commits: test-node 1 (Livedemo), bare 1 (far). ghost did not answer.");
+      const brief = await call(client, "repos", { node: "fleet", risk: "safe", brief: true });
+      expect(brief.content[0].text).toBe("the fleet has 1 safe repos: test-node 1 (fine). ghost did not answer.");
+      // a single node still answers for itself
+      expect(parsed(await call(client, "repos", { node: "bare", kind: "unpushed" }))).toMatchObject({ node: "bare", total: 1 });
+    } finally {
+      srv.db.query("DELETE FROM nodes WHERE id IN ('n-bare', 'n-ghost')").run();
+      bare.db.query("DELETE FROM repos WHERE path = '/srv/Code/far'").run();
+      await client.close();
+    }
+  }, 30_000);
 
   test("deck-backed tools read through the control module", async () => {
     const client = await connect(srv.base);
