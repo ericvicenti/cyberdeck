@@ -1,4 +1,3 @@
-import { registerNativeSpotifyRoutes } from "./api/spotify-native";
 import { registerMusicRoutes } from "./api/music";
 import { registerMusicVisualizerRoutes } from "./api/music-visualizer";
 import { Steam, registerSteamRoutes } from "./api/steam";
@@ -233,7 +232,6 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   const control = registerControlRoutes(app, cfg);
   registerCmuxRoutes(app);
   const isFullAuth = (c: { req: { raw: Request } }) => { const m = authByReq.get(c.req.raw)?.method; return m === "token" || m === "tailscale"; };
-  registerNativeSpotifyRoutes(app, isFullAuth, cfg.port);
   // Seed agents bridge: voice calls from the Casework app / web Desk go to a Seed agent (docs/VOICE.md).
   const seedCfg = seedConfig(cfg);
   const seed = new SeedBridge({ config: seedCfg, port: cfg.port, token, home: opts.seed?.home, companionFile: opts.seed?.companionFile ?? seedCfg.companionFile, runtimeFile: opts.seed?.runtimeFile ?? seedCfg.runtimeFile, roots: cfg.roots, fleetDir: cfg.fleetDir, nodeTools: cfg.mcp?.nodeTools !== false });

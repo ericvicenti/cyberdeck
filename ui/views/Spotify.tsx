@@ -25,11 +25,14 @@ import {
   readSpotifyArchive,
   saveSpotifyRecord,
 } from "../lib/spotify-storage";
-import { readRoute, routeHash, useRouteTitle, writeRoute } from "../lib/navigation";
+import { readRoute, useRouteTitle, writeRoute } from "../lib/navigation";
 import {
   spotifyLocation,
   spotifyRouteParams,
   type SpotifyLocation,
+  MUSIC_VIEW,
+  musicHash,
+  musicParams,
 } from "../lib/spotify-navigation";
 import {
   MusicIcon,
@@ -149,8 +152,8 @@ export function Spotify({
     mode: "push" | "replace" = "push",
   ) =>
     writeRoute(
-      "spotify",
-      spotifyRouteParams(readRoute().params, next),
+      MUSIC_VIEW,
+      musicParams(spotifyRouteParams(readRoute().params, next)),
       mode,
     );
   const navigateEntity = (entity: Card) =>
@@ -171,10 +174,10 @@ export function Spotify({
       radio: currentLocation.radio,
       recording: currentLocation.recording,
     });
-    const nextHash = routeHash("spotify", next);
+    const nextHash = musicHash(next);
     if (history.state?.cyberdeckSpotifyImmersiveFrom === nextHash)
       history.back();
-    else writeRoute("spotify", next, "replace");
+    else writeRoute(MUSIC_VIEW, musicParams(next), "replace");
   };
 
   const report = (e: unknown) => {
@@ -842,10 +845,10 @@ export function Spotify({
     });
   };
   useEffect(() => {
-    if (!visible || location.hash !== routeHash("spotify", params)) return;
+    if (!visible || location.hash !== musicHash(params)) return;
     const parsed = spotifyLocation(params);
-    if (routeHash("spotify", parsed.canonical) !== location.hash) {
-      writeRoute("spotify", parsed.canonical, "replace");
+    if (musicHash(parsed.canonical) !== location.hash) {
+      writeRoute(MUSIC_VIEW, musicParams(parsed.canonical), "replace");
       return;
     }
     const requested = parsed.location;
@@ -891,10 +894,10 @@ export function Spotify({
     void restore();
   }, [visible, connected, account, routeKey]);
   useRouteTitle(
-    visible && !currentLocation.recording && location.hash === routeHash("spotify", params) && resolvedRouteKey === routeKey
+    visible && !currentLocation.recording && location.hash === musicHash(params) && resolvedRouteKey === routeKey
       ? shelf.kind === "home"
-        ? "Spotify"
-        : `${shelf.title} · Spotify`
+        ? "Music · Afterglow"
+        : `${shelf.title} · Music · Afterglow`
       : undefined,
   );
   const toggleSave = async (uri: string) => {
@@ -1060,7 +1063,7 @@ export function Spotify({
         ...currentLocation,
         immersive: true,
       });
-      const hash = routeHash("spotify", next);
+      const hash = musicHash(next);
       if (location.hash !== hash) {
         history.pushState(
           { cyberdeckSpotifyImmersiveFrom: location.hash },
@@ -1252,7 +1255,7 @@ export function Spotify({
   );
   const recordingPlayback = useRecordingPlayback(account, startSavedAudio);
   const selectRecording = (recording: string) => navigateMusic({ shelf: "history", recording });
-  useRouteTitle(visible && currentLocation.recording && !account ? "Recording unavailable · Saved audio · Spotify" : undefined);
+  useRouteTitle(visible && currentLocation.recording && !account ? "Recording unavailable · Saved audio · Music · Afterglow" : undefined);
   return (
     <section
       ref={root}

@@ -3,9 +3,8 @@ import { refreshRouteTitle, routeHash } from "./lib/navigation";
 import { useEffect, useLayoutEffect, useState } from "react";
 import { parseHash, navigate, api, type Route } from "./lib/api";
 import { useFleet, useOverview } from "./lib/fleet";
-import { ShieldIcon, ServerIcon, FolderIcon, TerminalIcon, GitIcon, LayersIcon, BotIcon, PulseIcon, GridIcon, CloudIcon, MicIcon, MusicIcon, SeedIcon } from "./lib/icons";
+import { ShieldIcon, ServerIcon, FolderIcon, TerminalIcon, GitIcon, LayersIcon, BotIcon, PulseIcon, GridIcon, CloudIcon, MicIcon, SeedIcon } from "./lib/icons";
 import { RetainedView } from "./components/RetainedView";
-import { Spotify } from "./views/Spotify";
 import { Cloud } from "./views/Cloud";
 import { Applications } from "./views/Applications";
 import { Controls } from "./views/Controls";
@@ -33,7 +32,6 @@ const NAV = [
   { view: "controls", label: "Controls", icon: GridIcon },
   { view: "desktop", label: "Desktop", icon: GridIcon },
   { view: "applications", label: "Applications", icon: GridIcon },
-  { view: "spotify", label: "Spotify", icon: MusicIcon },
   { view: "desk", label: "Desk", icon: MicIcon },
   { view: "projects", label: "Projects", icon: LayersIcon },
   { view: "seed", label: "Seed", icon: SeedIcon },
@@ -52,8 +50,6 @@ const NAV = [
  *  (`?node=`) and pick it in place (Files, Editor, Cloud, Desktop, Seed). */
 export function App() {
   const [route, setRoute] = useState<Route>(parseHash());
-  const [spotifyOpened, setSpotifyOpened] = useState(route.view === "spotify");
-  useEffect(() => { if (route.view === "spotify") setSpotifyOpened(true); }, [route.view]);
   const [locked, setLocked] = useState(false);
   const { fleet } = useFleet();
   const knownRoute = NAV.some(item => item.view === route.view) || ["edit", "remote"].includes(route.view);
@@ -158,7 +154,7 @@ export function App() {
 
         <main className="min-w-0 flex-1 overflow-hidden">{view}
           <RetainedView visible={route.view === "applications"} params={route.params}>{(params, visible) => <Applications params={params} visible={visible} onLocked={lock} />}</RetainedView>
-          <RetainedView visible={route.view === "desk"} params={route.params}>{(params, visible) => <Desk params={params} visible={visible} onLocked={lock} />}</RetainedView>{spotifyOpened && <Spotify visible={route.view === "spotify"} params={route.params} />}</main>
+          <RetainedView visible={route.view === "desk"} params={route.params}>{(params, visible) => <Desk params={params} visible={visible} onLocked={lock} />}</RetainedView></main>
       </div>
 
       {/* sticky prompt bar: start sessions from anywhere; live sessions strip */}

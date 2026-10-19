@@ -1,3 +1,24 @@
+import { routeHash } from "./navigation";
+
+/** The listening room is Afterglow's music half: `#/applications?app=afterglow&tab=music…`. There is no
+ *  standalone Spotify view; `#/spotify` links are rewritten to this by the router. */
+export const MUSIC_VIEW = "applications";
+export const MUSIC_APP = "afterglow";
+export const MUSIC_TAB = "music";
+export function isMusicRoute(view: string, params: URLSearchParams): boolean {
+  return view === MUSIC_VIEW && params.get("app") === MUSIC_APP && params.get("tab") === MUSIC_TAB;
+}
+/** The player's own params (shelf, id, q, …) pinned under Afterglow's music tab. */
+export function musicParams(params: URLSearchParams | Record<string, string> = {}): URLSearchParams {
+  const next = new URLSearchParams(params);
+  next.set("app", MUSIC_APP);
+  next.set("tab", MUSIC_TAB);
+  next.delete("route");
+  next.sort();
+  return next;
+}
+export const musicHash = (params: URLSearchParams | Record<string, string> = {}): string => routeHash(MUSIC_VIEW, musicParams(params));
+
 export const SPOTIFY_COLLECTIONS = [
   "home",
   "liked",

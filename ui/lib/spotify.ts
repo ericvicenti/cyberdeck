@@ -1,3 +1,4 @@
+import { isMusicRoute, musicHash } from "./spotify-navigation";
 // Spotify stays on this browser, independent of Cyberdeck's selected fleet node.
 // PKCE needs only a public client ID. Tokens are tab-scoped and never sent to Cyberdeck.
 const PREFIX = "cyberdeck-spotify-";
@@ -129,14 +130,14 @@ export async function pkceChallenge(verifier: string): Promise<string> {
 // Keep only view parameters in the tab-local OAuth continuation. Never allow an
 // external return URL, authorization code, token, or unrelated application.
 export function spotifyReturnHash(hash: string): string {
-  if (!/^#\/spotify(?:\?|$)/.test(hash)) return "#/spotify";
-  const source = new URLSearchParams(hash.split("?")[1] || ""), params = new URLSearchParams();
-  for (const key of ["node", "q", "playlists", "shelf", "id", "page", "immersive", "radio"]) {
+  const [path, query = ""] = hash.replace(/^#\/?/, "").split("?");
+  const source = new URLSearchParams(query), params = new URLSearchParams();
+  const music = path === "spotify" || isMusicRoute(path, source);
+  if (music) for (const key of ["node", "q", "shelf", "id", "page", "immersive", "radio"]) {
     const value = source.get(key)?.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 300);
     if (value) params.set(key, value);
   }
-  params.sort();
-  return "#/spotify" + (params.size ? "?" + params : "");
+  return musicHash(params);
 }
 export async function connectSpotify(clientId: string): Promise<void> {
   clientId = clientId.trim();
@@ -215,7 +216,7 @@ export function finishSpotifyLogin(): Promise<boolean> {
     const pending = read<Pending>("pending");
     // Remove authorization codes before loading external scripts or artwork.
     const valid = !!pending && query.get("state") === pending.state && Date.now() - pending.created <= 600000 && pending.redirect === spotifyRedirect();
-    history.replaceState(null, "", location.pathname + (valid ? spotifyReturnHash(pending.returnHash || "") : "#/spotify"));
+    history.replaceState(null, "", location.pathname + (valid ? spotifyReturnHash(pending.returnHash || "") : musicHash()));
     window.dispatchEvent(new HashChangeEvent("hashchange"));
     sessionStorage.removeItem(PREFIX + "pending");
     if (!valid || !pending) throw new Error("Spotify sign-in could not be verified. Please connect again from this tab.");

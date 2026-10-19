@@ -53,8 +53,6 @@ struct WorkspaceView: View {
                 }
             } else if model.standaloneVisualizer {
                 StandaloneVisualizer(model: model)
-            } else if model.page.music {
-                MusicView(model: model, music: model.music, page: model.page).id(model.page.id)
             } else if model.page.cinema {
                 CinemaView(model: model, page: model.page).id(model.page.id)
             } else {
@@ -190,10 +188,6 @@ struct WorkspaceView: View {
             let actions: [UInt16: String] = [123: "left", 124: "right", 125: "down", 126: "up", 36: "select", 76: "select", 53: "back", 115: "home", 116: "previous", 121: "next"]
             if let action = actions[event.keyCode] { self.workspace.input(action); return nil }
             let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
-            if self.workspace.page.music && key == "v" { if !event.isARepeat { self.workspace.input("visualizer") }; return nil }
-            if self.workspace.page.music && [" ", "k", "j", "l"].contains(key) {
-                if !event.isARepeat { self.workspace.input(["j": "previous", "l": "next"][key] ?? "pause") }; return nil
-            }
             if self.workspace.player != nil {
                 let shortcuts = [" ": "pause", "k": "pause", "j": "previous", "l": "next", "m": "mute", "c": "captions", "f": "fullscreen", "o": "menu"]
                 if let action = shortcuts[key] { if !event.isARepeat || ["j", "l"].contains(key) { self.workspace.input(action) }; return nil }

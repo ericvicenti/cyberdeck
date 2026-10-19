@@ -104,7 +104,7 @@ beforeAll(async () => { browser = await chromium.launch(); page = await browser.
 afterAll(async () => { for (const release of deferred.values()) release(); await browser?.close(); server.stop(true); });
 
 test("primary views have titles and unknown routes render a useful error on fresh open", async () => {
-  for (const [route, expected] of [["fleet","Home"],["desktop","Desktop"],["applications","Applications"],["spotify","Spotify"],["desk","Desk"],["services","Services"],["data","Data"],["cloud","Cloud"],["remote","Screen remote"]]) {
+  for (const [route, expected] of [["fleet","Home"],["desktop","Desktop"],["applications","Applications"],["applications?app=afterglow&tab=music","Music · Afterglow"],["desk","Desk"],["services","Services"],["data","Data"],["cloud","Cloud"],["remote","Screen remote"]]) {
     await go(route); await title(`${expected} · Cyberdeck`);
   }
   await go("missing/nested"); await page.getByRole("heading",{name:"Page not found",exact:true}).waitFor(); await title("Page not found · Cyberdeck");

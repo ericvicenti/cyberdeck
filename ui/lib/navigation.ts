@@ -6,15 +6,17 @@ import { useEffect } from "react";
  * never carries one along. */
 export interface Route { view: string; params: URLSearchParams }
 export const VIEW_NAMES: Record<string, string> = {
-  desktop: "Desktop", seed: "Seed", fleet: "Home", controls: "Controls", applications: "Applications", spotify: "Spotify",
+  desktop: "Desktop", seed: "Seed", fleet: "Home", controls: "Controls", applications: "Applications",
   desk: "Desk", projects: "Projects", agents: "Agents", services: "Services", data: "Data",
   files: "Files", edit: "Editor", term: "Sessions", cmux: "cmux", cloud: "Cloud", remote: "Screen remote",
 };
 
 export function readRoute(hash = location.hash): Route {
   const h = hash.replace(/^#\/?/, ""), separator = h.indexOf("?");
-  const view = (separator < 0 ? h : h.slice(0, separator)).replace(/\/$/, "") || "fleet";
+  let view = (separator < 0 ? h : h.slice(0, separator)).replace(/\/$/, "") || "fleet";
   const params = new URLSearchParams(separator < 0 ? "" : h.slice(separator + 1));
+  // The standalone Spotify view is gone: music is Afterglow's music tab.
+  if (view === "spotify") { view = "applications"; params.set("app", "afterglow"); params.set("tab", "music"); params.delete("playlists"); }
   // Normalize legacy links without creating another history entry.
   if (view === "services" && params.has("service")) {
     if (!params.has("svc")) params.set("svc", params.get("service")!);
@@ -95,11 +97,12 @@ export function routeTitle(route = readRoute()): string {
     : route.view === "term" ? p.get("session")
     : route.view === "cmux" ? p.get("surface")
     : route.view === "agents" ? p.get("run") || p.get("task")
-    : route.view === "cloud" ? p.get("conversation") || p.get("profile")
-    : route.view === "spotify" ? p.get("id") || p.get("shelf") : null;
+    : route.view === "cloud" ? p.get("conversation") || p.get("profile") : null;
   if (detail) title = `${detail} · ${title}`;
   if (route.view === "applications" && p.get("app")) {
-    title = p.get("app") === "vimm" ? `${p.get("tab") === "steam" ? "PC games · " : ""}The Vault` : p.get("app") === "afterglow" ? "Afterglow" : `${p.get("app")} · Applications`;
+    title = p.get("app") === "vimm" ? `${p.get("tab") === "steam" ? "PC games · " : ""}The Vault`
+      : p.get("app") === "afterglow" ? (p.get("tab") === "music" ? `${p.get("id") || p.get("shelf") ? `${p.get("id") || p.get("shelf")} · ` : ""}Music · Afterglow` : "Afterglow")
+      : `${p.get("app")} · Applications`;
   }
   if (p.get("q")) title = `${p.get("q")} · ${title}`;
   if (p.get("node")) title += ` · ${nodeName(p.get("node")!)}`;

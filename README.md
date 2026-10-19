@@ -94,42 +94,23 @@ Remote-source tests run on that source through the existing fleet proxy, with it
 paired credentials. Every participating daemon needs the network update; an unpaired or
 unreachable source/target reports that condition rather than an inferred speed.
 
-### Spotify app
+### Music (inside Afterglow)
 
-Open **Spotify** in the sidebar or Applications, then **Open Spotify player**. The default
-experience uses Spotify's official web player in a separate tab with your existing Spotify
-login and subscription: no Developer app, Client ID, or configuration. **Open Spotify app**
-launches the installed app on the viewing device; search opens Spotify's own search. Keep the
-player tab open while using Cyberdeck. Spotify's full website does not allow embedding in
-Cyberdeck (its Content-Security-Policy restricts frame ancestors).
-
-The collapsed **Advanced: custom Cyberdeck player** option is for users who explicitly want
-custom controls. It plays full music through Spotify's Web Playback SDK with your existing Premium subscription and can control Spotify Connect
-devices. Search songs, play a Spotify track/album/playlist link, browse your playlists, and
-use play/pause, skip, seek, volume, and device transfer. The player stays mounted while you
-browse other dashboard views; closing/reloading the page disconnects the browser player.
-The fleet node selector does not move playback to that machine.
+Afterglow has two halves in Cyberdeck: the media site in its frame (films, series, your
+library) and the listening room Cyberdeck renders itself at **Applications → Afterglow →
+Music** (`#/applications?app=afterglow&tab=music`). The listening room plays full music in
+this browser through Spotify's Web Playback SDK with your existing Premium subscription and
+can control Spotify Connect devices: home/search/history shelves, album, artist and playlist
+pages, playlist editing, the queue, your library, radio mixes, in-page video, saved
+recordings of what played here, fullscreen artwork and an immersive visualizer. There is no
+standalone Spotify tab: `#/spotify` links are rewritten to the music tab.
 
 One-time setup: create an app at <https://developer.spotify.com/dashboard>, enable Web API
-and Web Playback SDK, and register the exact redirect URI displayed in Spotify's setup card
+and Web Playback SDK, and register the exact redirect URI displayed in the setup card
 (e.g. `http://127.0.0.1:4777/`). Paste the public Client ID and choose Connect Spotify. No client
-secret is needed. Spotify requires HTTPS except for literal loopback IPs; plain HTTP tailnet
-URLs and `localhost` are not supported. On a remote machine use Cyberdeck's HTTPS URL.
-In development mode, add any other account under the Spotify app's User Management.
-
-After connecting, choose **Enable browser playback**, then play a song or choose **Listen
-here** to transfer your current music. Protected-content/DRM support is required; if the
-browser cannot play, select a Spotify desktop/mobile device instead. Playback only starts
-on an explicit action. Autoplay restrictions may require pressing Play again.
-
-OAuth uses PKCE, a single-use state with a ten-minute expiry, and automatic token refresh.
-Spotify tokens live only in this tab's sessionStorage and go directly to Spotify; the
-public Client ID is remembered in localStorage. Disconnect clears local tokens and stops
-this browser player (other Spotify devices keep their playback). To revoke app access
-entirely, remove Cyberdeck from your Spotify account's connected apps. Sign in separately
-on each browser/origin. Search uses the current development-mode limit of ten results;
-rate-limit responses honor Retry-After. No Spotify credentials enter daemon config or Git.
-
+secret is needed. Spotify requires HTTPS except for literal loopback IPs. Tokens live only in
+this tab's sessionStorage and go directly to Spotify; no Spotify credentials enter daemon
+config or Git. To revoke app access, remove Cyberdeck from your Spotify account's connected apps.
 
 ### Casework: the whole deck on the iPad, and the kitchen sink
 

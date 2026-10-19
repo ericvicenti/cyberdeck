@@ -26,7 +26,6 @@ struct Page {
     var columns = 4
     var selection = 0
     var cinema = false
-    var music = false
     var shelves: [Shelf] = []
     var feature: Tile? = nil
 }
@@ -64,8 +63,6 @@ enum InputMode: String { case controller, keyboard, pointer }
     @Published var controllerNames: [String] = []
     var window: NSWindow?
     let deck: API
-    lazy var music = SpotifyConnection(deck: deck)
-    @Published var musicVisualizer = false
     @Published var standaloneVisualizer = false
     let controllers = ControllerInput()
     let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Casework")
@@ -101,7 +98,7 @@ enum InputMode: String { case controller, keyboard, pointer }
     init() {
         let file = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cyberdeck/token")
         token = (try? String(contentsOf: file, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)) ?? ""
-        deck = API(CommandLine.arguments.contains("--music-fixture") && CommandLine.arguments.contains("--verify") ? "http://127.0.0.1:4779" : "http://127.0.0.1:4777", token: token)
+        deck = API("http://127.0.0.1:4777", token: token)
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
     func start() {
@@ -134,7 +131,7 @@ enum InputMode: String { case controller, keyboard, pointer }
         var result: Object = ["inputMode": inputMode.rawValue, "onscreenKeyboard": keyboardText != nil && inputMode == .controller, "title": page.title, "tiles": page.tiles.map(\.title), "selection": selection,
             "focused": page.tiles.indices.contains(selection) ? page.tiles[selection].title : "", "busy": busy,
             "message": message, "controllers": controllers.names, "fullscreen": window?.styleMask.contains(.fullScreen) ?? false,
-            "shelves": page.shelves.map { ["start": $0.start, "count": $0.count] }, "cinema": page.cinema, "music": page.music, "musicVisualizer": musicVisualizer, "standaloneVisualizer": standaloneVisualizer, "spotify": music.playback, "spotifyError": music.error, "spotifyDevice": music.deviceName, "controllerInput": controllers.diagnostics, "active": NSApp.isActive, "controlConnected": controlConnected, "gameRunning": gameProcess?.isRunning == true, "native": true, "verification": verification, "compatibility": browser?.web.url?.absoluteString as Any? ?? NSNull(),
+            "shelves": page.shelves.map { ["start": $0.start, "count": $0.count] }, "cinema": page.cinema, "standaloneVisualizer": standaloneVisualizer, "controllerInput": controllers.diagnostics, "active": NSApp.isActive, "controlConnected": controlConnected, "gameRunning": gameProcess?.isRunning == true, "native": true, "verification": verification, "compatibility": browser?.web.url?.absoluteString as Any? ?? NSNull(),
             "keyboard": keyboardText as Any? ?? NSNull(), "keyboardSelection": keyboardSelection]
         if let player {
             result["player"] = ["title": playbackTitle, "status": player.currentItem?.status.rawValue ?? 0,
@@ -185,7 +182,7 @@ enum InputMode: String { case controller, keyboard, pointer }
     }
     private func cancel() { task?.cancel(); generation = UUID(); busy = false }
     func home() {
-        cancel(); musicVisualizer = false; standaloneVisualizer = false; keyboardText = nil; stopPlayback(); browser?.close(); browser = nil
+        cancel(); standaloneVisualizer = false; keyboardText = nil; stopPlayback(); browser?.close(); browser = nil
         if let process = gameProcess, process.isRunning {
             try? gameInput?.fileHandleForWriting.write(contentsOf: Data("QUIT\n".utf8))
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { if process.isRunning { process.interrupt() } }
@@ -205,7 +202,6 @@ enum InputMode: String { case controller, keyboard, pointer }
     func back() {
         if keyboardText != nil { keyboardText = nil; keyboardSubmit = nil; return }
         if standaloneVisualizer { standaloneVisualizer = false; return }
-        if page.music && musicVisualizer { musicVisualizer = false; return }
         if player != nil { if playerMenu { playerMenu = false } else { cancel(); stopPlayback() }; return }
         if let browser {
             if browser.web.canGoBack { browser.web.goBack() } else { browser.close(); self.browser = nil; message = "" }; return
@@ -285,16 +281,6 @@ enum InputMode: String { case controller, keyboard, pointer }
             default: break
             }; return
         }
-        if page.music {
-            if action == "visualizer" { toggleMusicVisualizer(); return }
-            if musicVisualizer && ["left", "right", "up", "down"].contains(action), page.shelves.count > 1 {
-                let controls = page.shelves[1]
-                selection = max(controls.start, min(controls.start + controls.count - 1, selection + (["left", "up"].contains(action) ? -1 : 1))); return
-            }
-            if ["pause", "menu"].contains(action) { musicControl("toggle"); return }
-            if ["previous", "next"].contains(action) { musicControl(action); return }
-            if action == "search" { musicVisualizer = false; enterText { [weak self] in self?.musicSearch($0) }; return }
-        }
         if page.cinema, let rowIndex = page.shelves.firstIndex(where: { selection >= $0.start && selection < $0.start + $0.count }) {
             let row = page.shelves[rowIndex], column = selection - page.shelves[rowIndex].start
             switch action {
@@ -351,7 +337,6 @@ enum InputMode: String { case controller, keyboard, pointer }
          Tile(title: "Films", symbol: "film", run: { [weak self] in self?.catalog("movie") }),
          Tile(title: "Series", symbol: "tv", run: { [weak self] in self?.catalog("series") }),
          Tile(title: "Search", symbol: "magnifyingglass", run: { [weak self] in self?.enterText { self?.catalog("all", search: $0) } }),
-         Tile(title: "Music", symbol: "music.note", run: { [weak self] in self?.musicHome() }),
          Tile(title: "My list", symbol: "bookmark", run: { [weak self] in self?.saved() }),
          Tile(title: "Full Afterglow", symbol: "square.on.square", run: { [weak self] in self?.work {
              guard let self else { return }; let api = try await self.mediaAPI(); self.openCompatibility(api.origin)
@@ -512,7 +497,6 @@ enum InputMode: String { case controller, keyboard, pointer }
         }
     }
     private func beginPlayback(_ info: Object, hash: String, file: Int, title: String, autoplay: Bool = true) async throws {
-        try await music.pauseForVideo()
         let api = try await mediaAPI(); let url = try api.url(string(info["url"]))
         let replacing = player != nil && playbackHash == hash && playbackFile == file
         let controlSelection = playerControlSelection

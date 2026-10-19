@@ -125,11 +125,11 @@ async function login(
       headers: { location: base + "/?" + args },
     });
   });
-  await page.goto(base + "/#/spotify");
+  await page.goto(base + "/#/applications?app=afterglow&tab=music");
   await page
     .getByRole("button", { name: "Connect Spotify", exact: true })
     .click();
-  await page.waitForURL(base + "/#/spotify");
+  await page.waitForURL(base + "/#/applications?app=afterglow&tab=music");
   return () => tokenCalls;
 }
 async function mockSpotify(
@@ -323,7 +323,7 @@ async function mockSpotify(
 test("custom player is the only experience and fits mobile without external links", async () => {
   const { page, errors } = await setup(390);
   try {
-    await page.goto(base + "/#/spotify");
+    await page.goto(base + "/#/applications?app=afterglow&tab=music");
     await page.getByRole("heading", { name: "Make room for music." }).waitFor();
     expect(
       await page.getByLabel("Spotify Client ID", { exact: true }).count(),
@@ -392,7 +392,8 @@ test("PKCE login, search, browser play, controls, navigation persistence, and di
     await page.getByTestId("nav-data").click();
     await page.getByTestId("spotify-app").waitFor({ state: "hidden" });
     expect(await page.evaluate(() => (window as any).sdkDisconnects)).toBe(0);
-    await page.getByTestId("nav-spotify").click();
+    // back into the listening room by its own URL (a hash change, so the mounted player persists)
+    await page.evaluate(() => { location.hash = "#/applications?app=afterglow&tab=music"; });
     await page.getByRole("button", { name: "Pause", exact: true }).waitFor();
     await page.getByTestId("spotify-app").evaluate((el) => {
       el.scrollTop = 0;
@@ -591,7 +592,7 @@ test("expired token refresh is single-flight and SDK failure retains Connect con
       },
     );
     await page.route("**/spotify-sdk.js", (route) => route.abort());
-    await page.goto(base + "/#/spotify");
+    await page.goto(base + "/#/applications?app=afterglow&tab=music");
     await page
       .getByText("CONNECTED AS Test listener", { exact: true })
       .waitFor();
@@ -746,8 +747,8 @@ test("catalog navigation, playlist editing, queue, library, radio and video stay
       .getByRole("button", { name: "Close video playback", exact: true })
       .click();
     // closing the video leaves the listening room where it was (the playlist's own URL)
-    expect(page.url().startsWith(base + "/#/spotify")).toBe(true);
-    expect(page.url()).not.toContain("video");
+    const after = new URLSearchParams(page.url().split("#/applications?")[1] ?? "");
+    expect([after.get("app"), after.get("tab"), after.has("video")]).toEqual(["afterglow", "music", false]);
     expect(
       await page.getByTestId("spotify-app").locator('a[href^="http"]').count(),
     ).toBe(0);
@@ -954,7 +955,7 @@ test("SDK audio tap saves non-silent playable audio and journal replays without 
   });
   expect(signal.peak).toBeGreaterThan(0.05);
   expect(signal.duration).toBeGreaterThan(1);
-  await page.goto(base + "/#/spotify");
+  await page.goto(base + "/#/applications?app=afterglow&tab=music");
   await page.getByRole("region", { name: "Saved audio" }).waitFor();
   await page.context().setOffline(true);
   await page.getByRole("button", { name: /Play saved Test song/ }).click();

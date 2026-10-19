@@ -12,14 +12,7 @@ The newer Seed and Desktop views are retained. Seed nested paths use the same
 history writer, including replace notifications and node-preserving new-window
 links; malformed and unknown nested paths render a not-found view. Services and
 cmux now distinguish missing selections from ordinary content. Native keyboard
-Enter/save events reach React and editors; the unmerged TV runtime receives the
-narrow companion patch in `scripts/navigation-tv-keyboard.patch`.
-
-Fleet installs still contain separate Vault/Spotify/controller overlays. Never
-replace those trees wholesale from main. The 2026-10-17 packages capture each
-host's exact source, merge only owned deltas, compile on Yacht and fingerprint
-all UI/daemon inputs before activation. This also avoids Botical's build OOM.
-The Deck report is authoritative for completed and pending deployments.
+Enter/save events reach React and editors; the TV runtime is on main.
 
 ## URL contract
 
@@ -32,7 +25,7 @@ node of their own, except Data's `node` filter). There is no page-wide machine
 selector. The server still authenticates every API/proxy request; node IDs are
 path-encoded. Node-scoped components remount only when that node changes, not on
 query edits.
-Applications, Spotify and the physical screen remote retain their existing
+Applications (with Afterglow's music tab) and the physical screen remote retain their existing
 serving-node behavior.
 
 `ui/lib/navigation.ts` owns parsing, sorted query serialization, push/replace,
@@ -72,7 +65,7 @@ credentials should not be replayed from a link.
 | SteamVault / Steam | selected game, PC tab, query; native install/game/session/cloud-save decisions | `steam=<id>` detail added, resolves from serving-node library, restores without Play. Game/cloud decision/quit remain runtime/confirmation actions. Keep background Steam/client/kiosk alive. |
 | GamesSection / Games | installed native games and import form | Part of Applications. Play/import are actions; no automatic execution from links. |
 | CaseworkConsole | selected device, events, camera/media/QR, calls, native scene actions | Selected device is covered by `device=<id>`, including canonical default, reload/history, missing-device error/title and no action replay. Device IDs are serving-node-local. Media preview URL semantics and call/session lifecycle still pending. |
-| `spotify` / Spotify, SpotifyRecordings, SpotifyVisualizer | shelves, entities, query, pagination, recordings, immersive mode | Compact player (main, Yacht/Iris/Sentinel/Botical/Clipper): submitted `q` and loaded `playlists` page count restore through direct links, reload and history; stale search/page results are ignored. Rich player (Enuc/Starlight): `shelf`, `id`, `q`, `radio`, `page`, `immersive` retain the existing listening room. OAuth returns to requested content in both variants; no link starts playback. SDK/player stays mounted through URL and primary-view changes. `shelf=history&recording=<id>` now selects saved-audio details separately from Play. Fresh links/reload/history resolve local or node metadata without fetching audio or retrying uploads; missing/offline/no-account states have honest titles. A persistent audio owner survives shelf/detail/primary-view transitions. Enuc’s exact rich-player build is tested; Starlight’s deployment remains pending while offline. |
+| `applications?app=afterglow&tab=music` / Spotify (the listening room), SpotifyRecordings, SpotifyVisualizer | shelves, entities, query, pagination, recordings, immersive mode | One player everywhere, inside Afterglow: `shelf`, `id`, `q`, `radio`, `page`, `immersive` and `shelf=history&recording=<id>` restore through direct links, reload and history; OAuth returns to the requested content; no link starts playback; the SDK/player stays mounted through URL and primary-view changes. Legacy `#/spotify` links are rewritten. |
 | `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session, run, server, node | Nested route canonicalization, malformed/unknown path errors, route-based titles, Back/Forward and node-preserving new-window links covered. Backend, identity and server failures keep accurate titles across nested routes, reload and node transitions; late failures cannot retitle another node. Human-readable async entity names and the remaining lifecycle matrix still need coverage. |
 | `desktop` / Desktop | selected node and connection | Primary route/title and URL-selected node covered; connect/input/credentials remain explicit runtime actions. |
 | `desk` / Desk + voice | Fleet/Services/Agents glance tab, voice call, transcript, setup, mute | `tab=services` / `tab=agents` restore from fresh links and history; default fleet ignores stale local preferences, invalid tabs replace to the default, and titles match. Tab transitions retain the voice subtree without reconnecting. Calls and permissions stay explicit. The call owner now stays mounted across primary views, node changes and screen-remote navigation. Voice requests stay on the serving daemon’s hub relay; idle configuration refreshes on return. Simulated live-room tests prove no disconnect/reconnect during navigation, release of push-to-talk when hidden, and disconnect on authentication lock. Real calls/microphones are not used by tests. |
@@ -86,7 +79,7 @@ credentials should not be replayed from a link.
 | `cmux` / Cmux | surface, scrollback, creation form | Surface/scrollback URL/default/title covered. Polling screen response guarded. Workspace creation, input and desktop focus are explicit actions. Missing surfaces have a not-found state/title and never poll a nonexistent terminal. Backend unavailable has its own title. |
 | `cloud` / Cloud + RemoteBrowser | profile, target URL, archive query, provider+conversation | Covered. Remote URL/title state mirrors into the parent route after a request acknowledgement; initial profile state cannot overwrite direct links, redirects replace the requested URL, page/user navigation pushes once, and Back/Forward restores without remounting the persistent browser. The UI settles unacknowledged state for older daemons during rolling updates. Missing profiles, invalid target URLs and unavailable browsers show matching errors/titles before any browser socket is opened. |
 | `remote` / ScreenRemote | physical screen connection, text/scroll mode, remote buttons | Static route/title; captures server kiosk, which has its own navigation. Do not attach normal Playwright to active kiosk (it changes emulated focus); only noDefaults/raw CDP for future physical verification. |
-| Standalone player documents | `/vault-player.html`, newer installed `/spotify-player.html` | Internal player/SDK transports, not independently reconstructable media links. Preserve their authenticated message channels; represent navigable content in their parent view. `/samples/:name` serves media bytes, not a view. |
+| Standalone player documents | `/vault-player.html`, `/spotify-player.html` | Internal player/SDK transports, not independently reconstructable media links. Preserve their authenticated message channels; represent navigable content in their parent view. `/samples/:name` serves media bytes, not a view. |
 | Markdown / Widgets / PromptBar / VolumeControl | rendering, panel links, new-run draft, session strip, volume | No independent routes. Session strip links now encode node and session in a single transition. Input/volume are actions/preferences. |
 
 ## Repeatable verification and deployment
@@ -103,31 +96,8 @@ Real sandboxed daemon regression: `bun test tests/e2e.test.ts` (includes generat
 shell/files and isolates daemon home; does not control installed sessions).
 Cloud archive/browser history and rolling-protocol regressions are in
 `bun test tests/cloud.test.ts tests/navigation-browser.test.ts`.
-Compact Spotify URL/OAuth regression: `bun test tests/spotify.test.ts tests/spotify-e2e.test.ts --timeout 30000`. Rich-player checks use the captured host build and the 2026-10-16 listening-room fixture suite (see the run report). `scripts/navigation-rich-spotify.patch` preserves the owned rich-player delta separately because that larger player is not yet on main.
+Music (Afterglow tab) URL/OAuth regression: `bun test tests/spotify.test.ts tests/spotify-e2e.test.ts --timeout 30000`.
 Auth/session regressions: `bun test tests/auth.test.ts tests/sessions.test.ts`.
-Installer conflict/rollback checks: `bun test tests/navigation-install.test.ts`.
-Live read-only checks: `CYBERDECK_TEST_ORIGIN=<private-origin> bun scripts/check-navigation-live.ts`.
-Set `CYBERDECK_TEST_STEAM=1` on Enuc to check title links without Play.
-Loopback Yacht reads its token inside the process; `CYBERDECK_TEST_TOKEN_HOST=<ssh-alias>`
-can read a remote token inside the process for an SSH tunnel. No token is logged.
-The script blocks all non-GET API requests and uses a separate headless browser.
-
-`install-navigation.py --package <package> --check` prepares a three-way merge of
-this run's before/after files into each installed clone. Installation backs up
-owned source files and the existing UI, typechecks, builds into a staging folder,
-checks for concurrent UI edits, copies assets, then atomically swaps index.html.
-It retains old hashed assets for open pages and never restarts services or reloads
-kiosks. Conflicts abort before writes. Failed validation restores owned source
-and leaves the old UI serving. `--rollback <backup>` verifies that no newer edit
-would be overwritten, then restores source and the old entrypoint.
-
-
-For exact prebuilt deployments, use `scripts/install-navigation-built.py` with a
-per-host package (`manifest.json`, `after/`, `ui/`). It checks all source inputs
-and served-asset hashes, backs up the existing source and UI, preserves old
-chunks, and atomically activates index.html without restarting. `--check`
-performs validation only; `--rollback <backup>` refuses newer source/UI edits.
-Tests: `bun test tests/navigation-built-install.test.ts`.
 
 The 2026-10-17 keyboard regression is covered by `tests/input-mode.test.ts`,
 Files deep search in `tests/navigation-browser.test.ts`, CodeMirror save in
@@ -145,20 +115,10 @@ The screen-remote view hides the main shell instead of disposing media/voice own
 Live smoke checks exercise the installed Afterglow wrapper with a local intercepted
 child fixture, keeping production media and saved state untouched.
 
-Rich saved-recording changes are isolated in `scripts/navigation-recordings.patch`
-because the complete listening-room UI is still an installed overlay. Apply only
-after reconciling that overlay; never replace the richer player with main’s compact
-player. Run `CYBERDECK_TEST_UI=/path/to/exact/dist/ui bun test
-scripts/recordings-browser.test.ts --timeout 30000` for standalone browser fixtures:
-encoded detail IDs, reload/new tab/history, missing/offline/account boundaries, mobile
-layout and generated local audio continuing through shelf/primary-view transitions.
-The fixture blocks external networking and uses synthetic credentials/media only.
-
-The TV keyboard companion patch also reserves Space for the visible live Desk’s
+The TV runtime also reserves Space for the visible live Desk’s
 push-to-talk control. Its global activation handler must not swallow that hold,
 and hidden Desk controls must not receive keys from another view.
 
 Editor/Seed failure and rapid-transition regressions are in `tests/navigation-browser.test.ts`;
 Afterglow canonicalization and single-history checks are in `tests/afterglow-navigation.test.ts`.
-Run the whole main suite with `bun test tests --timeout 30000`; the standalone rich
-recordings fixture under `scripts/` requires its own exact rich-player build.
+Run the whole main suite with `bun test tests --timeout 30000`.

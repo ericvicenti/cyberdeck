@@ -1,6 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { navigate } from "../lib/api";
 import { claimRouteTitle, routeHash, readRoute, writeRoute } from "../lib/navigation";
+import { musicHash } from "../lib/spotify-navigation";
+
+/** Afterglow's two halves: the media site in its frame, and the listening room Cyberdeck renders itself. */
+export function AfterglowTabs({ tab, films = true }: { tab: "films" | "music"; films?: boolean }) {
+  const node = readRoute().params.get("node");
+  const link = (active: boolean, href: string, label: string, testId: string) => (
+    <a href={href} data-testid={testId} aria-current={active ? "page" : undefined} className={`rounded px-2 py-0.5 ${active ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:text-zinc-100"}`}>{label}</a>
+  );
+  return (
+    <span className="flex items-center gap-1 text-[12px]" data-testid="afterglow-tabs">
+      {films && link(tab === "films", routeHash("applications", { app: "afterglow", ...(node ? { node } : {}) }), "Films & series", "afterglow-tab-films")}
+      {link(tab === "music", musicHash(node ? { node } : {}), "Music", "afterglow-tab-music")}
+    </span>
+  );
+}
 
 const DEFAULT_ROUTE = "discover";
 
@@ -129,6 +144,7 @@ export function AfterglowFrame({
           ← Applications
         </a>
         <strong>{name}</strong>
+        <AfterglowTabs tab="films" />
         <span className="flex-1" />
         <button
           onClick={() =>
