@@ -50,7 +50,11 @@ export type DogfoodStatus = { triggerId: string; name: string; enabled: boolean;
 export type DogfoodOptions = { timezone?: string; timeOfDay?: string };
 /** A line left for the owner on the Desk transcript without a call: the `announce` MCP tool writes one, the run-completed trigger drives it. */
 export type Notice = { id: string; at: number; text: string; run?: { id?: string; title?: string; status?: string; sessionId?: string } };
-export type AnnounceInput = { text?: string; title?: string; status?: string; runId?: string; sessionId?: string };
+export type AnnounceInput = { text?: string; title?: string; status?: string; runId?: string; sessionId?: string; /** The run's answer, appended to a composed line (`delegateResult`). */ summary?: string };
+/** A task handed to the harness agent (`delegate`): the session the answer lands in. */
+export type DelegateResult = { sessionId: string; title: string; agentId: string };
+/** Where a delegated task stands (`delegateResult`): the newest answer, if one has been written yet. */
+export type DelegateStatus = { sessionId: string; title: string; state: "running" | "waiting" | "done"; answer?: string; answeredAt?: number; turns: number };
 export type AnnounceResult = { announced: boolean; notice?: Notice; reason?: string };
 type TriggerInfo = { id: string; name: string; enabled: boolean; source: any; prompt?: string | unknown[]; continuation?: { kind?: string; tool?: string }; lastFiredAt?: number; lastError?: string; createdAt?: number };
 
@@ -89,6 +93,10 @@ export const COMPANION_FILE = join(homedir(), "Library", "Application Support", 
 /** The experiments agents server's env file; `SEED_AGENTS_VOICE_INTERNAL_TOKEN` in it guards its internal voice routes. */
 export const RUNTIME_FILE = join(homedir(), "Library", "Application Support", "CaseworkSeed", "runtime.json");
 const RUNTIME_TIMEOUT_MS = 5_000;
+/** How long `delegate` waits for the first turn to be refused before reporting the session as handed off. */
+const DELEGATE_GRACE_MS = 1_500;
+/** The agents server answers MessageSession when the run ends; a delegated run may take a while. */
+const DELEGATE_RUN_TIMEOUT_MS = 30 * 60_000;
 // Mirrors the agents server's own validation (voice.ts #handleRuntime) so a bad profile is skipped here, not 400'd there.
 const VOICE_ID_RE = /^[a-zA-Z0-9-]{1,100}$/;
 const MCP_SERVER_NAME = "cyberdeck";
@@ -161,11 +169,13 @@ function omitUndefined<T>(value: T): T {
  * (never silently: the owner may have tuned the agent by hand on the server).
  */
 export const fleetPrompt = (name: string) =>
-  `You are ${name}, Eric's fleet companion: the voice of Cyberdeck, the daemon on each of Eric's machines (the laptops yacht and starlight, the servers enuc, sentinel, iris and botical, the phone). Eric reaches you by voice from the Casework app on the iPad or the web Desk, so everything you say is read aloud: lead with the answer, one or two short sentences, plain words, no markdown, lists, code or URLs unless he asks for them.
+  `You are ${name}, Eric's fleet companion: the voice of Cyberdeck, the daemon on each of Eric's machines (the laptops yacht and starlight, the Madrid Mac mini clipper that hosts you, the servers enuc, sentinel, iris and botical, the phone). Eric reaches you by voice from the Casework app on the iPad or the web Desk, so everything you say is read aloud: lead with the answer, one or two short sentences, plain words, no markdown, lists, code or URLs unless he asks for them.
 
 Work from facts, not memory: call your cyberdeck tools before answering and never guess at the state of a machine, a service or a repo. Pass brief true on every call and read the sentence it returns; ask for the full data only when Eric wants details. Say in a few words what you checked ("I probed the services and read the log on enuc") and name the host and the service when something is down. Keep numbers few and sayable.
 
 Before anything that changes a machine or the shared handoff (restarting a service, queueing or starting a collab task, removing a handoff entry) say what you are about to do and wait for a yes. Reading status, logs, notes, repos and sessions needs no confirmation. Leave a trace: handoff_note for what you did on a host, note for something Eric should see later, todo_add for work someone has to pick up.
+
+Hand long jobs to the fleet agent instead of doing them in the call: anything that touches several machines or takes more than a few seconds (check every host and say what is down, probe all services, read the logs on three servers, compare the repos on two laptops). Call delegate with the task in full sentences and a short title, tell Eric you handed it off and that a line appears on the Desk when it is done, and go on with his next question. When he asks what it found, call delegate_result with that session id and read the answer; if it is still running, say so and offer to check again.
 
 When a tool fails, say which one and what it said, retry at most once, and offer the next step. When you do not know, say so plainly.`;
 
@@ -505,7 +515,8 @@ export class SeedBridge {
     if (!text && !title) return { announced: false, reason: "nothing to say: give text, or the run's title and status" };
     if (!text && input.runId && !input.sessionId) return { announced: false, reason: "skipped: a sub-step with no session is not announced" };
     const verb = status === "succeeded" ? "finished" : status === "failed" ? "failed" : status === "canceled" ? "was canceled" : status ? `is ${status}` : "finished";
-    const line = text ?? `${verb === "finished" ? "Done" : verb === "failed" ? "Failed" : "Update"}: "${clipText(title!, 160)}" ${verb}.`;
+    const summary = input.summary?.trim().replace(/\s+/g, " ");
+    const line = text ?? `${verb === "finished" ? "Done" : verb === "failed" ? "Failed" : "Update"}: "${clipText(title!, 160)}" ${verb}${summary ? `: ${clipText(summary, 220)}` : "."}`;
     const run = input.runId || title || status || input.sessionId ? { ...(input.runId ? { id: input.runId } : {}), ...(title ? { title: clipText(title, 200) } : {}), ...(status ? { status } : {}), ...(input.sessionId ? { sessionId: input.sessionId } : {}) } : undefined;
     const notice: Notice = { id: `n-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, at: Date.now(), text: clipText(line, 400), ...(run ? { run } : {}) };
     const list = [...(this.#state.notices ?? []), notice];
@@ -961,6 +972,51 @@ export class SeedBridge {
   async messageQuery(id: string, text: string, context?: string[], clientMessageId?: string): Promise<void> {
     await this.getQuery(id);
     await this.action({ _: "MessageSession", sessionId: id, content: [{ type: "text", text }, ...(context?.length ? [{ type: "context", lines: context }] : [])], clientMessageId });
+  }
+
+  /**
+   * Hand a task to the harness agent (the `delegate` MCP tool): a fresh durable session titled
+   * `title`, with `task` as its first turn. The run-completed trigger (`runWatch`) announces the finish on
+   * the Desk, and `delegateResult` reads the answer back; the voice agent is free again right away.
+   */
+  async delegate(task: string, title?: string): Promise<DelegateResult> {
+    const text = task.trim();
+    if (!text) throw new SeedError("delegate needs a task");
+    // Cheap precheck before the signer and the health probe: a node without a bridge answers at once.
+    if (!this.#state.agentId || !this.#state.mcpRegisteredAt) throw new SeedError("Seed is not set up on this node (no agent, or its MCP server is not registered): run cyberdeck seed setup", 409);
+    const name = clipText((title?.trim() || text.split(/\r?\n/)[0]!).replace(/\s+/g, " "), 120);
+    const s = await this.createQuery(name);
+    const sessionId = s.id.replace(/^seed-/, "");
+    // MessageSession answers only when the run is over (the agents server runs it inline), so the turn is
+    // sent and left running: the caller gets the session back after a short grace period in which an
+    // immediate refusal still surfaces. The run-completed trigger announces the end; delegateResult reads it.
+    const turn = this.action({ _: "MessageSession", sessionId, content: [{ type: "text", text }] }, { timeoutMs: DELEGATE_RUN_TIMEOUT_MS });
+    const settled = await Promise.race([
+      turn.then(() => "done" as const, (e) => { throw e; }),
+      new Promise<"sent">((resolve) => setTimeout(() => resolve("sent"), DELEGATE_GRACE_MS)),
+    ]);
+    if (settled === "sent") turn.catch((e) => console.error(`seed: delegated run ${sessionId}: ${e instanceof Error ? e.message : e}`));
+    return { sessionId, title: name, agentId: this.#state.queryAgentId! };
+  }
+
+  /** The newest assistant answer in a harness session and whether the agent is still working on it. */
+  async delegateResult(sessionId: string): Promise<DelegateStatus> {
+    const id = sessionId.trim().replace(/^seed-/, "");
+    if (!id) throw new SeedError("delegate_result needs a session id");
+    if (!this.#state.queryAgentId) throw new SeedError("no delegated sessions yet: nothing has been handed to the fleet agent on this node", 404);
+    const r = await this.getQuery(id) as { session?: { title?: string; status?: string }; events?: { seq: number; createdAt: number; event: { type?: string; role?: string; content?: unknown } }[] };
+    let answer: { text: string; at: number } | undefined;
+    let lastUserSeq = -1;
+    let answerSeq = -1;
+    let turns = 0;
+    for (const ev of r.events ?? []) {
+      const p = ev.event;
+      if (p?.type !== "message" || typeof p.content !== "string" || !p.content.trim()) continue;
+      if (p.role === "user") { lastUserSeq = ev.seq; turns++; } else if (p.role === "assistant") { answer = { text: p.content.trim(), at: ev.createdAt }; answerSeq = ev.seq; }
+    }
+    const streaming = r.session?.status === "streaming";
+    const state: DelegateStatus["state"] = streaming ? "running" : answer && answerSeq > lastUserSeq ? "done" : "waiting";
+    return { sessionId: id, title: r.session?.title || "Seed query", state, ...(answer ? { answer: answer.text, answeredAt: answer.at } : {}), turns };
   }
 
   // ---- voice profile --------------------------------------------------------------------------

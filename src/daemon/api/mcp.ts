@@ -24,7 +24,7 @@ import { runScan, isScanRunning } from "../indexer/scan";
 import { resolveService, serviceLogs, restartService, restartBudget, type ManifestHost, type ServiceTarget } from "../servicectl";
 import { matchRepo, repoDetail, type RepoDetail } from "../repodetail";
 import { registerNodeTools } from "./mcp-node";
-import type { AnnounceInput, AnnounceResult } from "../seed";
+import type { AnnounceInput, AnnounceResult, DelegateResult, DelegateStatus } from "../seed";
 
 export const MCP_PATH = "/api/mcp";
 export const MCP_SERVER_NAME = "cyberdeck";
@@ -68,6 +68,10 @@ export type McpDeps = {
   version: string;
   /** Leave a line on the Desk transcript (SeedBridge.announce); absent when this daemon has no bridge. */
   announce?: (input: AnnounceInput) => AnnounceResult;
+  /** Hand a task to the harness agent (SeedBridge.delegate); absent without a bridge. */
+  delegate?: (task: string, title?: string) => Promise<DelegateResult>;
+  /** Read a delegated session's newest answer (SeedBridge.delegateResult); absent without a bridge. */
+  delegateResult?: (sessionId: string) => Promise<DelegateStatus>;
 };
 
 function text(value: unknown): { content: { type: "text"; text: string }[]; structuredContent?: Record<string, unknown> } {
@@ -522,9 +526,52 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
     },
     async ({ text: line, title, status, runId, sessionId, brief }) => {
       if (!deps.announce) return fail("This node has no Seed bridge to announce through.");
-      const r = deps.announce({ text: line, title, status, runId, sessionId });
+      // A finished harness run carries its answer onto the Desk line, so the owner reads the result, not just "done".
+      let summary: string | undefined;
+      if (!line && sessionId && status === "succeeded" && deps.delegateResult) {
+        const r = await deps.delegateResult(sessionId).catch(() => undefined);
+        if (r?.answer) summary = r.answer;
+      }
+      const r = deps.announce({ text: line, title, status, runId, sessionId, summary });
       if (!r.announced) return spoken(`Not announced: ${r.reason ?? "nothing to say"}.`, { announced: false, reason: r.reason }, brief, { announced: false });
       return spoken(`Announced on the Desk: ${plain(r.notice!.text)}`, { announced: true, notice: r.notice }, brief, { announced: true, id: r.notice!.id });
+    }
+  );
+
+  server.tool(
+    "delegate",
+    "Hand a job to the fleet agent (the Seed harness agent behind the prompt bar) and come back at once: a fresh session titled `title` gets `task` as its first turn and runs on its own with the same cyberdeck tools. Use it for anything that touches several machines or takes more than a few seconds (check every host and say what is down, probe all services, read logs on several servers). When the run finishes, the run-completed trigger leaves its answer on the Desk transcript; `delegate_result` reads it back at any time. Returns the session id.",
+    {
+      task: z.string().min(1).max(4000).describe("The job, in full sentences, with what to report back"),
+      title: z.string().max(120).optional().describe("A short title for the session (default: the task's first line)"),
+      brief: BRIEF,
+    },
+    async ({ task, title, brief }) => {
+      if (!deps.delegate) return fail("This node has no Seed bridge to delegate through.");
+      try {
+        const r = await deps.delegate(task, title);
+        return spoken(`Handed "${plain(r.title)}" to the fleet agent; a line appears on the Desk when it is done.`, { delegated: true, ...r }, brief, { delegated: true, sessionId: r.sessionId });
+      } catch (e) {
+        return fail(`delegate failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  );
+
+  server.tool(
+    "delegate_result",
+    "Where a delegated job stands: the fleet agent's newest answer in that session (`sessionId` from `delegate`, or the one a Desk announcement names) and whether it is still running, waiting for the next turn, or done.",
+    { sessionId: z.string().min(1).max(200).describe("The session id `delegate` returned"), brief: BRIEF },
+    async ({ sessionId, brief }) => {
+      if (!deps.delegateResult) return fail("This node has no Seed bridge to read a delegated session from.");
+      try {
+        const r = await deps.delegateResult(sessionId);
+        const line = r.state === "running" ? `"${plain(r.title)}" is still running${r.answer ? `; so far: ${clip(r.answer, 200)}` : ""}.`
+          : r.answer ? `"${plain(r.title)}" ${r.state === "done" ? "finished" : "answered"}: ${clip(r.answer, 260)}`
+          : `"${plain(r.title)}" has no answer yet.`;
+        return spoken(line, r, brief, { state: r.state, sessionId: r.sessionId });
+      } catch (e) {
+        return fail(`delegate_result failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
   );
 

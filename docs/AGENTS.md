@@ -51,7 +51,9 @@ MCP server, and grants it to the voice agent; see `docs/VOICE.md`).
 | `collab_run` | start a queued task on this node, detached; refuses while a run is active | yes (spawns agents) |
 | `run_log` | tail of `worker.log`, `reviewer.log` or `result.md` for a run | no |
 | `note` | append a dated line to `notes/inbox.md` | yes (Deck repo) |
-| `announce` | leave a line on the Desk transcript for the owner (`text`, or a finished run's `title`/`status`/`runId`/`sessionId`; a run without a session is skipped); the `cyberdeck-run-completed` trigger calls it headlessly, see docs/VOICE.md "Run announcements" | yes (seed.json notices) |
+| `announce` | leave a line on the Desk transcript for the owner (`text`, or a finished run's `title`/`status`/`runId`/`sessionId`; a run without a session is skipped; a succeeded run's line ends with the session's newest answer); the `cyberdeck-run-completed` trigger calls it headlessly, see docs/VOICE.md "Run announcements" | yes (seed.json notices) |
+| `delegate` | hand a job to the harness agent (`task`, optional `title`): a fresh session on the agents server gets the task as its first turn and runs on its own; returns the `sessionId` at once, the run-completed trigger announces the finish, see docs/VOICE.md "Voice-initiated workflows" | yes (a harness run) |
+| `delegate_result` | the newest answer in a delegated session (`sessionId`) and its `state`: `running`, `waiting` (no answer yet) or `done` | no |
 | `scan` | rescan this node's roots now | no (indexer) |
 | `deck_context` | the `deck context [dir]` briefing every coding agent runs first (host, project of `dir`, handoff entries, inbox, collab tasks) | no |
 | `shell` | run a command line through the owner's login shell on this node, in `cwd`; `host` runs it on a manifest host over ssh; `timeoutSec` ≤ 600; long output is saved to an `outputFile` | yes (whatever the command does; audited) |

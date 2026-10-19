@@ -279,6 +279,28 @@ is skipped with `announced: false` so one job announces once. The web Desk sorts
 transcript by time with a `fleet` label and refreshes the history every 20 s between calls; the
 spoken side (the worker saying it when a call is live) is not done, see "Not done".
 
+## Voice-initiated workflows: "check every host and tell me what is down"
+
+A call should stay a conversation, so the voice agent does not sit through a job that touches several
+machines. Its prompt (`fleetPrompt`) tells it to hand such jobs to the fleet agent: the `delegate` MCP
+tool (`task`, optional `title`) creates a fresh session on the harness agent (the one behind the prompt
+bar and the Seed view, `queryAgentId`), sends the task as its first turn and returns the `sessionId`
+after a short grace period (1.5 s, long enough for an immediate refusal to surface). The agents server
+answers `MessageSession` only when the run is over, so the daemon keeps that request open in the
+background (up to 30 min) and the voice agent is free to say "handed off, the Desk gets a line when it
+is done" and take the next question. The harness agent runs the job with the same cyberdeck tools and
+its own fleet knowledge; the Seed view (journal) shows the session like any prompt-bar query.
+
+When the run finishes, the `cyberdeck-run-completed` trigger calls `announce` with the run's title,
+status and session, and the line now carries the answer: `Done: "Fleet check" finished: Two hosts are
+down: starlight and clipper. The other seven answer.` (the newest assistant message of that session,
+clipped to 220 characters; failed runs and lines given as `text` are left alone). `delegate_result`
+(`sessionId`) reads the answer back at any time, for "what did it find?" on the next call: `state` is
+`running` while the session is streaming, `waiting` when no answer has been written yet, `done` once an
+answer follows the last question. A node without a Seed bridge set up refuses both tools at once with
+the `cyberdeck seed setup` hint instead of probing anything. Tests: `tests/seed-delegate.test.ts` (a
+fake agents server playing the session API) and the refusal in `tests/mcp.test.ts`.
+
 ## The voice hub
 
 The voice system runs on one node, named by `voice.hub` on every node (`createVoiceRelay` in

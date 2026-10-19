@@ -245,7 +245,7 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   registerSeedAgentsRoutes(app, seed, { token, upgradeWebSocket, isFullAuth, getNode: (id) => db.query("SELECT * FROM nodes WHERE id = ?").get(id) as import("./api/fleet").NodeRow | null });
   registerDashboardRoutes(app, db, cfg);
   const network = registerNetworkRoutes(app, db, cfg);
-  registerMcpRoutes(app, db, cfg, control, { status, version: VERSION, announce: (input) => seed.announce(input) });
+  registerMcpRoutes(app, db, cfg, control, { status, version: VERSION, announce: (input) => seed.announce(input), delegate: (task, title) => seed.delegate(task, title), delegateResult: (id) => seed.delegateResult(id) });
 
   // Live sessions (daemon-owned PTYs). tmux-backed ones survive restarts; a
   // self-update is deferred while plain pty sessions are still running.

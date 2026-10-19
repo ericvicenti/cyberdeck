@@ -94,7 +94,7 @@ describe("mcp tools", () => {
     const client = await connect(srv.base);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["announce", "collab_add", "collab_run", "collab_tasks", "deck_context", "edit_file", "fleet_status", "grep", "handoff", "handoff_note", "hosts", "list_dir", "note", "projects", "read_file", "repos", "repos_detail", "run_log", "scan", "service_logs", "services", "services_restart", "sessions", "sessions_search", "shell", "status", "todo", "todo_add", "todo_done", "write_file"]);
+    expect(names).toEqual(["announce", "collab_add", "collab_run", "collab_tasks", "deck_context", "delegate", "delegate_result", "edit_file", "fleet_status", "grep", "handoff", "handoff_note", "hosts", "list_dir", "note", "projects", "read_file", "repos", "repos_detail", "run_log", "scan", "service_logs", "services", "services_restart", "sessions", "sessions_search", "shell", "status", "todo", "todo_add", "todo_done", "write_file"]);
     for (const t of tools) {
       expect(t.name).toMatch(/^[a-z0-9_]{1,40}$/);
       expect(t.description?.length ?? 0).toBeGreaterThan(20);
@@ -497,3 +497,13 @@ describe("node tools", () => {
     await c2.close();
   });
 });
+
+test("delegate without a Seed bridge set up fails fast with the setup hint", async () => {
+  const client = await connect(srv.base);
+  const d = await call(client, "delegate", { task: "Check every host and tell me what is down.", title: "Fleet check" });
+  expect(d.isError).toBe(true);
+  expect(d.content[0]?.text).toMatch(/delegate failed: Seed is not set up on this node .*cyberdeck seed setup/);
+  const dr = await call(client, "delegate_result", { sessionId: "nope" });
+  expect(dr.isError).toBe(true);
+  expect(dr.content[0]?.text).toMatch(/no delegated sessions yet/);
+}, 30_000);

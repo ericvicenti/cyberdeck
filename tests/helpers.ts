@@ -46,7 +46,10 @@ export function startTestServer(
   const token = opts.token ?? TEST_TOKEN;
   const db = new Database(":memory:");
   initSchema(db);
-  const { fetch: appFetch, websocket, sessions } = createServer(db, cfg, token, opts.nodeId ?? "stw-test");
+  // The Seed bridge keeps its state (seed.json: agent ids, notices) under its own home: a test server must
+  // never read the developer's real ~/.cyberdeck/seed.json, or its tools reach the live agents server.
+  const seedHome = mkdtempSync(join(homedir(), ".cyberdeck-test-seed-"));
+  const { fetch: appFetch, websocket, sessions } = createServer(db, cfg, token, opts.nodeId ?? "stw-test", { seed: { home: seedHome, companionFile: join(seedHome, "companion.json"), runtimeFile: join(seedHome, "runtime.json") } });
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: appFetch, websocket });
   const base = `http://127.0.0.1:${server.port}`;
   return {
@@ -54,7 +57,7 @@ export function startTestServer(
     base,
     wsBase: `ws://127.0.0.1:${server.port}`,
     // Kill daemon-held PTYs first; stop() is not awaited so a straggling socket cannot hang the hook.
-    stop: () => { sessions.close(); void server.stop(true); },
+    stop: () => { sessions.close(); void server.stop(true); rmSync(seedHome, { recursive: true, force: true }); },
     api: (path, init) =>
       fetch(`${base}${path}`, {
         ...init,
