@@ -74,6 +74,7 @@ export function caseworkAllows(method: string, path: string): boolean {
   // The kitchen sink's Agent tab: the Casework Seed bridge behind this node (when one is configured).
   if (path.startsWith("/api/seed/")) return get || post;
   if (path === "/api/kiosk/stream") return get;
+  if (path === "/api/kiosk/media") return post; // the remote's media buttons, same reach as the screen stream
   if (path === "/api/audio") return get || post; // the remote's volume buttons
   if (path.startsWith("/api/modules/")) return get;
   if (path.startsWith("/api/media/")) return get || method === "PUT";

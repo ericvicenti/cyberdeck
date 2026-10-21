@@ -419,3 +419,17 @@ have tuned the agent on the server). The persona makes the agent speak for a voi
 one or two sentences, no markdown), work from the cyberdeck tools with `brief: true` instead of guessing,
 say what it checked, ask before restarts and collab runs, and leave a trace with `handoff_note`, `note`
 and `todo_add`. Apply, then `cyberdeck seed reset-session` so the next call starts on the new prompt.
+
+## The screen: Afterglow by voice
+
+"What is on the TV", "pause", "skip back thirty seconds", "search for Blade Runner", "play Heat": the `media` MCP
+tool (docs/AGENTS.md) drives the fleet screen, the kiosk Chromium that `cyberdeck-kiosk.service` supervises on a
+node with `kiosk.enabled` (enuc today). The daemon on that node attaches over the loopback CDP port it already uses
+for the screen stream, finds Afterglow's iframe (`window.afterglowNavigation`) and its `<video>`, and does the one
+thing asked: playback is a DOM call on the video, navigation is an Afterglow hash route, and `watch` matches the
+spoken title against Afterglow's `/api/library` (the application URL in config) and opens `watch/<id>/<file>`.
+With no Afterglow on screen the outer page is pointed at `#/applications?app=afterglow&route=…` first. Every other
+node answers `POST /api/kiosk/media` with 409, so the hub's tool call walks this node and then each peer and uses
+the first screen that answers (or `host` names it). The Casework pairing key may call the route too, so the iPad
+remote can grow media buttons without a new scope. The native macOS Casework player on clipper is not reached
+yet: it speaks `casework.input` over `/api/command`, a second screen type for the same tool.

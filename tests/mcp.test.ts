@@ -94,7 +94,7 @@ describe("mcp tools", () => {
     const client = await connect(srv.base);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["announce", "collab_add", "collab_run", "collab_tasks", "deck_context", "delegate", "delegate_result", "edit_file", "fleet_status", "grep", "handoff", "handoff_note", "hosts", "list_dir", "note", "projects", "read_file", "repos", "repos_detail", "run_log", "scan", "service_logs", "services", "services_restart", "sessions", "sessions_search", "shell", "status", "todo", "todo_add", "todo_done", "write_file"]);
+    expect(names).toEqual(["announce", "collab_add", "collab_run", "collab_tasks", "deck_context", "delegate", "delegate_result", "edit_file", "fleet_status", "grep", "handoff", "handoff_note", "hosts", "list_dir", "media", "note", "projects", "read_file", "repos", "repos_detail", "run_log", "scan", "service_logs", "services", "services_restart", "sessions", "sessions_search", "shell", "status", "todo", "todo_add", "todo_done", "write_file"]);
     for (const t of tools) {
       expect(t.name).toMatch(/^[a-z0-9_]{1,40}$/);
       expect(t.description?.length ?? 0).toBeGreaterThan(20);
@@ -349,7 +349,29 @@ describe("mcp brief mode", () => {
     expect((services.structuredContent as any).down).toEqual(["web-api on other"]);
     expect(sentence(await call(client, "collab_tasks", { brief: true }))).toContain("collab task");
     expect(sentence(await call(client, "scan", { brief: true }))).toMatch(/^(Rescan started on test-node|test-node is already scanning)/);
+    // no node in the test fleet has a kiosk screen: the tool says so instead of failing
+    const media = await call(client, "media", { brief: true });
+    expect(sentence(media)).toBe("No fleet screen is configured (none of test-node has a kiosk).");
+    expect((media.structuredContent as any).ok).toBe(false);
     await client.close();
+  });
+
+  test("media asks a named peer's screen over the fleet pairing and names unknown hosts", async () => {
+    srv.db.query("INSERT INTO nodes (id, name, url, token, added_at) VALUES (?, ?, ?, ?, ?)").run("n-bare-m", "bare", bare.base, TEST_TOKEN, Date.now());
+    const client = await connect(srv.base);
+    try {
+      const r = parsed(await call(client, "media", { host: "bare", action: "pause" }));
+      expect(r).toMatchObject({ ok: false, screens: [{ name: "bare", noScreen: true }] });
+      expect(r.brief).toBe("No fleet screen is configured (none of bare has a kiosk).");
+      const unknown = await call(client, "media", { host: "nowhere" });
+      expect(unknown.isError).toBe(true);
+      expect(unknown.content[0].text).toContain("No paired node is called nowhere");
+      const all = parsed(await call(client, "media"));
+      expect(all.screens.map((s: any) => s.name)).toEqual(["test-node", "bare"]);
+    } finally {
+      srv.db.query("DELETE FROM nodes WHERE id = 'n-bare-m'").run();
+      await client.close();
+    }
   });
 
   test("full answers still carry the data, with the sentence first", async () => {

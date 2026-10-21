@@ -24,6 +24,8 @@ import { runScan, isScanRunning } from "../indexer/scan";
 import { resolveService, serviceLogs, restartService, restartBudget, type ManifestHost, type ServiceTarget } from "../servicectl";
 import { matchRepo, repoDetail, type RepoDetail } from "../repodetail";
 import { registerNodeTools } from "./mcp-node";
+import type { Kiosk } from "./kiosk";
+import { MEDIA_ACTIONS, mediaSentence, type MediaState } from "../screenmedia";
 import type { AnnounceInput, AnnounceResult, DelegateResult, DelegateStatus } from "../seed";
 
 export const MCP_PATH = "/api/mcp";
@@ -47,7 +49,8 @@ Start with \`status\` (this node and its peers) or \`fleet_status\` (every host,
 uncommitted or unpushed work and \`repos_detail\` to look inside one repo (it starts with a \`brief\` sentence
 you can say as-is). \`sessions_search\` finds a past cc/cx session and tells the owner how to resume it. Queue work for a laptop agent with \`collab_add\`, start it with
 \`collab_run\`, and read its result with \`run_log\`. When \`services\` shows something down, read
-\`service_logs\` first and say what you found; call \`services_restart\` only after the owner agrees. \`todo_add\` / \`todo_done\` keep the handoff list current (confirm before removing), \`handoff_note\` records what you did on a host, and \`note\` drops a line into the owner's inbox that
+\`service_logs\` first and say what you found; call \`services_restart\` only after the owner agrees. \`media\` reads and drives the fleet's screen (the kiosk TV running
+Afterglow): what is playing, play/pause/seek/volume, a search or a downloaded title put on the screen. \`todo_add\` / \`todo_done\` keep the handoff list current (confirm before removing), \`handoff_note\` records what you did on a host, and \`note\` drops a line into the owner's inbox that
 every agent reads at session start. All times are ISO 8601 or Unix milliseconds.
 
 On this node the server also carries the reach a terminal coding agent has: \`shell\` (a command through the owner's
@@ -72,6 +75,8 @@ export type McpDeps = {
   delegate?: (task: string, title?: string) => Promise<DelegateResult>;
   /** Read a delegated session's newest answer (SeedBridge.delegateResult); absent without a bridge. */
   delegateResult?: (sessionId: string) => Promise<DelegateStatus>;
+  /** This node's kiosk screen (registerKioskRoutes); `media` reaches peers' screens over the fleet pairing. */
+  kiosk?: Kiosk;
 };
 
 function text(value: unknown): { content: { type: "text"; text: string }[]; structuredContent?: Record<string, unknown> } {
@@ -637,6 +642,59 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
       brief: BRIEF,
     },
     async ({ host, text: line, brief }) => deckWrite(["handoff", "note", host.toLowerCase(), "seed", line], ["handoff"], (out) => `Recorded on ${host}'s handoff note${out.file ? ` (${out.file})` : ""}.`, brief)
+  );
+
+  server.tool(
+    "media",
+    `What is playing on a fleet screen (the kiosk TV that shows Afterglow, the owner's films, series and music), and the controls: play, pause, toggle, seek (value = seconds, negative to go back), mute, unmute, volume (value 0-100), library, music, search (value = what to look for; the results appear on the screen), watch (value = the title to play from the downloaded library), open (value = an Afterglow route such as discover, saved, series or title/movie/tt0123456). Without \`host\` the first screen in the fleet answers. Start with status before changing anything.`,
+    {
+      action: z.enum(MEDIA_ACTIONS).default("status"),
+      value: z.union([z.string().max(500), z.number()]).optional().describe("Seconds for seek, 0-100 for volume, the query for search, the title for watch, the route for open"),
+      host: z.string().max(80).optional().describe("Host name of the screen (e.g. enuc); default: the first fleet screen that answers"),
+      brief: BRIEF,
+    },
+    async ({ action, value, host, brief }) => {
+      const body = JSON.stringify({ action, value });
+      const ask = async (name: string, run: () => Promise<Response | MediaState>): Promise<{ name: string; state?: MediaState; noScreen?: boolean; error?: string }> => {
+        try {
+          const r = await run();
+          if (!(r instanceof Response)) return { name, state: r };
+          const data = (await r.json().catch(() => ({}))) as Partial<MediaState> & { error?: string; screen?: boolean };
+          if (r.status === 409 || (r.status === 404 && !data.error)) return { name, noScreen: true };
+          if (!r.ok) return { name, error: data.error ?? `${name} answered ${r.status}` };
+          return { name, state: data as MediaState };
+        } catch (err) {
+          return { name, error: err instanceof Error ? err.message : String(err) };
+        }
+      };
+      const local = cfg.nodeName;
+      const wanted = host?.trim().toLowerCase();
+      const peer = (n: NodeRow) => ask(n.name, () => peerFetch(n, "/api/kiosk/media", { method: "POST", headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(20_000) }));
+      const here = () => ask(local, async () => (deps.kiosk?.enabled ? deps.kiosk.media({ action, value }) : new Response(JSON.stringify({ error: "no screen" }), { status: 409 })));
+      let answers: { name: string; state?: MediaState; noScreen?: boolean; error?: string }[];
+      if (wanted) {
+        if (wanted === local.toLowerCase()) answers = [await here()];
+        else {
+          const n = peers().find((p) => p.name.toLowerCase() === wanted);
+          if (!n) return fail(`No paired node is called ${host}; the screens I can reach are on ${listOf([local, ...peers().map((p) => p.name)])}.`);
+          answers = [await peer(n)];
+        }
+      } else {
+        // The first screen that answers; a status asks everyone, an action stops at the first screen.
+        answers = [await here()];
+        if (!answers[0].state) answers = [...answers, ...(await Promise.all(peers().map(peer)))];
+      }
+      const hit = answers.find((a) => a.state);
+      if (!hit?.state) {
+        const errors = answers.filter((a) => a.error).map((a) => `${a.name}: ${a.error}`);
+        const sentence = errors.length ? `No screen answered: ${listOf(errors, 3)}.` : `No fleet screen is configured (none of ${listOf(answers.map((a) => a.name))} has a kiosk).`;
+        return spoken(sentence, { ok: false, screens: answers }, brief, { ok: false });
+      }
+      const s = hit.state;
+      const sentence = mediaSentence(hit.name, s);
+      const out = { host: hit.name, ...s };
+      return s.ok ? spoken(sentence, out, brief, { host: hit.name, ok: true, playing: s.video?.playing ?? false, route: s.afterglow.route, did: s.did }) : spoken(sentence, out, brief, { host: hit.name, ok: false, error: s.error });
+    }
   );
 
   server.tool(

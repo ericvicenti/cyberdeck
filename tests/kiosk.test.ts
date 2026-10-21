@@ -41,3 +41,37 @@ test("remote screen compiles against the native modules shipped in Casework", as
   expect(compiled.source).toContain("react-native-webview");
   expect(compiled.source).toContain("/#/remote");
 });
+test("POST /api/kiosk/media is refused without a kiosk, validates the command, and drives the screen with one", async () => {
+  const off = new Hono();
+  registerKioskRoutes(off, testConfig({ kiosk: { enabled: false } }), () => () => null, () => true);
+  const refused = await off.request("/api/kiosk/media", { method: "POST", body: JSON.stringify({ action: "status" }), headers: { "content-type": "application/json" } });
+  expect(refused.status).toBe(409);
+  expect(((await refused.json()) as any).error).toContain("no kiosk screen");
+
+  const calls: string[] = [];
+  const frame = { url: () => "https://afterglow.test/", evaluate: async (fn: any) => { calls.push(fn.name); return { afterglow: true, route: "discover", title: "Afterglow", video: null }; } };
+  const page = { url: () => "http://127.0.0.1:4777/#/applications?app=afterglow", title: async () => "Cyberdeck", frames: () => [frame], evaluate: async () => {} };
+  const browser = { isConnected: () => true, contexts: () => [{ pages: () => [page] }] } as any;
+  const app = new Hono();
+  const kiosk = registerKioskRoutes(app, testConfig({ kiosk: { enabled: true } }), () => () => null, () => true, { connect: async () => browser });
+  expect(kiosk.enabled).toBe(true);
+  const bad = await app.request("/api/kiosk/media", { method: "POST", body: JSON.stringify({ action: "fly" }), headers: { "content-type": "application/json" } });
+  expect(bad.status).toBe(400);
+  const res = await app.request("/api/kiosk/media", { method: "POST", body: JSON.stringify({ action: "status" }), headers: { "content-type": "application/json" } });
+  expect(res.status).toBe(200);
+  expect(await res.json()).toMatchObject({ ok: true, action: "status", afterglow: { present: true, route: "discover" }, video: null, screen: { title: "Cyberdeck" } });
+  expect(calls).toEqual(["probeScript"]);
+  // the handle the MCP tool uses goes through the same page
+  expect((await kiosk.media({ action: "status" })).afterglow.route).toBe("discover");
+  // watch needs the Afterglow application URL on this node
+  const noLib = await app.request("/api/kiosk/media", { method: "POST", body: JSON.stringify({ action: "watch", value: "dune" }), headers: { "content-type": "application/json" } });
+  expect(((await noLib.json()) as any).error).toBe("This node cannot look up Afterglow's library.");
+
+  const gone = new Hono();
+  registerKioskRoutes(gone, testConfig({ kiosk: { enabled: true } }), () => () => null, () => true, { connect: async () => { throw new Error("connect ECONNREFUSED 127.0.0.1:9223"); } });
+  const down = await gone.request("/api/kiosk/media", { method: "POST", body: JSON.stringify({ action: "status" }), headers: { "content-type": "application/json" } });
+  expect(down.status).toBe(503);
+  expect(((await down.json()) as any).error).toContain("ECONNREFUSED");
+  expect(caseworkAllows("POST", "/api/kiosk/media")).toBe(true);
+  expect(caseworkAllows("GET", "/api/kiosk/media")).toBe(false);
+});

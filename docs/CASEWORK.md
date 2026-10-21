@@ -21,7 +21,8 @@ server, so the app is a native client of the fleet: the protocol is implemented 
    **Test connection** → **Use this server**.
 
 The pairing key lives at `~/.cyberdeck/casework-key` (mode 0600) and is NOT the node token: a key
-holder only reaches `/api/state`, `/api/modules/*`, `/api/command`, uploads, read-only control routes
+holder only reaches `/api/state`, `/api/modules/*`, `/api/command`, the kiosk screen stream and its
+`POST /api/kiosk/media` (docs/VOICE.md "The screen"), uploads, read-only control routes
 (overview, sessions) and the collab `tick`/`run` actions (`caseworkAllows`). The node token works as a
 pairing key too, for scripts. **Rotate key** on the card replaces it and disconnects paired devices.
 Pairing grants the server authority to execute JavaScript inside the app, which is why the key must
