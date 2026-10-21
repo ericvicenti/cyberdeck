@@ -4,6 +4,9 @@ import type { CyberdeckConfig } from "../config";
 import { createBrowserStreamHandlers, type Profile } from "../browser";
 import { screenMedia, parseMediaCommand, type LibraryItem, type MediaCommand, type MediaState } from "../screenmedia";
 
+/** Playwright errors carry a multi-line call log; the first line is the message worth repeating aloud. */
+const firstLine = (err: unknown) => (err instanceof Error ? err.message : String(err)).split("\n")[0].trim();
+
 /** What a node says about its screen: the media state, or why there is none here. */
 export type Kiosk = {
   enabled: boolean;
@@ -56,7 +59,7 @@ export function registerKioskRoutes(app: Hono, cfg: CyberdeckConfig, upgradeWebS
     try {
       return c.json(await media(cmd));
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err), screen: true }, 503);
+      return c.json({ error: firstLine(err), screen: true }, 503);
     }
   });
   return { enabled: Boolean(cfg.kiosk?.enabled), media };

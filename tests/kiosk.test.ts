@@ -68,10 +68,11 @@ test("POST /api/kiosk/media is refused without a kiosk, validates the command, a
   expect(((await noLib.json()) as any).error).toBe("This node cannot look up Afterglow's library.");
 
   const gone = new Hono();
-  registerKioskRoutes(gone, testConfig({ kiosk: { enabled: true } }), () => () => null, () => true, { connect: async () => { throw new Error("connect ECONNREFUSED 127.0.0.1:9223"); } });
+  registerKioskRoutes(gone, testConfig({ kiosk: { enabled: true } }), () => () => null, () => true, { connect: async () => { throw new Error("connectOverCDP: connect ECONNREFUSED 127.0.0.1:9223\nCall log:\n  - <ws preparing> retrieving websocket url"); } });
   const down = await gone.request("/api/kiosk/media", { method: "POST", body: JSON.stringify({ action: "status" }), headers: { "content-type": "application/json" } });
   expect(down.status).toBe(503);
-  expect(((await down.json()) as any).error).toContain("ECONNREFUSED");
+  // one line: the voice agent repeats this error aloud
+  expect(((await down.json()) as any).error).toBe("connectOverCDP: connect ECONNREFUSED 127.0.0.1:9223");
   expect(caseworkAllows("POST", "/api/kiosk/media")).toBe(true);
   expect(caseworkAllows("GET", "/api/kiosk/media")).toBe(false);
 });

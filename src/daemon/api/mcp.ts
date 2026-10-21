@@ -661,10 +661,10 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
           if (!(r instanceof Response)) return { name, state: r };
           const data = (await r.json().catch(() => ({}))) as Partial<MediaState> & { error?: string; screen?: boolean };
           if (r.status === 409 || (r.status === 404 && !data.error)) return { name, noScreen: true };
-          if (!r.ok) return { name, error: data.error ?? `${name} answered ${r.status}` };
+          if (!r.ok) return { name, error: clip(String(data.error ?? `${name} answered ${r.status}`).split("\n")[0], 160) };
           return { name, state: data as MediaState };
         } catch (err) {
-          return { name, error: err instanceof Error ? err.message : String(err) };
+          return { name, error: clip((err instanceof Error ? err.message : String(err)).split("\n")[0], 160) };
         }
       };
       const local = cfg.nodeName;
