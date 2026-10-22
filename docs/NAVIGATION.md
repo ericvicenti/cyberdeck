@@ -75,7 +75,7 @@ credentials should not be replayed from a link.
 | `data` / Data | root filter, repo query | Covered. Scans are actions; table has a fixed 100-item cap, not a pageable UI. |
 | `files` / Files, TreeNode, dialogs | path, hidden files, sort/order, query, deep search, File Info modal | Covered, including stale listing/deep-search protection. Multi-selection, expanded tree folders, clipboard, rename/chmod/delete/import drafts stay transient; assess any desired navigable selection separately. Failed directory/info has a matching title. |
 | `edit` / Editor | file path, text/media/markdown, playlist; video transport mode, loop/shuffle | Path/title reconstruct content; empty paths and missing text have accurate views/titles. Loading and save results are scoped to the current file/editor, including rapid transitions; stale results cannot overwrite another file or clear its unsaved indicator. Media failure titles and preserving media/unsaved edits across primary-view changes remain; playback preferences stay runtime state. |
-| `term` / Term, TermPane, SeedPane, PromptBar | node/session, new-session form, cwd prefill; transcript pagination | Default selection replaces; explicit session/node links push once; invalid session and title covered. Links never create a process. Daemon session persistence covered in existing E2E. Transcript pagination/draft and backend error details remain. |
+| `term` / Term, TermPane, SeedPane, PromptBar | node/session, new-session form, cwd prefill; transcript pagination | `filter` selects the tab-strip machine (`self` = serving node, absent = every machine); `target` selects the New form destination independently of the underlying session node. Both restore on reload/new-tab/Back/Forward, and selecting a session retains its filter. Default selection waits for its owner and replaces once; offline/unknown nodes have distinct errors, delayed peers do not become false missing sessions. Seed session links use authenticated entity titles. Links never create a process. Daemon persistence covered in existing E2E. Transcript pagination/drafts and remaining backend errors remain. |
 | `cmux` / Cmux | surface, scrollback, creation form | Surface/scrollback URL/default/title covered. Polling screen response guarded. Workspace creation, input and desktop focus are explicit actions. Missing surfaces have a not-found state/title and never poll a nonexistent terminal. Backend unavailable has its own title. |
 | `cloud` / Cloud + RemoteBrowser | profile, target URL, archive query, provider+conversation | Covered. Remote URL/title state mirrors into the parent route after a request acknowledgement; initial profile state cannot overwrite direct links, redirects replace the requested URL, page/user navigation pushes once, and Back/Forward restores without remounting the persistent browser. The UI settles unacknowledged state for older daemons during rolling updates. Missing profiles, invalid target URLs and unavailable browsers show matching errors/titles before any browser socket is opened. |
 | `remote` / ScreenRemote | physical screen connection, text/scroll mode, remote buttons | Static route/title; captures server kiosk, which has its own navigation. Do not attach normal Playwright to active kiosk (it changes emulated focus); only noDefaults/raw CDP for future physical verification. |
@@ -138,7 +138,7 @@ The October 19–21 runs left additional Editor/Vault/Casework lifecycle work in
 isolated worktrees and installed overlays, still uncommitted. October 21 manifests
 confirm six installations; its unfinished report did not reflect that deployment,
 and its live check recorded failures. Preserve those overlays and their history;
-this run commits only its Network Map changes. The current installed trees on Yacht,
+this run commits only its own Network Map, Seed title and Sessions navigation changes. The current installed trees on Yacht,
 Enuc, Iris, Sentinel, Botical and Clipper were captured before rebuilding; Starlight
 was offline. See the latest Deck report for measured rollout/verification results.
 
@@ -162,3 +162,10 @@ Offline/no-identity hosts are reported as unavailable rather than treated as liv
 Title lookups use only the selected node's configured server; they never sign extra
 requests for an arbitrary server URL carried in a link. Existing Seed navigation and
 session components retain their original ownership and are not remounted for titles.
+
+Sessions checks: `bun test tests/navigation-browser.test.ts tests/seed-titles-browser.test.ts`.
+The fixture covers filter/form destinations, defaults, fresh/history restoration, delayed
+selected owners, backend errors, unknown machines, title cleanup and Seed session titles.
+`CYBERDECK_TEST_ORIGIN=<private-tunnel> CYBERDECK_TEST_TOKEN_HOST=<ssh-alias> bun scripts/check-term-navigation-live.ts`
+checks installed form/filter/history/error routes without attaching to a terminal or
+creating a process. No-peer hosts report that live destination coverage is unavailable.

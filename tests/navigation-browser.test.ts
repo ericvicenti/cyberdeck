@@ -11,6 +11,8 @@ const browserMessages: any[] = [];
 let locked = false;
 let browserUnavailable = false;
 let missingLog = false, holdLog = false;
+let holdTerm=false, termUnavailable=false;
+const termWaiters=new Set<()=>void>();
 const browserConnections: string[] = [];
 const deferred = new Map<string, () => void>();
 const projects = ["alpha", "beta"].map(slug => ({ slug, name: slug === "alpha" ? "Alpha project" : "Beta project", status: "active", depth: 0, parent: null, repos: [], hosts: ["Test"], links: [], body: `# ${slug}`, file: `projects/${slug}/index.md` }));
@@ -59,7 +61,13 @@ const server = Bun.serve<{legacy:boolean}>({port:0,hostname:"127.0.0.1",async fe
     if (path === "/api/cmux/tree") return Response.json({available:true,running:true,tree:[{kind:"window",ref:"w1",children:[{kind:"workspace",ref:"ws1",title:"Work",children:[{kind:"surface",ref:"s1",title:"First shell",active:true,children:[]},{kind:"surface",ref:"s2",title:"Second shell",children:[]}]}]}]});
     if (path === "/api/cmux/screen") return Response.json({text:`screen ${u.searchParams.get("surface")} scrollback=${u.searchParams.get("scrollback")}`});
     if (path === "/api/applications") return Response.json({applications:[]});
-    if (path === "/api/sessions") return Response.json({sessions:[session("one"),session("two")]});
+    if (path === "/api/sessions") {
+      if(original.includes("/peer-a/")) {
+        if(termUnavailable)return Response.json({error:"Peer A is offline"},{status:503});
+        if(holdTerm){await new Promise<void>(r=>termWaiters.add(r));return Response.json({sessions:[session("remote")]});}
+      }
+      return Response.json({sessions:[session("one"),session("two")]});
+    }
     if (path === "/api/browser/profiles") return Response.json({available:!browserUnavailable,profiles:[{name:"chatgpt",open:true,exists:true},{name:"claude",open:false,exists:true},{name:"default",open:false,exists:false}]});
     const conv = path.match(/^\/api\/cloud\/(?:chatgpt|claude)\/conversations\/(.+)$/)?.[1];
     if (conv) {
@@ -573,4 +581,61 @@ test("Seed identity and server failures keep their own titles on reload and nest
     expect(await isolated.title()).toBe("Applications · Cyberdeck");await isolated.goBack();
     await isolated.waitForFunction(()=>document.title==="Seed server unavailable · Cyberdeck");
   } finally {await isolated.close();}
+});
+
+test("session machine filters and new-session destinations survive history and fresh loads", async () => {
+  await go("term?session=one&node=peer-a&filter=self"); await title("Shell one · Peer A · Sessions · Cyberdeck");
+  expect(await page.getByTestId("term-filter-node").inputValue()).toBe("");
+  expect(await page.getByTestId("term-tab").count()).toBe(2);
+  await page.getByTestId("terminal-host").evaluate(el=>(el as HTMLElement).dataset.navigationOwner="retained");
+  const before=await page.evaluate(()=>history.length);
+  await page.getByTestId("term-filter-node").selectOption("peer-b");await settle();
+  expect(await param("filter")).toBe("peer-b");expect(await page.evaluate(()=>history.length)).toBe(before+1);
+  await page.goBack();await page.waitForFunction(()=>new URLSearchParams(location.hash.split("?")[1]).get("filter")==="self");
+  await page.goForward();await page.waitForFunction(()=>new URLSearchParams(location.hash.split("?")[1]).get("filter")==="peer-b");
+  expect(await page.getByTestId("terminal-host").getAttribute("data-navigation-owner")).toBe("retained");
+  await page.reload();await title("Shell one · Peer A · Sessions · Cyberdeck");expect(await page.getByTestId("term-filter-node").inputValue()).toBe("peer-b");
+  await page.getByTestId("term-tab").filter({hasText:"Shell two"}).getByRole("button",{name:"Shell two",exact:true}).click();await title("Shell two · Peer B · Sessions · Cyberdeck");expect(await param("filter")).toBe("peer-b");
+  await page.evaluate(()=>location.hash="#/term?session=one&node=peer-a&new=1&target=self&filter=peer-b");await title("New session on Test · Cyberdeck");
+  await page.getByTestId("term-new-node").selectOption("peer-b");await title("New session on Peer B · Cyberdeck");
+  await page.goBack();await title("New session on Test · Cyberdeck");await page.goForward();await title("New session on Peer B · Cyberdeck");
+  await page.reload();await title("New session on Peer B · Cyberdeck");
+  const tab=await browser.newPage();try{await tab.goto(page.url());await tab.getByTestId("term-new-form").waitFor();expect(await tab.getByTestId("term-new-node").inputValue()).toBe("peer-b");}finally{await tab.close();}
+  await page.getByRole("button",{name:"Cancel",exact:true}).click();await title("Shell one · Peer A · Sessions · Cyberdeck");
+  expect(await param("target")).toBe(null);expect(await param("filter")).toBe("peer-b");expect(mutations).toEqual([]);
+});
+
+test("a delayed selected session owner cannot become missing or a new session prematurely", async () => {
+  const release=()=>{for(const resolve of termWaiters)resolve();termWaiters.clear();};
+  holdTerm=true;
+  try{
+    await go("term?node=peer-a");while(!termWaiters.size)await page.waitForTimeout(10);
+    await page.waitForTimeout(150);expect(await param("new")).toBe(null);expect(await page.getByTestId("term-missing").count()).toBe(0);
+    const before=await page.evaluate(()=>history.length);release();await title("Shell remote · Peer A · Sessions · Cyberdeck");
+    expect(await param("session")).toBe("remote");expect(await page.evaluate(()=>history.length)).toBe(before);
+    await go("term?node=peer-a&session=remote");while(!termWaiters.size)await page.waitForTimeout(10);
+    await title("Loading sessions · Peer A · Cyberdeck");expect(await page.getByTestId("term-missing").count()).toBe(0);
+    await page.getByTestId("nav-data").click();release();await title("Data · Cyberdeck");await page.waitForTimeout(50);expect(await page.title()).toBe("Data · Cyberdeck");
+  }finally{holdTerm=false;release();}
+});
+
+test("unavailable and unknown session owners have honest reloadable errors", async () => {
+  termUnavailable=true;
+  try{
+    await go("term?node=peer-a&session=missing");await title("Sessions unavailable · Peer A · Cyberdeck");await page.getByTestId("term-unavailable").waitFor();expect(await page.getByTestId("term-missing").count()).toBe(0);
+    await page.reload();await title("Sessions unavailable · Peer A · Cyberdeck");
+    await go("term?node=peer-a");await title("Sessions unavailable · Peer A · Cyberdeck");expect(await param("new")).toBe(null);
+    await go("term?node=unknown&session=missing");await title("Machine not found · Sessions · Cyberdeck");await page.getByTestId("term-unavailable").waitFor();
+    await go("term?session=one&filter=*&target=peer-b");await title("Shell one · Test · Sessions · Cyberdeck");expect(await param("filter")).toBe(null);expect(await param("target")).toBe(null);
+    expect(mutations).toEqual([]);
+  }finally{termUnavailable=false;}
+});
+
+
+test("local session defaults remain usable when fleet metadata is unavailable", async () => {
+  await page.route("**/api/fleet/nodes",route=>route.fulfill({status:503,json:{error:"Fleet metadata unavailable"}}));
+  try {
+    await go("term");await title("Shell one · local · Sessions · Cyberdeck");
+    expect(await param("session")).toBe("one");expect(await param("node")).toBe(null);expect(mutations).toEqual([]);
+  } finally {await page.unroute("**/api/fleet/nodes");}
 });

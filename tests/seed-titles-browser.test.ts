@@ -144,3 +144,13 @@ test("Leaving a delayed trigger route cannot sign its follow-up title lookup",()
  expect(actions.filter(a=>a.endsWith(":GetAgentTrigger")).length).toBe(before);
  expect(await page.title()).toBe("Data · Cyberdeck");
 }),30000);
+
+
+test("Sessions Seed links use the embedded entity title and restore without creating a terminal",()=>fresh(async page=>{
+ await page.goto(`${server.url}#/term?session=seed-one`);await title(page,"local First conversation · Seed session · Cyberdeck");
+ await page.reload();await title(page,"local First conversation · Seed session · Cyberdeck");
+ await page.evaluate(()=>location.hash="#/term?session=seed-two&node=peer-b");await title(page,"peer-b Second conversation · Seed session · Peer B · Cyberdeck");
+ await page.goBack();await title(page,"local First conversation · Seed session · Cyberdeck");
+ await page.evaluate(()=>location.hash="#/term?session=seed-missing");await title(page,"Session not found · Seed · Cyberdeck");
+ await page.getByTestId("nav-data").click();await title(page,"Data · Cyberdeck");
+}),30000);

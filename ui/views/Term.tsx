@@ -102,11 +102,12 @@ function NativeSeedSession({ id, node }: { id: string; node: string }) {
     <Suspense fallback={<div className="p-6 text-xs text-zinc-500">Loading Seed agents…</div>}>
       <SeedAgentsEmbed
         node={node}
+        title={`${sessionId} · Seed session`}
         route={{ key: "agent-session", sessionId }}
-        onRouteChange={(next, _mode, path) => {
+        onRouteChange={(next, mode, path) => {
           // Stay in Sessions for this session; anything else (the agent, a run, another session) opens the Seed view on the same machine.
           if (next.key === "agent-session" && next.sessionId === sessionId) return;
-          navigate("seed", { r: path, node: node || undefined });
+          navigate("seed", { r: path, node: node || undefined }, mode);
         }}
       />
     </Suspense>
@@ -121,39 +122,55 @@ export function Term({ params, onLocked }: { params: URLSearchParams; onLocked?:
   const { sessions: all, nodes, states, replace } = useLiveSessions(4000);
   const [statuses, setStatuses] = useState<Record<string, Status>>({});
   const adding = params.get("new") === "1" || (!!params.get("cwd") && !params.get("session"));
-  const [newNode, setNewNode] = useState<string | null>(null);
   const [newCwd, setNewCwd] = useState("");
   const [newCmd, setNewCmd] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [filterNode, setFilterNode] = useState("*");
+  const filter = params.get("filter") || "";
+  const filterNode = filter === "self" ? "" : filter || "*";
   const active = params.get("session") ?? "";
   const activeNode = routeNode(params);
   const { overview } = useOverview();
   const targets = useMemo(() => targetsOf(nodes), [nodes]);
-  const nameOf = (id: string) => targets.find((t) => t.id === id)?.name ?? (id ? "node" : "local");
+  const nameOf = (id: string) => targets.find((t) => t.id === id)?.name ?? (id || "local");
 
   // newest first, every machine
   const sessions = useMemo(() => [...all].sort((a, b) => b.createdAt - a.createdAt), [all]);
   const shown = useMemo(() => (filterNode === "*" ? sessions : sessions.filter((s) => s.node === filterNode)), [sessions, filterNode]);
   const current = sessions.find((s) => s.id === active && s.node === activeNode) ?? null;
-  const answered = states.some((s) => s.answered);
+  const selectedState = states.find(s => s.node === activeNode);
+  const unknownNode = !!activeNode && !!nodes && !nodes.nodes.some(n => n.id === activeNode);
+  const selectedReady = unknownNode || !!selectedState && (selectedState.answered || !selectedState.online);
+  const allReady = states.length >= (nodes ? nodes.nodes.length + 1 : 1) && states.every(s => s.answered || !s.online);
+  const selectionError = !current && selectedReady && (unknownNode ? "Machine not found" : selectedState?.error ? "Sessions unavailable" : "");
+  const seedSelected = !adding && active.startsWith("seed-") && !unknownNode;
   const local401 = states.find((s) => s.node === "")?.error;
   useEffect(() => { if (local401 && /^401\b|Unauthorized/i.test(local401)) onLocked?.(); }, [local401]);
   // the machine the new-session form targets: the one chosen, else the current session's, else the URL's (= this one
   // when absent). Never a fallback to another machine: an unknown node id fails at the daemon, not silently elsewhere.
-  const formNode = newNode ?? (current ? current.node : activeNode);
-  const formTarget = targets.find((t) => t.id === formNode) ?? { id: formNode, name: nameOf(formNode), online: true, self: formNode === "" };
+  const target = params.get("target");
+  const formNode = target === "self" ? "" : target || activeNode;
+  const formTarget = targets.find((t) => t.id === formNode) ?? { id: formNode, name: nameOf(formNode), online: !nodes, self: formNode === "" };
 
-  const openForm = () => { setNewNode(current ? current.node : activeNode); updateParams({ new: "1", cwd: null }); };
-  const closeForm = () => { setNewNode(null); updateParams({ new: null, cwd: null }); };
+  // Defaults have one spelling; preserve unknown machine IDs so errors stay shareable.
+  useEffect(() => {
+    const canonical: Record<string, string | null> = {};
+    if (filter === "*" || params.has("filter") && !filter) canonical.filter = null;
+    if (target !== null && (!adding || !target || (target === "self" ? "" : target) === activeNode)) canonical.target = null;
+    if (Object.keys(canonical).length) updateParams(canonical, "replace");
+  }, [filter, target, adding, activeNode]);
+  const openForm = () => updateParams({ new: "1", cwd: null, target: null });
+  const closeForm = () => updateParams({ new: null, cwd: null, target: null });
+  const selectSession = (session: LiveSession, mode: "push" | "replace" = "push") => navigate("term", {
+    session: session.id, node: session.node || undefined, filter: filter || undefined,
+  }, mode);
   const create = async (cwd: string, cmd?: string, node: string = formNode) => {
     const nodeName = nameOf(node);
     try {
       const caps = await getCaps(node);
       const s = await createSession(node, nodeName, { cwd: cwd || undefined, cmd: cmd || undefined, runner: caps?.tmux ? "tmux" : "pty" });
       rememberCwd(s.cwd);
-      setNewCmd(""); setNewNode(null);
+      setNewCmd("");
       replace(node, [...all.filter((x) => x.node === node), s]);
       navigate("term", { session: s.id, node: node || undefined });
     } catch (e) { if ((e as { status?: number }).status === 401) onLocked?.(); setErr(`could not start on ${nodeName}: ${e instanceof Error ? e.message : e}`); }
@@ -162,12 +179,14 @@ export function Term({ params, onLocked }: { params: URLSearchParams; onLocked?:
   // A shareable URL describes a view; opening/reloading it must never create a process: `cwd` only prefills the form.
   useEffect(() => { setNewCwd(params.get("cwd") ?? ""); }, [params.get("cwd")]);
   useEffect(() => {
-    if (!answered || active || adding) return;
+    if (active || adding) return;
+    // A fast local answer cannot decide that a slower selected peer is empty.
+    if (params.has("node") ? !selectedReady || !!selectionError : !allReady) return;
     // `#/term?node=<id>` without a session: that machine's newest session, else a new one there
     const pool = params.has("node") ? sessions.filter((s) => s.node === activeNode) : sessions;
-    if (pool.length) navigate("term", { session: pool[0].id, node: pool[0].node || undefined }, "replace");
+    if (pool.length) selectSession(pool[0], "replace");
     else updateParams({ new: "1" }, "replace");
-  }, [answered, sessions, active, adding, activeNode]);
+  }, [allReady, selectedReady, selectionError, sessions, active, adding, activeNode]);
 
   const close = async (s: LiveSession) => {
     if (s.state === "running" && !(await confirmAction(s.tool === "seed" ? `Delete conversation “${s.title}” on ${s.nodeName} and its messages?` : `Kill session “${s.title}” on ${s.nodeName}? Anything running in it stops.`))) return;
@@ -177,7 +196,10 @@ export function Term({ params, onLocked }: { params: URLSearchParams; onLocked?:
     if (current && current.id === s.id && current.node === s.node) { if (rest[0]) navigate("term", { session: rest[0].id, node: rest[0].node || undefined }); else { navigate("term", { new: "1" }); } }
   };
   const cwdOptions = useMemo(() => Array.from(new Set([...recentCwds(), ...projectDirs(overview)])), [overview, adding]);
-  useRouteTitle(adding ? `New session on ${formTarget.name}` : current ? `${current.title} · ${current.nodeName} · Sessions` : answered && active ? "Session not found" : undefined);
+  useRouteTitle(adding ? `New session on ${formTarget.name}` : unknownNode ? `Machine not found · Sessions`
+    : seedSelected ? undefined : current ? `${current.title} · ${current.nodeName} · Sessions`
+    : selectionError ? `${selectionError} · ${nameOf(activeNode)}`
+    : selectedReady && active ? "Session not found" : active ? `Loading sessions · ${nameOf(activeNode)}` : undefined);
   const led = (s: LiveSession) => (s.state !== "running" ? "led-off" : statuses[`${s.node}:${s.id}`] === "connecting" ? "led-warn" : s.busy ? "led-run" : "led-on");
   const problems = states.filter((s) => s.error || s.seedError);
   const currentKey = current ? `${current.node}:${current.id}` : "";
@@ -186,7 +208,7 @@ export function Term({ params, onLocked }: { params: URLSearchParams; onLocked?:
     <div className="flex h-full flex-col">
       <div className="hud-chrome flex items-center gap-1 overflow-x-auto border-b px-2 py-1">
         <span className="hud-label neon mr-2 hidden whitespace-nowrap sm:inline">Sessions</span>
-        {targets.length > 1 && <NodePicker value={filterNode} onChange={setFilterNode} targets={targets} all="every machine" testId="term-filter-node" title="show sessions on" className="mr-1 hidden sm:inline" />}
+        {targets.length > 1 && <NodePicker value={filterNode} onChange={node => updateParams({ filter: node === "*" ? null : node || "self" })} targets={targets} all="every machine" testId="term-filter-node" title="show sessions on" className="mr-1 hidden sm:inline" />}
         {shown.map((t) => (
           <div key={`${t.node}:${t.id}`} className={`group flex shrink-0 items-center gap-1.5 rounded-sm border px-2 py-1 text-[11px] ${current === t && !adding ? "border-sky-500/40 bg-sky-500/10 text-zinc-100" : "border-transparent text-zinc-400 hover:text-zinc-200"}`} data-testid="term-tab" data-session={t.id} data-node={t.node}>
             <span className={`led ${led(t)}`} />
@@ -194,7 +216,7 @@ export function Term({ params, onLocked }: { params: URLSearchParams; onLocked?:
             {editing === `${t.node}:${t.id}` ? (
               <input autoFocus defaultValue={t.title} onBlur={async (e) => { const v = e.target.value.trim(); setEditing(null); if (v && v !== t.title) { try { await renameSession(t.node, t.id, v); } catch {} } }} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} className="w-32 bg-transparent font-mono outline-none" />
             ) : (
-              <button onClick={() => { navigate("term", { session: t.id, node: t.node || undefined }); }} onDoubleClick={() => setEditing(`${t.node}:${t.id}`)} className="max-w-[180px] truncate font-mono" title={`${t.nodeName} · ${shortCwd(t.cwd)}${t.cmd ? ` · ${t.cmd}` : ""} · ${t.runner}${t.state !== "running" ? ` · ${t.state}` : ""}`}>{t.title}</button>
+              <button onClick={() => { selectSession(t); }} onDoubleClick={() => setEditing(`${t.node}:${t.id}`)} className="max-w-[180px] truncate font-mono" title={`${t.nodeName} · ${shortCwd(t.cwd)}${t.cmd ? ` · ${t.cmd}` : ""} · ${t.runner}${t.state !== "running" ? ` · ${t.state}` : ""}`}>{t.title}</button>
             )}
             {t.node !== "" && <NodeTag name={t.nodeName} />}
             <button onClick={() => close(t)} className="text-zinc-600 hover:text-red-400" title={t.state === "running" ? `kill session on ${t.nodeName}` : "remove"}>×</button>
@@ -213,13 +235,13 @@ export function Term({ params, onLocked }: { params: URLSearchParams; onLocked?:
         <div className="hud-card m-3 p-4" data-testid="term-new-form">
           <div className="flex flex-wrap items-center gap-2">
             <div className="hud-label neon">New session on</div>
-            <NodePicker value={formNode} onChange={setNewNode} targets={targets} testId="term-new-node" title="which machine runs this session" />
+            <NodePicker value={formNode} onChange={node => updateParams({ target: node === activeNode ? null : node || "self" })} targets={targets} testId="term-new-node" title="which machine runs this session" />
           </div>
           <form className="mt-3 flex flex-col gap-2 sm:flex-row" onSubmit={(e) => { e.preventDefault(); create(newCwd.trim(), newCmd.trim()); }}>
             <input list="cwd-options" value={newCwd} onChange={(e) => setNewCwd(e.target.value)} placeholder={`working directory on ${formTarget.name} (default: home)`} className="flex-1 rounded-sm border border-zinc-700 bg-zinc-950 px-3 py-1.5 font-mono text-xs text-zinc-100 outline-none focus:border-sky-500/60" />
             <datalist id="cwd-options">{cwdOptions.map((c) => <option key={c} value={c} />)}</datalist>
             <input value={newCmd} onChange={(e) => setNewCmd(e.target.value)} placeholder="startup command (optional), e.g. claude --dangerously-skip-permissions" className="flex-1 rounded-sm border border-zinc-700 bg-zinc-950 px-3 py-1.5 font-mono text-xs text-zinc-100 outline-none focus:border-sky-500/60" />
-            <button className="hud-badge neon px-3 py-1.5 hover:bg-sky-500/10" data-testid="term-new-open">Open</button>
+            <button className="hud-badge neon px-3 py-1.5 hover:bg-sky-500/10" disabled={!formTarget.online} data-testid="term-new-open">Open</button>
             {sessions.length > 0 && <button type="button" onClick={closeForm} className="rounded-sm border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400">Cancel</button>}
           </form>
           <div className="mt-3 flex flex-wrap gap-1.5">
@@ -232,11 +254,13 @@ export function Term({ params, onLocked }: { params: URLSearchParams; onLocked?:
         </div>
       )}
       {/* Seed's view needs only the id, so it opens before the session list catches up. */}
-      {!adding && active.startsWith("seed-") && <NativeSeedSession key={`${activeNode}:${active}`} id={active} node={activeNode} />}
+      {seedSelected && <NativeSeedSession key={`${activeNode}:${active}`} id={active} node={activeNode} />}
       {!adding && current && current.tool !== "seed" && (
         <TermPane key={currentKey} session={current} onStatus={(s) => setStatuses((m) => (m[currentKey] === s ? m : { ...m, [currentKey]: s }))} onRemove={() => close(current)} />
       )}
-      {!adding && !current && answered && active && !active.startsWith("seed-") && <div className="p-6 text-xs text-zinc-500" data-testid="term-missing">No session {active} on {nameOf(activeNode)}{states.find((s) => s.node === activeNode)?.error ? ` (${nameOf(activeNode)} did not answer)` : ""}. Pick one above.</div>}
+      {!adding && !current && !seedSelected && selectionError && <div role="alert" className="p-6 text-xs text-amber-300" data-testid="term-unavailable">{unknownNode ? `No paired machine ${activeNode}.` : `Cannot read sessions on ${nameOf(activeNode)}. ${selectedState?.error}`}</div>}
+      {!adding && !current && !seedSelected && !selectionError && selectedReady && active && <div className="p-6 text-xs text-zinc-500" data-testid="term-missing">No session {active} on {nameOf(activeNode)}. Pick one above.</div>}
+      {!adding && !current && !seedSelected && !selectedReady && active && <div role="status" className="p-6 text-xs text-zinc-500">Reading sessions on {nameOf(activeNode)}…</div>}
     </div>
   );
 }
