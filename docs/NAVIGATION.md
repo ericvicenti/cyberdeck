@@ -1,8 +1,8 @@
 # Cyberdeck navigation coverage
 
-Updated 2026-10-18. This is an implementation inventory, not a completion claim.
+Updated 2026-10-22. This is an implementation inventory, not a completion claim.
 The nightly routine and fleet deployment status live in Deck's
-`handoff/routines/cyberdeck-navigation/2026-10-18.md`.
+`handoff/routines/cyberdeck-navigation/2026-10-22.md`.
 
 ## Source and rollout status
 
@@ -56,7 +56,7 @@ credentials should not be replayed from a link.
 | --- | --- | --- |
 | main / PWA / token and OAuth bootstrap | token entry, OAuth return, install manifest | Spotify OAuth restores a validated, tab-local return fragment after state verification. Callback codes are removed and cannot enter shared URLs; invalid state cannot choose a return destination. |
 | App / api / navigation | primary view, node, not-found, auth, titles | Covered, including legacy `service`→`svc`, Steam app→Vault tab. More parameter validation and every error title remain. |
-| `fleet` / Home | local/fleet overview, node links; pairing and account/reset dialogs; NetworkMap selected endpoints | Overview and node links covered. Pairing/reset/benchmark actions remain transient and must never auto-run. Decide URL representation for NetworkMap endpoint selection. |
+| `fleet` / Home | local/fleet overview, node links; pairing and account/reset dialogs; NetworkMap selected endpoints | Overview and node links covered. `networkFrom` / `networkTo` identify an inspected connection by host name, independent of the serving node. Selections push once; partial/whitespace links replace canonical defaults; Back/Forward, reload and fresh tabs restore both endpoints. Unknown/same-host links keep honest errors and titles; unavailable telemetry retains the requested pair. Pairing/reset/benchmark actions remain explicit and never replay from links. |
 | `controls` / Controls | control diagram, bindings/editor, reset notice | Static route/title covered where installed. Binding changes are settings, not navigation. Keyboard/gamepad mode preferences remain local. |
 | `applications` / Applications | application id, Casework example, pairing dialog, reload | Id and unknown-id error/title covered. Pairing is an explicit operation. Visited generic iframe documents now survive primary-view, application and node navigation. Their nested reload/history/state/title still require cooperative bridges. |
 | `applications?app=afterglow` / AfterglowFrame + BoticalMedia/public/navigation.js | child route, season/episode, search/filter, person dialog, music and YouTube state | Existing bridge retained: exact origin+source, parent-only history, route restoration, stable iframe, title cleanup. Browser regressions now prove document/timer continuity across primary views, other apps and node changes, plus hidden-message isolation and route/title restoration. A pending parent route rejects stale child acknowledgements. Missing, malformed and legacy child routes normalize with replace, preserving the iframe document and prior history. No production media is played by these checks. |
@@ -122,3 +122,27 @@ and hidden Desk controls must not receive keys from another view.
 Editor/Seed failure and rapid-transition regressions are in `tests/navigation-browser.test.ts`;
 Afterglow canonicalization and single-history checks are in `tests/afterglow-navigation.test.ts`.
 Run the whole main suite with `bun test tests --timeout 30000`.
+
+
+## 2026-10-22 Network Map checks and current source split
+
+`bun test tests/network-navigation.test.ts --timeout 30000` exercises the production
+bundle with read-only telemetry, including encoded node IDs, directed measurements,
+selection swaps, missing hosts, delayed responses, title cleanup and authentication.
+`CYBERDECK_TEST_UI=/path/to/exact/dist/ui` selects a captured installed-tree build.
+`CYBERDECK_TEST_ORIGIN=<private-tunnel> CYBERDECK_TEST_TOKEN_HOST=<ssh-alias> bun scripts/check-network-navigation-live.ts`
+checks actual served routes in a separate browser and rejects all API writes. Omit the
+token host for local Yacht. It does not run a network benchmark or use a kiosk context.
+
+The October 19–21 runs left additional Editor/Vault/Casework lifecycle work in their
+isolated worktrees and installed overlays, still uncommitted. October 21 manifests
+confirm six installations; its unfinished report did not reflect that deployment,
+and its live check recorded failures. Preserve those overlays and their history;
+this run commits only its Network Map changes. The current installed trees on Yacht,
+Enuc, Iris, Sentinel, Botical and Clipper were captured before rebuilding; Starlight
+was offline. See the latest Deck report for measured rollout/verification results.
+
+Remaining: generic embedded child URL/title cooperation; Seed human-readable entity
+names; the rest of the error/lifecycle matrix; reconciliation and verification of the
+previous lifecycle patches on main; and offline Starlight. This inventory is not an
+app-wide acceptance claim. Network URLs describe an inspection, never a test command.

@@ -100,7 +100,7 @@ export function App() {
       {!knownRoute && <section className="p-6"><h1 className="text-xl">Page not found</h1><p className="my-3">No Cyberdeck view named “{route.view}”.</p><button onClick={() => navigate("fleet")}>Go home</button></section>}
       {route.view === "controls" && <Controls />}
       {route.view === "desktop" && <Suspense fallback={<div className="p-6">Loading desktop…</div>}><Desktop params={route.params} key={`desktop-${nodeId}`} /></Suspense>}
-      {route.view === "fleet" && <Home onLocked={lock} />}
+      {route.view === "fleet" && <Home params={route.params} onLocked={lock} />}
       {route.view === "projects" && <Projects params={route.params} onLocked={lock} />}
       {route.view === "seed" && <Suspense fallback={<div className="p-6 text-xs text-zinc-500">Loading Seed agents…</div>}><SeedAgents params={route.params} key={`seed-${nodeId}`} /></Suspense>}
       {route.view === "agents" && <Agents params={route.params} onLocked={lock} />}
