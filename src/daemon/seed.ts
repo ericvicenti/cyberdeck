@@ -17,6 +17,8 @@ export type SeedState = {
   queryAgentId?: string; agentId?: string; sessionId?: string; mcpRegisteredAt?: number; mcpTools?: string; lastCallAt?: number; dogfoodTriggerId?: string;
   /** The run-completed trigger (`runWatch()`) that announces finished harness runs on the Desk. */
   runWatchTriggerId?: string;
+  /** The weekly fleet digest trigger (`digest()`), the signing identity it publishes with (secret name on the agents server) and that identity's hm account. */
+  digestTriggerId?: string; digestSignerName?: string; digestAccount?: string;
   /** Lines the agent (or its triggers) left for the owner through the `announce` MCP tool; newest last, capped. */
   notices?: Notice[];
   /** Memory-pack manifests per agent (path → sha256 of what was written), so a sync writes only what changed. */
@@ -42,12 +44,17 @@ export type SeedStatus = {
   dogfood?: DogfoodStatus;
   /** The run-completed trigger (`runWatch()`) on the voice agent, read back from the agents server; absent when none. */
   runWatch?: DogfoodStatus;
+  /** The weekly fleet digest trigger (`digest()`): the schedule plus the hm account the documents are published under. */
+  digest?: DigestStatus;
   /** The voice profile calls will carry (from companion.json) and whether the runtime token to apply it is on hand. */
   profile?: VoiceProfile & { runtimeToken: boolean; source: string };
 };
 
 export type DogfoodStatus = { triggerId: string; name: string; enabled: boolean; lastFiredAt?: number; lastError?: string; nextSummary?: string };
 export type DogfoodOptions = { timezone?: string; timeOfDay?: string };
+export type DigestOptions = DogfoodOptions & { dayOfWeek?: number };
+/** The digest trigger plus where it publishes: `account` is the signing identity's hm account, `signer` its secret name on the agents server, `url` the public listing. */
+export type DigestStatus = DogfoodStatus & { account?: string; signer?: string; url?: string };
 /** A line left for the owner on the Desk transcript without a call: the `announce` MCP tool writes one, the run-completed trigger drives it. */
 export type Notice = { id: string; at: number; text: string; run?: { id?: string; title?: string; status?: string; sessionId?: string } };
 export type AnnounceInput = { text?: string; title?: string; status?: string; runId?: string; sessionId?: string; /** The run's answer, appended to a composed line (`delegateResult`). */ summary?: string };
@@ -107,6 +114,19 @@ export const RUNWATCH_TRIGGER_NAME = "cyberdeck-run-completed";
 /** The fallback thread when the headless tool call cannot run: the agent relays the event to `announce` itself. */
 export const RUNWATCH_PROMPT =
   "A run of the fleet agent just finished; its runId, runTitle, runStatus and sessionId are in this message. Call cyberdeck__announce exactly once with them (title, status, runId, sessionId): it writes the line Eric sees on the Desk transcript. Do nothing else: no other tools, no text answer, and no retry if it says the run was skipped.";
+export const DIGEST_TRIGGER_NAME = "cyberdeck-fleet-digest";
+/** The label of the signing identity `digest()` creates on the agents server; documents are published under its hm account. */
+export const DIGEST_SIGNER_LABEL = "Cyberdeck fleet";
+/** Where the digests of a signing identity are listed (the hm account's home on the public gateway). */
+export function digestUrl(account: string): string { return `https://hyper.media/hm/${account}`; }
+/**
+ * The weekly digest prompt: fleet facts from the cyberdeck tools, one public hypermedia document under the
+ * digest identity's account (top level, `fleet-digest-<date>`, because `document.create` wants an existing parent),
+ * then a Deck inbox note and a Desk announcement with the address. The account is baked in so the agent never guesses it.
+ */
+export function digestPrompt(account: string): string {
+  return `Weekly fleet digest. The document slug is today's date as YYYY-MM-DD (for example fleet-digest-2026-10-26). Use your cyberdeck tools only (no guessing): call cyberdeck__fleet_status, cyberdeck__services (probe: true), cyberdeck__repos (kind: 'unpushed') and cyberdeck__todo. Read hm://${account}/:directory and, if an earlier fleet-digest document exists, read the newest one so the new document can say what changed. Then read ~/tools/write/documents once and call write exactly once: address 'hm://${account}/fleet-digest-<date>', options {name: 'Fleet digest <date>'}, content = markdown under 3000 characters with the sections 'Hosts' (up and down, by name), 'Services' (down, or all up), 'Repos' (unpushed work by host), 'TODO' (the oldest items worth attention) and 'Since last week'. The document is public: never include tokens, keys, passwords, IP addresses or file paths. Then call cyberdeck__note exactly once with ONE line under 400 characters: 'fleet digest <date>: hm://${account}/fleet-digest-<date> - <one sentence>', and cyberdeck__announce exactly once with text 'Fleet digest <date> is published at hm://${account}/fleet-digest-<date>'. Nobody reads your final answer: the document, the note and the announcement are the only outputs of this run; if a tool fails, say which in the note. Do not start any other work.`;
+}
 const NOTICES_MAX = 50;
 function clipText(text: string, max: number): string { return text.length > max ? `${text.slice(0, max - 1)}…` : text; }
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -235,6 +255,7 @@ export class SeedBridge {
   #healthInFlight: Promise<SeedHealth> | null = null;
   #dogfood: { value: DogfoodStatus | undefined; checkedAt: number; agentId: string } | null = null;
   #runWatch: { value: DogfoodStatus | undefined; checkedAt: number; agentId: string } | null = null;
+  #digest: { value: DigestStatus | undefined; checkedAt: number; agentId: string } | null = null;
   #agentName: string | undefined;
   #agentNameTriedAt = 0;
   #querySetup: Promise<string> | null = null;
@@ -402,6 +423,8 @@ export class SeedBridge {
       if (dogfood) s.dogfood = dogfood;
       const runWatch = await this.#runWatchStatus().catch(() => undefined);
       if (runWatch) s.runWatch = runWatch;
+      const digest = await this.#digestStatus().catch(() => undefined);
+      if (digest) s.digest = digest;
     }
     const profile = this.voiceProfile();
     if (profile) s.profile = { ...profile, runtimeToken: this.#runtimeToken() !== null, source: this.companionFile };
@@ -439,6 +462,94 @@ export class SeedBridge {
     const value = found ? this.#toDogfood(found) : undefined;
     this.#runWatch = { value, checkedAt: Date.now(), agentId };
     return value;
+  }
+
+  /** The weekly digest trigger as the agents server has it; cached like the check-in. */
+  async #digestStatus(): Promise<DigestStatus | undefined> {
+    const agentId = this.#state.agentId;
+    if (!agentId) return undefined;
+    if (this.#digest && this.#digest.agentId === agentId && Date.now() - this.#digest.checkedAt < HEALTH_TTL_MS) return this.#digest.value;
+    const found = await this.#findTrigger(agentId, DIGEST_TRIGGER_NAME, this.#state.digestTriggerId);
+    const value = found ? this.#toDigest(found) : undefined;
+    this.#digest = { value, checkedAt: Date.now(), agentId };
+    return value;
+  }
+
+  #toDigest(t: TriggerInfo): DigestStatus {
+    const account = this.#state.digestAccount;
+    return { ...this.#toDogfood(t), ...(account ? { account, url: digestUrl(account) } : {}), ...(this.#state.digestSignerName ? { signer: this.#state.digestSignerName } : {}) };
+  }
+
+  /**
+   * Make sure the agent publishes a weekly fleet digest document (roadmap P6): a signing identity labelled
+   * DIGEST_SIGNER_LABEL on the agents server (created once; its hm account is where the documents live),
+   * granted to the agent through `definition.signingKeys` (the publish grant), and a weekly schedule trigger
+   * named DIGEST_TRIGGER_NAME (Monday 08:00 Europe/Madrid by default) whose prompt is `digestPrompt(account)`.
+   * Idempotent like `dogfood()`: reused by name, a stale prompt is rewritten.
+   */
+  async digest(opts: DigestOptions = {}): Promise<DigestStatus & { created: boolean; updated: boolean; granted: boolean; identityCreated: boolean }> {
+    const agentId = this.#state.agentId;
+    if (!agentId) throw new SeedError("no agent set up: run `cyberdeck seed setup`");
+    const timeOfDay = opts.timeOfDay?.trim() || "08:00";
+    if (!/^\d{2}:\d{2}$/.test(timeOfDay)) throw new SeedError(`timeOfDay must be HH:MM, got "${timeOfDay}"`);
+    const timezone = opts.timezone?.trim() || "Europe/Madrid";
+    const dayOfWeek = opts.dayOfWeek ?? 1;
+    if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) throw new SeedError(`dayOfWeek must be 0 (Sunday) to 6, got "${opts.dayOfWeek}"`);
+
+    // 1. The signing identity: the one recorded, else the one with our label, else a new one.
+    type Identity = { id?: string; name: string; accountId?: string; label?: string };
+    const listed = await this.action<{ identities?: Identity[] }>({ _: "ListSigningIdentities" });
+    const identities = (listed.identities ?? []).filter((i) => i && typeof i.name === "string");
+    let identity = identities.find((i) => i.name === this.#state.digestSignerName) ?? identities.find((i) => i.label === DIGEST_SIGNER_LABEL);
+    let identityCreated = false;
+    if (!identity) {
+      const res = await this.action<{ identity: Identity }>({ _: "CreateSigningIdentity", label: DIGEST_SIGNER_LABEL }, { timeoutMs: 60_000 });
+      identity = res.identity;
+      identityCreated = true;
+    }
+    if (!identity?.accountId) throw new SeedError(`signing identity ${identity?.name ?? "?"} has no hm account`);
+    const account = identity.accountId;
+    if (this.#state.digestSignerName !== identity.name || this.#state.digestAccount !== account) { this.#state.digestSignerName = identity.name; this.#state.digestAccount = account; this.#save(); }
+
+    // 2. The grant: the agent may sign with it.
+    const got = await this.action<{ agent: { definition: Record<string, unknown> & { signingKeys?: string[]; signingKey?: string } } }>({ _: "GetAgent", agentId });
+    const def = got.agent.definition;
+    const keys = Array.isArray(def.signingKeys) ? def.signingKeys : def.signingKey ? [def.signingKey] : [];
+    let granted = false;
+    if (!keys.includes(identity.name)) {
+      await this.action({ _: "UpdateAgent", agentId, definition: { ...def, signingKeys: [...keys, identity.name] } });
+      granted = true;
+    }
+
+    // 3. The trigger.
+    const prompt = digestPrompt(account);
+    let trigger = await this.#findTrigger(agentId, DIGEST_TRIGGER_NAME, this.#state.digestTriggerId);
+    let created = false;
+    let updated = false;
+    if (trigger && typeof trigger.prompt === "string" && trigger.prompt !== prompt) {
+      const res = await this.action<{ trigger?: TriggerInfo }>({ _: "UpdateAgentTrigger", triggerId: trigger.id, patch: { prompt } });
+      trigger = { ...trigger, ...(res.trigger ?? {}), prompt };
+      updated = true;
+    }
+    if (!trigger) {
+      const res = await this.action<{ trigger: TriggerInfo }>({
+        _: "CreateAgentTrigger",
+        agentId,
+        trigger: {
+          name: DIGEST_TRIGGER_NAME,
+          enabled: true,
+          source: { type: "schedule", schedule: { kind: "weekly", daysOfWeek: [dayOfWeek], timeOfDay, timezone } },
+          prompt,
+          continuation: { kind: "newThread" },
+        },
+      });
+      trigger = res.trigger;
+      created = true;
+    }
+    if (this.#state.digestTriggerId !== trigger.id) { this.#state.digestTriggerId = trigger.id; this.#save(); }
+    const value = this.#toDigest(trigger);
+    this.#digest = { value, checkedAt: Date.now(), agentId };
+    return { ...value, created, updated, granted, identityCreated };
   }
 
   /**

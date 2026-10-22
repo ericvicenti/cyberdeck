@@ -17,7 +17,7 @@ import { seedConfig } from "../src/daemon/config";
 import { caseworkAllows } from "../src/daemon/api/casework";
 import { createVoiceRelay, secureCallUrl, agoText, hubUnreachable, HUB_DOWN_TTL_MS } from "../src/daemon/api/voice";
 import { Tailscale } from "../src/daemon/tailscale";
-import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME, fleetPrompt, RUNWATCH_TRIGGER_NAME, RUNWATCH_PROMPT } from "../src/daemon/seed";
+import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME, fleetPrompt, RUNWATCH_TRIGGER_NAME, RUNWATCH_PROMPT, DIGEST_TRIGGER_NAME, DIGEST_SIGNER_LABEL, digestPrompt } from "../src/daemon/seed";
 import { testConfig, TEST_TOKEN, tmpHomeDir } from "./helpers";
 
 // Deterministic signer; the bridge builds the keypair from this instead of opening the Seed vault.
@@ -39,6 +39,7 @@ function fakeAgents(opts: { voice: boolean }) {
   const secrets = new Map<string, Uint8Array>();
   const mcp = new Map<string, Record<string, any>>();
   const triggers = new Map<string, Record<string, any>[]>();
+  const identities: Record<string, any>[] = [];
   const memory = new Map<string, Map<string, string>>();
   const providers = new Map<string, Record<string, any>>();
   const logins = new Map<string, "pending" | "completed" | "failed">();
@@ -79,7 +80,7 @@ function fakeAgents(opts: { voice: boolean }) {
         case "SetSecret": secrets.set(a.name, a.value); return ok({ _: "SetSecretResponse", secret: { name: a.name } });
         case "SetMcpServer": mcp.set(a.name, a.config); return ok({ _: "SetMcpServerResponse", server: { name: a.name, status: { state: "ok", checkedAt: Date.now() }, tools: [{ name: "status" }, { name: "todo" }] } });
         case "GetAgent": { const d = agents.get(a.agentId); return d ? ok({ _: "GetAgentResponse", agent: { id: a.agentId, definition: d }, sessionCount: 0 }) : err(404, "Agent not found"); }
-        case "UpdateAgent": if (!agents.has(a.agentId)) return err(404, "Agent not found"); agents.set(a.agentId, a.definition); return ok({ _: "UpdateAgentResponse", agent: { id: a.agentId, definition: a.definition } });
+        case "UpdateAgent": if (!agents.has(a.agentId)) return err(404, "Agent not found"); if (Array.isArray(a.definition?.signingKeys) && a.definition.signingKeys.some((k: string) => !identities.some((i) => i.name === k))) return err(400, "Signing key not found"); agents.set(a.agentId, a.definition); return ok({ _: "UpdateAgentResponse", agent: { id: a.agentId, definition: a.definition } });
         case "CreateAgent": { if (a.definition?.modelProvider === "Missing") return err(404, "Model provider not found"); const id = `agent-${++n}`; agents.set(id, a.definition); return ok({ _: "CreateAgentResponse", agentId: id }); }
         case "CreateSession": { if (!agents.has(a.agentId)) return err(404, "Agent not found"); const id = `session-${++n}`; sessions.set(id, { agentId: a.agentId, title: a.title }); if (a.agentId !== COMPANION_ID) queryEvents.set(id, []); return ok({ _: "CreateSessionResponse", sessionId: id }); }
         case "ListSessions": return ok({ _: "ListSessionsResponse", sessions: [...sessions].filter(([, s]) => s.agentId === a.agentId).map(([id, s]) => ({ id, ...s, status: "idle", createdAt: 1, updatedAt: 2 })) });
@@ -158,6 +159,13 @@ function fakeAgents(opts: { voice: boolean }) {
           triggers.set(a.agentId, [...(triggers.get(a.agentId) ?? []), t]);
           return ok({ _: "CreateAgentTriggerResponse", trigger: t });
         }
+        case "ListSigningIdentities": return ok({ _: "ListSigningIdentitiesResponse", identities: [...identities] });
+        case "CreateSigningIdentity": {
+          const accountId = `z6Mk${(++n).toString().padStart(4, "0")}digestaccount`;
+          const id = { id: `sid-${n}`, name: `hm-account-${accountId.slice(0, 16)}`, accountId, label: a.label ?? `Agent account ${accountId.slice(0, 10)}`, serverUrl: "https://hyper.example", createdAt: Date.now(), updatedAt: Date.now() };
+          identities.push(id);
+          return ok({ _: "CreateSigningIdentityResponse", identity: id });
+        }
         case "UpdateAgentTrigger": {
           const list = [...triggers.values()].flat();
           const t = list.find((x) => x.id === a.triggerId);
@@ -198,6 +206,7 @@ function fakeAgents(opts: { voice: boolean }) {
     mcp,
     triggers,
     memory,
+    identities,
     providers,
     runtimeCalls,
     holdNextMessage() {
@@ -295,6 +304,7 @@ describe("seed config", () => {
     expect(caseworkAllows("POST", "/api/voice/session/reset")).toBe(true);
     expect(caseworkAllows("POST", "/api/voice/setup")).toBe(false);
     expect(caseworkAllows("POST", "/api/voice/dogfood")).toBe(false);
+    expect(caseworkAllows("POST", "/api/voice/digest")).toBe(false);
     expect(caseworkAllows("POST", "/api/voice/config")).toBe(false);
   });
 });
@@ -475,6 +485,53 @@ describe("configured node", () => {
     expect(patches[0]).toMatchObject({ triggerId: j1.triggerId, patch: { prompt: DOGFOOD_PROMPT } });
     expect((await (await req(a, TEST_TOKEN, "/api/voice/dogfood", { method: "POST", body: JSON.stringify({}) })).json()).updated).toBe(false);
     expect(voiced.actions.filter((x) => x._ === "UpdateAgentTrigger").length).toBe(1);
+  });
+
+  test("digest: a signing identity, its grant on the agent and the Monday trigger that publishes the fleet digest", async () => {
+    expect((await req(a, KEY, "/api/voice/digest", { method: "POST" })).status).toBe(403);
+    expect((await (await req(a, TEST_TOKEN, "/api/voice/status")).json()).digest).toBeUndefined();
+    expect(voiced.identities.length).toBe(0);
+
+    const r1 = await req(a, TEST_TOKEN, "/api/voice/digest", { method: "POST", body: JSON.stringify({}) });
+    expect(r1.status).toBe(200);
+    const j1 = await r1.json();
+    expect(j1).toMatchObject({ created: true, updated: false, granted: true, identityCreated: true, name: DIGEST_TRIGGER_NAME, enabled: true, nextSummary: "Mon at 08:00 Europe/Madrid" });
+    // One new identity with our label, granted to the agent through signingKeys, documents listed under its account.
+    expect(voiced.identities.length).toBe(1);
+    expect(voiced.identities[0].label).toBe(DIGEST_SIGNER_LABEL);
+    const account = voiced.identities[0].accountId as string;
+    expect(j1.account).toBe(account);
+    expect(j1.signer).toBe(voiced.identities[0].name);
+    expect(j1.url).toBe(`https://hyper.media/hm/${account}`);
+    expect(voiced.agents.get(COMPANION_ID)!.signingKeys).toEqual([voiced.identities[0].name]);
+    expect(voiced.agents.get(COMPANION_ID)!.mcpServers).toContain("casework_host"); // the rest of the definition is kept
+    const stored = voiced.triggers.get(COMPANION_ID)!.filter((t) => t.name === DIGEST_TRIGGER_NAME);
+    expect(stored.length).toBe(1);
+    expect(stored[0].source).toEqual({ type: "schedule", schedule: { kind: "weekly", daysOfWeek: [1], timeOfDay: "08:00", timezone: "Europe/Madrid" } });
+    expect(stored[0].prompt).toBe(digestPrompt(account));
+    expect(stored[0].prompt).toContain(`hm://${account}/fleet-digest-<date>`);
+    expect(stored[0].prompt).toContain("cyberdeck__announce");
+    expect(stored[0].continuation).toEqual({ kind: "newThread" });
+    const state = JSON.parse(readFileSync(join(a.home, "seed.json"), "utf8"));
+    expect(state).toMatchObject({ digestTriggerId: j1.triggerId, digestSignerName: voiced.identities[0].name, digestAccount: account });
+
+    // Idempotent: no second identity, no second grant, no second trigger; other schedule options are ignored once it exists.
+    const j2 = await (await req(a, TEST_TOKEN, "/api/voice/digest", { method: "POST", body: JSON.stringify({ dayOfWeek: 5, timeOfDay: "09:30" }) })).json();
+    expect(j2).toMatchObject({ created: false, updated: false, granted: false, identityCreated: false, triggerId: j1.triggerId, account });
+    expect(voiced.identities.length).toBe(1);
+    expect(voiced.triggers.get(COMPANION_ID)!.filter((t) => t.name === DIGEST_TRIGGER_NAME).length).toBe(1);
+    expect(voiced.actions.filter((x) => x._ === "CreateSigningIdentity").length).toBe(1);
+    expect(voiced.actions.filter((x) => x._ === "UpdateAgent" && Array.isArray(x.definition?.signingKeys)).length).toBe(1);
+
+    const s = await (await req(a, TEST_TOKEN, "/api/voice/status")).json();
+    expect(s.digest).toMatchObject({ triggerId: j1.triggerId, name: DIGEST_TRIGGER_NAME, enabled: true, nextSummary: "Mon at 08:00 Europe/Madrid", account, url: `https://hyper.media/hm/${account}` });
+    expect((await req(a, TEST_TOKEN, "/api/voice/digest", { method: "POST", body: JSON.stringify({ dayOfWeek: 7 }) })).status).toBe(502);
+
+    // A stale prompt (older build) is rewritten with the same account.
+    stored[0].prompt = "Weekly fleet digest. Old wording.";
+    const j3 = await (await req(a, TEST_TOKEN, "/api/voice/digest", { method: "POST", body: JSON.stringify({}) })).json();
+    expect(j3).toMatchObject({ created: false, updated: true, triggerId: j1.triggerId });
+    expect(stored[0].prompt).toBe(digestPrompt(account));
   });
 
   test("runwatch: a run-completed trigger on the voice agent watches the harness agent, and announce lands in the transcript", async () => {

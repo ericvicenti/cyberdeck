@@ -134,6 +134,7 @@ switch (cmd) {
       if (s.via) console.log(`voice hub:     ${s.via.name} (${s.via.node}) answers every voice route of this node`);
       if (s.dogfood) console.log(`dogfood:       ${s.dogfood.name} (${s.dogfood.triggerId}) ${s.dogfood.enabled ? "enabled" : "disabled"}, ${s.dogfood.nextSummary ?? ""}; last fired ${when(s.dogfood.lastFiredAt)}${s.dogfood.lastError ? `; last error: ${s.dogfood.lastError}` : ""}`);
       if (s.runWatch) console.log(`run watch:     ${s.runWatch.name} (${s.runWatch.triggerId}) ${s.runWatch.enabled ? "enabled" : "disabled"}, ${s.runWatch.nextSummary ?? ""}; last fired ${when(s.runWatch.lastFiredAt)}${s.runWatch.lastError ? `; last error: ${s.runWatch.lastError}` : ""}`);
+      if (s.digest) console.log(`digest:        ${s.digest.name} (${s.digest.triggerId}) ${s.digest.enabled ? "enabled" : "disabled"}, ${s.digest.nextSummary ?? ""}; last fired ${when(s.digest.lastFiredAt)}${s.digest.lastError ? `; last error: ${s.digest.lastError}` : ""}${s.digest.url ? `; documents at ${s.digest.url}` : ""}`);
       if (s.profile) console.log(`voice profile: ${s.profile.voice} x${s.profile.speed} (${s.profile.runtimeToken ? "runtime token on hand" : "NO runtime token: calls keep the worker's default voice"})`);
       console.log(s.configured ? "voice: ready (provider livekit)" : `voice: not configured — ${s.reason}`);
       const h = await api("/api/voice/harness").catch(() => null);
@@ -201,6 +202,16 @@ switch (cmd) {
       console.log(`${r.created ? "created" : r.updated ? "prompt updated" : "already present"}: ${r.name} (${r.triggerId}) ${r.enabled ? "enabled" : "disabled"}, ${r.nextSummary ?? ""}`);
       if (r.lastFiredAt) console.log(`last fired: ${when(r.lastFiredAt)}`);
       if (r.lastError) console.log(`last error: ${r.lastError}`);
+    } else if (sub === "digest") {
+      // Weekly fleet digest document: signing identity + publish grant + schedule trigger. --tz <zone> --at HH:MM --day 0-6 (Sunday = 0; default Monday 08:00 Europe/Madrid).
+      const tz = flags.includes("--tz") ? flags[flags.indexOf("--tz") + 1] : undefined;
+      const at = flags.includes("--at") ? flags[flags.indexOf("--at") + 1] : undefined;
+      const day = flags.includes("--day") ? Number(flags[flags.indexOf("--day") + 1]) : undefined;
+      const r = await api("/api/voice/digest", { method: "POST", body: JSON.stringify({ ...(tz ? { timezone: tz } : {}), ...(at ? { timeOfDay: at } : {}), ...(day !== undefined ? { dayOfWeek: day } : {}) }) }).catch(fail);
+      console.log(`${r.created ? "created" : r.updated ? "prompt updated" : "already present"}: ${r.name} (${r.triggerId}) ${r.enabled ? "enabled" : "disabled"}, ${r.nextSummary ?? ""}`);
+      console.log(`publishes as: ${r.account ?? "?"} (${r.identityCreated ? "new signing identity" : "existing signing identity"} ${r.signer ?? "?"}, ${r.granted ? "granted to the agent now" : "already granted"}); documents at ${r.url ?? "?"}`);
+      if (r.lastFiredAt) console.log(`last fired: ${when(r.lastFiredAt)}`);
+      if (r.lastError) console.log(`last error: ${r.lastError}`);
     } else if (sub === "runwatch") {
       // Run-completed trigger: the voice agent announces finished harness runs on the Desk transcript.
       const r = await api("/api/voice/runwatch", { method: "POST" }).catch(fail);
@@ -220,7 +231,7 @@ switch (cmd) {
       if (!r.messages?.length) console.log("(no messages)");
       for (const x of r.notices ?? []) console.log(`[${new Date(x.at).toLocaleTimeString()}] notice: ${x.text}`);
     } else {
-      console.log("usage: cyberdeck seed status | setup [--new] [--no-adopt] [--name <agent>] | sync [--voice] [--force] | prompt-text | keygen [--force] | login [--code <url>|--status] | providers | reset-session | call | transcript [n] | dogfood [--tz <zone>] [--at HH:MM] | runwatch | prompt [--apply]");
+      console.log("usage: cyberdeck seed status | setup [--new] [--no-adopt] [--name <agent>] | sync [--voice] [--force] | prompt-text | keygen [--force] | login [--code <url>|--status] | providers | reset-session | call | transcript [n] | dogfood [--tz <zone>] [--at HH:MM] | digest [--tz <zone>] [--at HH:MM] [--day 0-6] | runwatch | prompt [--apply]");
       process.exit(1);
     }
     break;

@@ -355,6 +355,18 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
     }
   });
 
+  // Weekly fleet digest: signing identity + publish grant + Monday schedule trigger on the agent (idempotent). Node token only.
+  app.post("/api/voice/digest", async (c) => {
+    if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      return c.json(await bridge.digest({ timezone: typeof body?.timezone === "string" ? body.timezone : undefined, timeOfDay: typeof body?.timeOfDay === "string" ? body.timeOfDay : undefined, dayOfWeek: typeof body?.dayOfWeek === "number" ? body.dayOfWeek : undefined }));
+    } catch (e) {
+      console.error("voice: digest failed:", e instanceof Error ? e.message : e);
+      return c.json(errorBody(e), errorStatus(e));
+    }
+  });
+
   // The companion's system prompt against the fleet persona; POST writes it. Node token only.
   app.get("/api/voice/prompt", async (c) => {
     if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);

@@ -181,12 +181,13 @@ the node token (`~/.cyberdeck/token`) requires a re-run so the secret on the age
 | `POST /api/voice/session/reset` | pairing | `{sessionId, previous?, room?}`: a new session for the next call; body `{room?}` names a live call's LiveKit room, which the voice runtime is then switched to the new session (`room: {name, switched, error?}`), so the caller keeps talking |
 | `GET /api/voice/transcript?limit=` | pairing | `{supported: true, sessionId?, messages: [{seq, role, text, at}], hasMoreBefore, notices: [{id, at, text, run?}]}`: user/assistant text of the current session (`GetSession`'s tail, cheap) plus the lines left by the `announce` tool (below) |
 | `POST /api/voice/dogfood` | node token | `{triggerId, name, enabled, lastFiredAt?, lastError?, nextSummary?, created, updated}`: the daily fleet check-in trigger (below); body `{timezone?, timeOfDay?}` |
+| `POST /api/voice/digest` | node token | `{triggerId, name, enabled, lastFiredAt?, lastError?, nextSummary?, account, signer, url, created, updated, granted, identityCreated}`: the weekly fleet digest trigger (below); body `{timezone?, timeOfDay?, dayOfWeek?}` |
 | `POST /api/voice/runwatch` | node token | same shape plus `watches` (the harness agent id) and `headless`: the run-completed trigger that announces finished harness runs on the Desk (below) |
 | `GET /api/voice/prompt` | node token | `{agentId, name?, current, desired, changed, applied: false}`: the agent's system prompt next to the fleet persona Cyberdeck ships (`fleetPrompt` in `src/daemon/seed.ts`) |
 | `POST /api/voice/prompt` | node token | the same, after writing the persona to the agent when it differs (`applied: true`); the next session uses it |
 | `POST /api/voice/setup` | node token | the setup result above (`{agent: {id, name?, origin: kept\|adopted\|created}, sessionId, mcp: {name, url, state, tools?, error?}, warnings}`); body `{new?, adopt?, name?}` |
 
-`status` also carries `dogfood: {triggerId, name, enabled, lastFiredAt?, lastError?, nextSummary?}` and `runWatch` (same shape)
+`status` also carries `dogfood: {triggerId, name, enabled, lastFiredAt?, lastError?, nextSummary?}`, `runWatch` (same shape) and `digest` (same shape plus `account`, `signer`, `url`)
 once the check-in trigger exists (read back from `ListAgentTriggers`, cached 10 s).
 
 `configured` is true when the identity loads, the agents server answers `/api/health` with
@@ -209,6 +210,7 @@ cyberdeck seed call            # smoke test: mint a room and print it (token wit
 cyberdeck seed transcript [n]  # last n user/assistant messages
 cyberdeck seed dogfood [--tz Europe/Madrid] [--at 07:00]   # daily fleet check-in trigger (idempotent; rewrites a stale prompt)
 cyberdeck seed runwatch        # run-completed trigger: finished harness runs are announced on the Desk (idempotent)
+cyberdeck seed digest [--tz Europe/Madrid] [--at 08:00] [--day 1]   # weekly fleet digest document: signing identity + publish grant + trigger (idempotent)
 cyberdeck seed prompt [--apply]  # the agent's system prompt vs the fleet persona; --apply writes the persona
 ```
 
@@ -250,6 +252,34 @@ prompt now says the note is the run's only output. Schedule options only apply w
 created; edit the time in the agent's Triggers tab afterwards.
 
 All of these go through the local daemon's HTTP API with the node token, like the other commands.
+
+## Dogfood: the weekly fleet digest document
+
+`cyberdeck seed digest` gives the agent a place to publish and a reason to: it makes sure of three things on
+the agents server, each idempotent, and answers what it did (`identityCreated`, `granted`, `created`, `updated`).
+
+1. A **signing identity** labelled `Cyberdeck fleet` (`ListSigningIdentities` by the recorded secret name,
+   else by label, else `CreateSigningIdentity`). The agents server generates an hm account key for it, keeps
+   it as an encrypted secret and publishes the account's profile and home to its `hmServerUrl` (hyper.media
+   on the hub). That account is where the digests live: `status.digest.account` and `url`
+   (`https://hyper.media/hm/<account>`); the secret name is `signer`.
+2. The **publish grant**: the agent's definition lists that secret in `signingKeys` (`GetAgent`, then
+   `UpdateAgent` with the rest of the definition untouched), so the `write` verb can sign `hm://` documents
+   with it. Without a grant the server refuses every write ("No signing identities are enabled for this agent").
+3. A weekly schedule trigger named `cyberdeck-fleet-digest`, Monday 08:00 Europe/Madrid by default
+   (`--day 0-6`, Sunday = 0, `--at`, `--tz`; only applied when the trigger is created), continuation
+   `newThread`, prompt `digestPrompt(account)` in `src/daemon/seed.ts`: fleet facts from the cyberdeck
+   tools (`fleet_status`, `services` with a probe, `repos` unpushed, `todo`), the account's `:directory`
+   and the newest earlier digest for "Since last week", then exactly one `write` to
+   `hm://<account>/fleet-digest-<YYYY-MM-DD>` (top level, because `document.create` wants an existing
+   parent), one `cyberdeck__note` line in the Deck inbox and one `cyberdeck__announce` on the Desk with the
+   address. The prompt says the document is public and forbids tokens, keys, IP addresses and file paths.
+   A trigger whose prompt differs (older build, or the account changed) is rewritten like the check-in.
+
+The documents are published under the agent's own account, not Eric's: writing into Eric's space needs a
+capability from Eric's key to the `Cyberdeck fleet` account (the agents server's `write` guide,
+`capability.create`), which only Eric can sign. Until then the digest page is the agent account's home.
+`seed.json` keeps `digestTriggerId`, `digestSignerName` and `digestAccount`.
 
 ## Run announcements: the agent tells you when a delegated run is done
 
