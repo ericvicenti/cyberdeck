@@ -10,7 +10,8 @@ import { join } from "node:path";
 const origin=process.env.CYBERDECK_TEST_ORIGIN||"http://127.0.0.1:4777", host=process.env.CYBERDECK_TEST_TOKEN_HOST;
 const token=host?(()=>{const p=Bun.spawnSync(["ssh","-o","BatchMode=yes","-o","ConnectTimeout=10",host,"cat ~/.cyberdeck/token"]);if(p.exitCode)throw new Error("Cannot read host token");return p.stdout.toString().trim();})():readFileSync(join(homedir(),".cyberdeck/token"),"utf8").trim();
 if(!token)throw new Error("Empty credential");
-const reads=new Set(["ListAgents","GetAgent","GetSession","GetRun","ListSessions","ListRuns","ListAgentTriggers","ListModelProviders","ListProviderModels","ListSigningIdentities","ListAgentInvites","ListMcpServers"]);
+// Subscribe only reads the live event stream; it does not start an agent.
+const reads=new Set(["ListAgents","GetAgent","GetSession","GetRun","ListSessions","ListRuns","ListAgentTriggers","ListModelProviders","ListProviderModels","ListSigningIdentities","ListAgentInvites","ListAgentCollaborators","ListMcpServers","Subscribe"]);
 const browser=await chromium.launch(), context=await browser.newContext({viewport:{width:1360,height:1000}});
 const errors:string[]=[],blocked:string[]=[],passed:string[]=[],observed=new Set<string>();
 await context.addInitScript(value=>localStorage.setItem("cyberdeck-token",value),token);
@@ -43,7 +44,14 @@ try{
  const response=await context.request.get(`${origin}/api/seed-agents/session`,{headers:{authorization:`Bearer ${token}`}});
  if(!response.ok())throw new Error(`Seed connection returned HTTP ${response.status()}`);
  const state=await response.json();
- if(!state.available||!state.reachable){console.log(JSON.stringify({origin,available:state.available,reachable:state.reachable,skipped:"Live Seed identity/server unavailable; exact-bundle fixture covers names"}));}
+ if(!state.available||!state.reachable){
+  await page.goto(`${origin}/#/seed?r=session%2F__navigation_probe`);
+  const expected=state.available?"Seed server unavailable · Cyberdeck":"Seed identity unavailable · Cyberdeck";
+  await page.waitForFunction(expected=>document.title===expected,expected);
+  await page.reload();await page.waitForFunction(expected=>document.title===expected,expected);
+  if(errors.length||blocked.length)throw new Error("Unavailable Seed view attempted a write or raised a page error");
+  console.log(JSON.stringify({origin,available:state.available,reachable:state.reachable,passed:["actual unavailable identity/server title and reload"],skipped:"Live entity names unavailable; exact-bundle fixture covers names",pageErrors:0,mutations:0}));
+ }
  else{
   await page.goto(`${origin}/#/seed`);
   const until=Date.now()+25000;
