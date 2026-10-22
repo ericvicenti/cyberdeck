@@ -66,7 +66,7 @@ credentials should not be replayed from a link.
 | GamesSection / Games | installed native games and import form | Part of Applications. Play/import are actions; no automatic execution from links. |
 | CaseworkConsole | selected device, events, camera/media/QR, calls, native scene actions | Selected device is covered by `device=<id>`, including canonical default, reload/history, missing-device error/title and no action replay. Device IDs are serving-node-local. Media preview URL semantics and call/session lifecycle still pending. |
 | `applications?app=afterglow&tab=music` / Spotify (the listening room), SpotifyRecordings, SpotifyVisualizer | shelves, entities, query, pagination, recordings, immersive mode | One player everywhere, inside Afterglow: `shelf`, `id`, `q`, `radio`, `page`, `immersive` and `shelf=history&recording=<id>` restore through direct links, reload and history; OAuth returns to the requested content; no link starts playback; the SDK/player stays mounted through URL and primary-view changes. Legacy `#/spotify` links are rewritten. |
-| `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session, run, server, node | Nested route canonicalization, malformed/unknown path errors, route-based titles, Back/Forward and node-preserving new-window links covered. Backend, identity and server failures keep accurate titles across nested routes, reload and node transitions; late failures cannot retitle another node. Human-readable async entity names and the remaining lifecycle matrix still need coverage. |
+| `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session, run, server, node | Nested route canonicalization, malformed/unknown path errors, route-based titles, Back/Forward and node-preserving new-window links covered. Backend, identity and server failures keep accurate titles across nested routes, reload and node transitions; late failures cannot retitle another node. Agent/tab/trigger names, memory paths, session titles (including untitled sessions) and run titles now resolve through authenticated read-only metadata on the selected node. Missing/access-denied/unavailable entities have matching titles. Route/host ownership rejects late responses; focus and 30-second visible-page refresh pick up renames. URL-supplied external servers retain route-based titles; remaining nested-file errors and lifecycle cases still need coverage. |
 | `desktop` / Desktop | selected node and connection | Primary route/title and URL-selected node covered; connect/input/credentials remain explicit runtime actions. |
 | `desk` / Desk + voice | Fleet/Services/Agents glance tab, voice call, transcript, setup, mute | `tab=services` / `tab=agents` restore from fresh links and history; default fleet ignores stale local preferences, invalid tabs replace to the default, and titles match. Tab transitions retain the voice subtree without reconnecting. Calls and permissions stay explicit. The call owner now stays mounted across primary views, node changes and screen-remote navigation. Voice requests stay on the serving daemon’s hub relay; idle configuration refreshes on return. Simulated live-room tests prove no disconnect/reconnect during navigation, release of push-to-talk when hidden, and disconnect on authentication lock. Real calls/microphones are not used by tests. |
 | `projects` / Projects | selected project, nested slug, unassigned repos, query | URL selection, canonical default, filter, title, missing project covered. Nested slugs use the same `p` key. Editing launches Files/Editor. |
@@ -142,7 +142,23 @@ this run commits only its Network Map changes. The current installed trees on Ya
 Enuc, Iris, Sentinel, Botical and Clipper were captured before rebuilding; Starlight
 was offline. See the latest Deck report for measured rollout/verification results.
 
-Remaining: generic embedded child URL/title cooperation; Seed human-readable entity
-names; the rest of the error/lifecycle matrix; reconciliation and verification of the
+Remaining: generic embedded child URL/title cooperation; Seed titles for URL-supplied
+external servers and nested-file errors; the rest of the error/lifecycle matrix; reconciliation and verification of the
 previous lifecycle patches on main; and offline Starlight. This inventory is not an
 app-wide acceptance claim. Network URLs describe an inspection, never a test command.
+
+
+Seed metadata title checks: `bun test tests/seed-titles-browser.test.ts tests/seed-navigation.test.ts tests/navigation-browser.test.ts --timeout 30000`.
+The browser fixture runs the actual published Seed UI, synthetic signed CBOR reads and
+fake entity metadata. It rejects message/create/run/trigger mutations. Tests cover direct
+links, nested tabs, new tabs, reload/history, focus refresh, late names across routes/nodes,
+authentication cleanup, and cancellation before a follow-up metadata signature.
+`CYBERDECK_TEST_UI=/path/to/exact/dist/ui` selects an installed-tree build.
+
+`CYBERDECK_TEST_ORIGIN=<private-tunnel> CYBERDECK_TEST_TOKEN_HOST=<ssh-alias> bun scripts/check-seed-titles-live.ts`
+verifies actual named agents where a live Seed identity/server is available. It allowlists
+read-only signed actions and rejects other API writes; no agent is started or messaged.
+Offline/no-identity hosts are reported as unavailable rather than treated as live passes.
+Title lookups use only the selected node's configured server; they never sign extra
+requests for an arbitrary server URL carried in a link. Existing Seed navigation and
+session components retain their original ownership and are not remounted for titles.
