@@ -1,8 +1,8 @@
 # Cyberdeck navigation coverage
 
-Updated 2026-10-22. This is an implementation inventory, not a completion claim.
+Updated 2026-10-23. This is an implementation inventory, not a completion claim.
 The nightly routine and fleet deployment status live in Deck's
-`handoff/routines/cyberdeck-navigation/2026-10-22.md`.
+`handoff/routines/cyberdeck-navigation/2026-10-23.md`.
 
 ## Source and rollout status
 
@@ -58,7 +58,7 @@ credentials should not be replayed from a link.
 | App / api / navigation | primary view, node, not-found, auth, titles | Covered, including legacy `service`→`svc`, Steam app→Vault tab. More parameter validation and every error title remain. |
 | `fleet` / Home | local/fleet overview, node links; pairing and account/reset dialogs; NetworkMap selected endpoints | Overview and node links covered. `networkFrom` / `networkTo` identify an inspected connection by host name, independent of the serving node. Selections push once; partial/whitespace links replace canonical defaults; Back/Forward, reload and fresh tabs restore both endpoints. Unknown/same-host links keep honest errors and titles; unavailable telemetry retains the requested pair. Pairing/reset/benchmark actions remain explicit and never replay from links. |
 | `controls` / Controls | control diagram, bindings/editor, reset notice | Static route/title covered where installed. Binding changes are settings, not navigation. Keyboard/gamepad mode preferences remain local. |
-| `applications` / Applications | application id, Casework example, pairing dialog, reload | Id and unknown-id error/title covered. Pairing is an explicit operation. Visited generic iframe documents now survive primary-view, application and node navigation. Their nested reload/history/state/title still require cooperative bridges. |
+| `applications` / Applications | application id, Casework example, pairing dialog, reload | Id, unknown-id and unavailable-listing errors/titles covered; failed lookups retain the requested link instead of showing an ordinary app list. Pairing is an explicit operation. Visited generic iframe documents now survive primary-view, application and node navigation. Opt-in generic SPA navigation now restores root-relative child routes/titles via an origin/source/request-bound bridge and keeps one history owner. Noncooperating apps still require adoption; unsupported nested links report a restoration error. See `docs/EMBEDDED-NAVIGATION.md`. |
 | `applications?app=afterglow` / AfterglowFrame + BoticalMedia/public/navigation.js | child route, season/episode, search/filter, person dialog, music and YouTube state | Existing bridge retained: exact origin+source, parent-only history, route restoration, stable iframe, title cleanup. Browser regressions now prove document/timer continuity across primary views, other apps and node changes, plus hidden-message isolation and route/title restoration. A pending parent route rejects stale child acknowledgements. Missing, malformed and legacy child routes normalize with replace, preserving the iframe document and prior history. No production media is played by these checks. |
 | `applications?app=vimm` / Vault | tabs, system, query, letter, page; selected retro title modal | Covered. `game=<catalog-id>` restores a detail from its shelf/catalog/list context on fresh open, reload and history without starting playback. Invalid tab/system/query/letter/page/game values normalize; missing IDs retain an honest error/title. My list and ready-to-play metadata remain browser-local by design. |
 | VaultPlayer / vault download and storage | running emulator, ROM cache, save state, native N64 handoff, pause menu | Runtime session; do not replay Play/downloads from URL. Verify continuation across all relevant URL changes. Existing regression suites exercise generated fixture ROMs only. |
@@ -142,7 +142,7 @@ this run commits only its own Network Map, Seed title and Sessions navigation ch
 Enuc, Iris, Sentinel, Botical and Clipper were captured before rebuilding; Starlight
 was offline. See the latest Deck report for measured rollout/verification results.
 
-Remaining: generic embedded child URL/title cooperation; Seed titles for URL-supplied
+Remaining: adoption of the generic embedded adapter by configured child apps; Seed titles for URL-supplied
 external servers and nested-file errors; the rest of the error/lifecycle matrix; reconciliation and verification of the
 previous lifecycle patches on main; and offline Starlight. This inventory is not an
 app-wide acceptance claim. Network URLs describe an inspection, never a test command.
@@ -169,3 +169,16 @@ selected owners, backend errors, unknown machines, title cleanup and Seed sessio
 `CYBERDECK_TEST_ORIGIN=<private-tunnel> CYBERDECK_TEST_TOKEN_HOST=<ssh-alias> bun scripts/check-term-navigation-live.ts`
 checks installed form/filter/history/error routes without attaching to a terminal or
 creating a process. No-peer hosts report that live destination coverage is unavailable.
+
+
+## 2026-10-23 generic embedded bridge
+
+`bun test tests/embedded-navigation.test.ts --timeout 30000` runs the actual public
+adapter in a separate-origin child against the built Cyberdeck UI. It checks direct
+links/new tabs/reload, canonical defaults, one-entry navigation, no-op/replace,
+Back/Forward, delayed renders, hidden session retention, origin/source/request
+validation, stale titles, errors, explicit reload and authentication cleanup.
+Use `CYBERDECK_TEST_UI` for a captured installed-tree build. The adapter is opt-in;
+this does not claim Commander or arbitrary third-party apps adopted it. Afterglow's
+protocol and source remain unchanged. See `docs/EMBEDDED-NAVIGATION.md` for the
+child integration contract and the limitations of independent history writers.

@@ -19,12 +19,14 @@ export function Applications({ params, onLocked, visible = true }: { params: URL
   const [casework, setCasework] = useState<Listing["casework"]>();
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [listingError, setListingError] = useState("");
   const [pairing, setPairing] = useState<{ qr: string; link: string } | null>(null);
   const pair = async () => { try { setPairing(await api("/api/casework/pairing?url=" + encodeURIComponent(await pairingOrigin()))); } catch (e) { setError(String(e)); } };
   useEffect(() => {
     if (!visible) return;
     let alive = true;
-    api<Listing>("/api/applications").then(r => { if (alive) { setApps(r.applications.filter(a => /^https?:\/\//.test(a.url))); setCasework(r.casework); setLoaded(true); } }).catch(e => { if (alive) { if (e instanceof ApiError && e.status === 401) onLocked(); setError(String(e)); } });
+    setListingError("");
+    api<Listing>("/api/applications").then(r => { if (alive) { setApps(r.applications.filter(a => /^https?:\/\//.test(a.url))); setCasework(r.casework); setLoaded(true); } }).catch(e => { if (alive) { if (e instanceof ApiError && e.status === 401) onLocked(); setListingError(String(e)); } });
     return () => { alive = false; };
   }, [visible]);
   const app = apps.find(a => a.id === params.get("app"));
@@ -35,9 +37,11 @@ export function Applications({ params, onLocked, visible = true }: { params: URL
   const [musicOpened, setMusicOpened] = useState(visible && music);
   useEffect(() => { if (visible && music) setMusicOpened(true); }, [visible, music]);
   const missing = loaded && !!params.get("app") && !app && !example && !music && !["vimm", "steam"].includes(params.get("app")!);
-  useRouteTitle(!visible ? undefined : missing ? "Application not found" : example || app?.id === "afterglow" || music ? undefined : app?.name);
+  const listingUnavailable = !!listingError && !music && !["vimm", "steam"].includes(params.get("app") || "") && (!loaded || missing);
+  useRouteTitle(!visible ? undefined : listingUnavailable ? "Applications unavailable" : missing ? "Application not found" : example || app?.id === "afterglow" || music ? undefined : app?.name);
   const content = () => {
   if (!visible || music) return null;
+  if (listingUnavailable) return <section className="p-6"><h1 className="text-xl">Applications unavailable</h1><p role="alert" className="my-3 text-red-300">{listingError}</p><p>The requested application could not be checked. Reload to try again.</p></section>;
   if (missing) return <section className="p-6"><h1 className="text-xl">Application not found</h1><p className="my-3">“{params.get("app")}” is not configured on this machine.</p><button onClick={() => navigate("applications")}>← Applications</button></section>;
   if (params.get("app") === "vimm") return <Vault params={params} onLocked={onLocked} />;
   if (params.get("app") === "steam") return <Vault params={new URLSearchParams("tab=steam")} onLocked={onLocked} />;
@@ -52,6 +56,7 @@ export function Applications({ params, onLocked, visible = true }: { params: URL
   return <section className="h-full overflow-auto p-6"><h1 className="text-2xl font-semibold">Applications</h1><p className="mt-2 text-sm text-zinc-400">Your apps in Cyberdeck.</p><button className="mt-4 mr-3 rounded-lg border border-zinc-700 px-4 py-2 text-sm" onClick={() => navigate("controls")}>Controller & keyboard controls</button>
     <button className="mt-4 rounded-lg border border-cyan-700 px-4 py-2 text-sm text-cyan-300" onClick={pair}>Connect Casework remote</button>
     {pairing && <div role="dialog" aria-label="Connect Casework" className="mt-4 max-w-md rounded-xl border border-zinc-700 bg-zinc-900 p-5"><h2 className="text-lg">Connect buoy</h2><p className="my-3 text-sm text-zinc-400">In Casework, open Server settings → Scan pairing QR → Use this server. Keep Tailscale connected. {casework?.kiosk ? "This gives control of this machine’s whole Cyberdeck screen, with the deck and its example apps underneath." : "The device then runs the whole deck, with the example apps under Apps."}</p><div className="max-w-72 [&>svg]:h-auto [&>svg]:w-full" dangerouslySetInnerHTML={{ __html: pairing.qr }} /><button className="mt-3 text-cyan-300" onClick={() => setPairing(null)}>Done</button></div>}
+    {listingError && <p role="alert" className="mt-4 text-red-300">Could not refresh applications: {listingError}</p>}
     {error && <p role="alert" className="mt-4 text-red-300">{error}</p>}
     <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3"><button onClick={() => navigate("applications", { app: "vimm" })} className="rounded-xl border border-lime-900 bg-zinc-900 p-6 text-left hover:border-lime-400"><span className="mb-4 block text-3xl text-lime-300">◈</span><strong className="text-xl">The Vault</strong><p className="mt-2 text-sm text-zinc-400">Rediscover the classics. Browse and search Vimm’s Lair with box art, console collections, and your own saved list.</p><span className="mt-5 block text-sm text-lime-300">Explore The Vault →</span></button>{apps.map(a => <button key={a.id} data-tv-autofocus={a.id === lastApp || undefined} onClick={() => navigate("applications", { app: a.id })} className="rounded-xl border border-zinc-800 bg-zinc-900 p-6 text-left hover:border-cyan-500">
       <span className="mb-4 block text-3xl text-lime-300">▶</span><strong className="text-xl">{a.name}</strong><p className="mt-2 text-sm text-zinc-400">{a.description}</p><span className="mt-5 block text-sm text-cyan-300">Open {a.name} →</span>
