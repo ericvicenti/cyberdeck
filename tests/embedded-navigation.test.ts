@@ -192,3 +192,23 @@ test("child interaction during parent restoration follows the acknowledgement on
   expect(await page.evaluate(()=>history.length)).toBe(length+1);
   await page.goBack();await settled('/slow');
 });
+
+
+test("default canonical acknowledgement does not lose an immediately queued child selection", async () => {
+  await page.goto(url()); await view().locator('#next').waitFor();
+  const f=frame();
+  // Force a new default handshake and queue a user selection before its reply.
+  await page.evaluate(()=>{history.replaceState(null,'','#/applications?app=fixture');dispatchEvent(new HashChangeEvent('hashchange'));});
+  await f.evaluate(()=> (window as any).bridge.navigate('/detail?id=queued'));
+  await settled('/detail?id=queued','Detail');
+  await page.goBack();await settled('/library');
+});
+
+
+test("duplicate old acknowledgements cannot undo a later child selection", async () => {
+  await page.goto(url('/library')); await settled('/library');
+  const f=frame(),message=await f.evaluate(()=>(window as any).messages.at(-1));
+  await view().locator('#next').click();await settled('/detail?id=two%20%26%20three#part','Detail');
+  await f.evaluate(({message,origin})=>parent.postMessage({...message,type:'embedded:ack',route:'/library',title:'Old library'},origin),{message,origin:parent.url.origin});
+  await page.waitForTimeout(30);expect(await route()).toBe('/detail?id=two%20%26%20three#part');expect(await page.title()).toBe('Detail · Fixture · Cyberdeck');
+});

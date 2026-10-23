@@ -38,7 +38,7 @@ export function Applications({ params, onLocked, visible = true }: { params: URL
   useEffect(() => { if (visible && music) setMusicOpened(true); }, [visible, music]);
   const missing = loaded && !!params.get("app") && !app && !example && !music && !["vimm", "steam"].includes(params.get("app")!);
   const listingUnavailable = !!listingError && !music && !["vimm", "steam"].includes(params.get("app") || "") && (!loaded || missing);
-  useRouteTitle(!visible ? undefined : listingUnavailable ? "Applications unavailable" : missing ? "Application not found" : example || app?.id === "afterglow" || music ? undefined : app?.name);
+  useRouteTitle(!visible ? undefined : listingUnavailable ? "Applications unavailable" : missing ? "Application not found" : undefined);
   const content = () => {
   if (!visible || music) return null;
   if (listingUnavailable) return <section className="p-6"><h1 className="text-xl">Applications unavailable</h1><p role="alert" className="my-3 text-red-300">{listingError}</p><p>The requested application could not be checked. Reload to try again.</p></section>;
