@@ -5,13 +5,13 @@
 // events and WebRTC call signalling.
 import { useEffect, useRef, useState } from "react";
 import { api, post, token, ApiError } from "../lib/api";
-import { updateParams, useRouteTitle } from "../lib/navigation";
+import { CaseworkMedia, caseworkMediaPath } from "./CaseworkMedia";
+import { readRoute, updateParams, useRouteTitle } from "../lib/navigation";
 
 export type CaseworkApp = { id: string; name: string; description: string; title?: string };
 type Device = { id: string; info?: { name?: string; model?: string; os?: string }; scene?: string };
 type DeviceEvent = { deviceId?: string; at: number; name?: string; data?: any; result?: any; error?: string; ok?: boolean; path?: string };
 type Pairing = { url: string; key: string; qr: string };
-type Media = { url: string; kind: "img" | "video" | "audio" | null; name: string; bytes: number };
 type Signal = { type: "offer" | "answer" | "ice" | "hangup"; description?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit; video?: boolean };
 
 export const KITCHEN_TABS = ["Agent", "Overview", "Camera + QR", "Audio + calls", "Video", "Graphics", "Device", "Files + OS", "Web + forms"];
@@ -25,7 +25,9 @@ const isSimulator = (d: Device) => /simulator/i.test(d.info?.model ?? "");
 const btn = "rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 hover:border-cyan-500 disabled:opacity-40";
 const panel = "rounded-xl border border-zinc-800 bg-zinc-900/60 p-5";
 
-export function CaseworkConsole({ app, params, onLocked }: { app: CaseworkApp; params: URLSearchParams; onLocked: () => void }) {
+export function CaseworkConsole({ app, params, onLocked, visible = true }: { app: CaseworkApp; params: URLSearchParams; onLocked: () => void; visible?: boolean }) {
+  const mounted = useRef(false);
+  const callGeneration = useRef(0);
   const [pairing, setPairing] = useState<Pairing | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [receivedDevices, setReceivedDevices] = useState(false);
@@ -35,7 +37,11 @@ export function CaseworkConsole({ app, params, onLocked }: { app: CaseworkApp; p
   const [motion, setMotion] = useState("");
   const [scanned, setScanned] = useState("");
   const [identity, setIdentity] = useState("");
-  const [media, setMedia] = useState<Media | null>(null);
+  const [receivedMedia, setReceivedMedia] = useState<string | null>(null);
+  const active = useRef(visible);
+  active.current = visible;
+  const lock = useRef(onLocked);
+  lock.current = onLocked;
   const [qr, setQr] = useState<{ text: string; qr: string } | null>(null);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
@@ -50,7 +56,7 @@ export function CaseworkConsole({ app, params, onLocked }: { app: CaseworkApp; p
   const remoteVideo = useRef<HTMLVideoElement>(null);
   selectedRef.current = selected;
 
-  const fail = (e: unknown) => { if (e instanceof ApiError && e.status === 401) onLocked(); setError(e instanceof Error ? e.message : String(e)); };
+  const fail = (e: unknown) => { if (!mounted.current) return; if (e instanceof ApiError && e.status === 401 && active.current) lock.current(); setError(e instanceof Error ? e.message : String(e)); };
   const act = (fn: () => Promise<unknown>, done = "") => { setError(""); setNote(""); fn().then(() => setNote(done)).catch(fail); };
   const show = (list: Device[]) => {
     // Prefer real hardware when a simulator is connected too.
@@ -66,8 +72,9 @@ export function CaseworkConsole({ app, params, onLocked }: { app: CaseworkApp; p
 
   const signal = (message: Signal) => { const c = call.current; if (c && socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify({ type: "signal", to: c.target, signal: message })); };
   const endCall = (notify = true) => {
+    callGeneration.current++;
     const c = call.current;
-    if (!c) return;
+    if (!c) { setCallStatus("call ended"); return; }
     if (notify) signal({ type: "hangup" });
     call.current = null;
     c.pc.close();
@@ -81,8 +88,19 @@ export function CaseworkConsole({ app, params, onLocked }: { app: CaseworkApp; p
     if (!deviceId) throw new Error("Connect a device first");
     if (!navigator.mediaDevices?.getUserMedia) throw new Error("This page has no microphone access: open Cyberdeck over https or on localhost");
     endCall();
+    const generation = callGeneration.current;
     setCallVideo(video); setCallStatus("requesting media…"); setIncoming(null);
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video });
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video });
+    } catch (error) {
+      if (mounted.current && generation === callGeneration.current) setCallStatus("call ended");
+      throw error;
+    }
+    if (!mounted.current || generation !== callGeneration.current) {
+      stream.getTracks().forEach(track => track.stop());
+      return;
+    }
     const pc = new RTCPeerConnection({ iceServers: [] });
     call.current = { pc, stream, target: deviceId, pending: [] };
     if (localVideo.current) localVideo.current.srcObject = stream;
@@ -93,6 +111,7 @@ export function CaseworkConsole({ app, params, onLocked }: { app: CaseworkApp; p
     pc.ontrack = ({ streams }) => { if (remoteVideo.current) { remoteVideo.current.srcObject = streams[0]; remoteVideo.current.play().catch(() => setNote("Press play to hear the call")); } };
     pc.onconnectionstatechange = () => { if (call.current?.pc !== pc) return; setCallStatus(pc.connectionState); if (pc.connectionState === "failed") { endCall(); setError("Call failed. Check that both ends are on the same network."); } };
     await pc.setLocalDescription(await pc.createOffer());
+    if (call.current?.pc !== pc) return;
     signal({ type: "offer", description: pc.localDescription!, video });
     offered = true;
     early.forEach((candidate) => signal({ type: "ice", candidate }));
@@ -113,14 +132,16 @@ export function CaseworkConsole({ app, params, onLocked }: { app: CaseworkApp; p
     if (e.name === "device.info") setIdentity(JSON.stringify(e.data, null, 2));
     setEvents((prev) => [e, ...prev].slice(0, 45));
     // An upload is reported twice (the device's own event and the server's receipt); show it once.
-    const path: string | undefined = e.name === "files.upload" ? e.data?.path : undefined;
-    if (path) void fetch(path, { headers: { authorization: `Bearer ${token()}` } }).then((r) => { if (!r.ok) throw new Error(`upload ${r.status}`); return r.blob(); }).then((blob) => {
-      const kind = /\.(jpe?g|png)$/i.test(path) ? "img" : /\.(mov|mp4)$/i.test(path) ? "video" : /\.(m4a|wav)$/i.test(path) ? "audio" : null;
-      setMedia((prev) => { if (prev) URL.revokeObjectURL(prev.url); return { url: URL.createObjectURL(blob), kind, name: path.split("/").pop() ?? "upload", bytes: blob.size }; });
-    }).catch(fail);
+    const name = caseworkMediaPath(e.name === "files.upload" ? e.data?.path : null);
+    if (name) {
+      setReceivedMedia(name);
+      const route = readRoute();
+      if (active.current && route.view === "applications" && route.params.get("app") === app.id) updateParams({ media: name });
+    }
   };
 
   useEffect(() => {
+    mounted.current = true;
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const connect = (key: string) => {
@@ -142,7 +163,7 @@ export function CaseworkConsole({ app, params, onLocked }: { app: CaseworkApp; p
     };
     api<Pairing>(`/api/casework/pairing?url=${encodeURIComponent(location.origin)}`).then((p) => { if (!alive) return; setPairing(p); connect(p.key); }).catch(fail);
     api<{ text: string; qr: string }>("/api/casework/demo-qr").then((q) => { if (alive) setQr(q); }).catch(() => {});
-    return () => { alive = false; clearTimeout(timer); endCall(); socket.current?.close(); setMedia((prev) => { if (prev) URL.revokeObjectURL(prev.url); return null; }); };
+    return () => { mounted.current = false; alive = false; clearTimeout(timer); endCall(); socket.current?.close(); };
   }, []);
   // Another device's results are not this device's: start clean when the selection changes.
   useEffect(() => { setEvents([]); setMotion(""); setScanned(""); setIdentity(""); }, [selected]);
@@ -151,7 +172,7 @@ export function CaseworkConsole({ app, params, onLocked }: { app: CaseworkApp; p
   const device = devices.find((d) => d.id === selected);
   const missingDevice = receivedDevices && Boolean(requestedDevice) && !devices.some((d) => d.id === requestedDevice);
   useEffect(() => {
-    if (!receivedDevices) return;
+    if (!visible || !receivedDevices) return;
     if (requestedDevice) {
       setSelected(devices.some((d) => d.id === requestedDevice) ? requestedDevice : "");
     } else if (devices[0]) {
@@ -160,8 +181,10 @@ export function CaseworkConsole({ app, params, onLocked }: { app: CaseworkApp; p
     } else {
       setSelected("");
     }
-  }, [receivedDevices, requestedDevice, devices.map((d) => d.id).join("\0")]);
-  useRouteTitle(missingDevice ? `Device not found · ${app.name}` : device ? `${deviceName(device)} · ${app.name}` : app.name);
+  }, [visible, receivedDevices, requestedDevice, devices.map((d) => d.id).join("\0")]);
+  const mediaName = params.get("media") ?? "";
+  const consoleTitle = missingDevice ? `Device not found · ${app.name}` : device ? `${deviceName(device)} · ${app.name}` : app.name;
+  useRouteTitle(!visible || mediaName ? undefined : consoleTitle);
   const onApp = device?.scene === app.id;
   const here = inCasework();
   const inCall = Boolean(callStatus) && callStatus !== "call ended";
@@ -170,7 +193,7 @@ export function CaseworkConsole({ app, params, onLocked }: { app: CaseworkApp; p
     <div className="flex flex-wrap items-center gap-3">
       <span className={`led ${online ? "led-on" : "led-off"}`} /><span className="hud-label">{online ? "console online" : "connecting"}</span>
       <span className="flex-1" />
-      {devices.length > 0 && <select aria-label="Device" value={selected} onChange={(e) => { setSelected(e.target.value); updateParams({ device: e.target.value }); }} className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm"><option value="" disabled>Select a device</option>{devices.map((d) => <option key={d.id} value={d.id}>{deviceName(d)}{d.scene ? ` · ${d.scene}` : ""}</option>)}</select>}
+      {devices.length > 0 && <select aria-label="Device" value={selected} onChange={(e) => { setSelected(e.target.value); updateParams({ device: e.target.value, media: null }); }} className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm"><option value="" disabled>Select a device</option>{devices.map((d) => <option key={d.id} value={d.id}>{deviceName(d)}{d.scene ? ` · ${d.scene}` : ""}</option>)}</select>}
     </div>
     <h1 className="mt-4 text-3xl font-semibold tracking-tight">{app.name}</h1>
     <p className="mt-2 max-w-3xl text-sm text-zinc-400">{app.description} It runs natively in the Casework Desk app, served from this node; this page sends it to a paired device, drives it, and shows what the device really did.</p>
@@ -201,6 +224,8 @@ export function CaseworkConsole({ app, params, onLocked }: { app: CaseworkApp; p
     {incoming && <div className={`${panel} mt-4 border-lime-600`} role="dialog" aria-label="Incoming call"><strong>{deviceName(devices.find((d) => d.id === incoming.from) ?? { id: incoming.from })} is calling ({incoming.video ? "video" : "audio"})</strong>
       <div className="mt-3 flex gap-2"><button className={`${btn} border-lime-600 text-lime-300`} onClick={() => act(() => startCall(incoming.video, incoming.from))}>Accept</button><button className={btn} onClick={() => setIncoming(null)}>Ignore</button></div></div>}
 
+    <CaseworkMedia name={mediaName} visible={visible} title={consoleTitle} received={receivedMedia} />
+
     {devices.length > 0 && <div className="mt-5 grid gap-5 lg:grid-cols-2">
       <section className={panel}><h2 className="text-lg">Scan this on the device</h2><p className="mt-1 text-sm text-zinc-400">Camera + QR tab: point the camera here. The decoded text comes back below.</p>
         {qr && <div className="my-4 w-56 rounded-lg bg-white p-2 [&>svg]:h-auto [&>svg]:w-full" dangerouslySetInnerHTML={{ __html: qr.qr }} />}
@@ -214,9 +239,6 @@ export function CaseworkConsole({ app, params, onLocked }: { app: CaseworkApp; p
         <p className="mt-2 text-xs text-zinc-500">These reach the player on the Video tab while it is on screen.</p>
       </section>
       <section className={panel}><h2 className="text-lg">Live motion</h2><p className="mt-1 text-sm text-zinc-400">Device tab → Stream motion, then tilt it.</p><pre className="mt-2 min-h-24 whitespace-pre-wrap font-mono text-xs text-zinc-400">{motion || "Waiting for sensor data."}</pre></section>
-      <section className={panel}><h2 className="text-lg">Media arriving from the device</h2>
-        {media ? <div className="mt-3 space-y-2">{media.kind === "img" && <img src={media.url} alt="Upload from the device" className="max-h-80 w-full rounded-lg object-contain" />}{media.kind === "video" && <video src={media.url} controls className="max-h-80 w-full rounded-lg" />}{media.kind === "audio" && <audio src={media.url} controls className="w-full" />}<a href={media.url} download={media.name} className="block text-sm text-cyan-300">Download {media.bytes.toLocaleString()} bytes received from the device</a></div> : <p className="mt-2 text-sm text-zinc-500">Captured photos, audio and video appear here after upload.</p>}
-      </section>
       <section className={`${panel} lg:col-span-2`}><h2 className="text-lg">Actual results</h2>
         <div className="mt-2 max-h-96 overflow-auto" data-testid="casework-events">{events.length ? events.map((e, i) => <div key={`${e.at}-${i}`} className="border-b border-zinc-800 py-2"><strong className={e.ok === false || e.name === "error" ? "text-red-300" : "text-lime-300"}>{e.name || (e.ok === false ? "command failed" : "command completed")}</strong><small className="text-zinc-500"> · {new Date(e.at).toLocaleTimeString()}</small><pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap font-mono text-xs text-zinc-400">{JSON.stringify(e.data ?? e.result ?? e.error ?? (e.path ? { path: e.path } : null), null, 2)}</pre></div>) : <p className="text-sm text-zinc-500">Waiting for device events.</p>}</div>
       </section>
