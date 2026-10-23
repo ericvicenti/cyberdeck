@@ -77,7 +77,7 @@ export function EmbeddedFrame({ app, params, visible }: {
     <div className="flex shrink-0 items-center gap-4 border-b border-zinc-800 px-4 py-2 text-sm">
       <button data-tv-frame-back onClick={() => navigate("applications")} className="text-cyan-300">← Applications</button>
       <strong>{app.name}</strong><span className="flex-1" />
-      <button onClick={() => { frame.current?.contentWindow?.location.replace(app.url); }}>Reload</button>
+      <button onClick={() => { connect.current(true); frame.current?.contentWindow?.location.replace(app.url); }}>Reload</button>
     </div>
     {problem && <p role="alert" className="p-3 text-amber-300">{problem}</p>}
     <iframe ref={frame} data-tv-autofocus onLoad={event => {

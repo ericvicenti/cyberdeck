@@ -4,6 +4,7 @@ import { chromium, type Browser, type Page } from "playwright";
 
 const ui = process.env.CYBERDECK_TEST_UI || join(import.meta.dir, "../dist/ui");
 let parentOrigin = "";
+let fixtureName = "Fixture";
 const errors: string[] = [];
 const child = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
   const url = new URL(request.url);
@@ -33,7 +34,7 @@ const child = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
 const parent = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
   const path = new URL(request.url).pathname;
   if (path === "/api/applications") return Response.json({ applications: [
-    { id: "fixture", name: "Fixture", url: `${child.url}library`, description: "Fixture" },
+    { id: "fixture", name: fixtureName, url: `${child.url}library`, description: "Fixture" },
     { id: "plain", name: "Plain", url: `${child.url}plain`, description: "Plain" },
   ] });
   if (path === "/api/fleet/nodes") return Response.json({ self: { nodeId: "local", name: "Local" }, nodes: [] });
@@ -53,7 +54,7 @@ async function settled(value: string, title = "Library") {
   expect(await page.title()).toBe(`${title} · Fixture · Cyberdeck`);
 }
 beforeAll(async () => { browser = await chromium.launch(); });
-beforeEach(async () => { await page?.close(); page = await browser.newPage(); page.on("pageerror", e => errors.push(e.message)); });
+beforeEach(async () => { fixtureName = "Fixture"; await page?.close(); page = await browser.newPage(); page.on("pageerror", e => errors.push(e.message)); });
 afterAll(async () => { await browser?.close(); parent.stop(true); child.stop(true); });
 
 test("generic child direct links, canonical defaults, reload and new tabs", async () => {
@@ -211,4 +212,28 @@ test("duplicate old acknowledgements cannot undo a later child selection", async
   await view().locator('#next').click();await settled('/detail?id=two%20%26%20three#part','Detail');
   await f.evaluate(({message,origin})=>parent.postMessage({...message,type:'embedded:ack',route:'/library',title:'Old library'},origin),{message,origin:parent.url.origin});
   await page.waitForTimeout(30);expect(await route()).toBe('/detail?id=two%20%26%20three#part');expect(await page.title()).toBe('Detail · Fixture · Cyberdeck');
+});
+
+
+test("renamed application metadata updates the title without replacing its document", async () => {
+  await page.goto(url('/library'));await settled('/library');
+  const f=frame(),identity=await f.evaluate(()=>(window as any).identity);
+  await page.getByTestId('nav-data').click();await page.waitForFunction(()=>location.hash==='#/data');
+  fixtureName='Renamed fixture';
+  await page.goBack();await page.waitForFunction(()=>document.title==='Library · Renamed fixture · Cyberdeck');
+  expect(await page.locator('iframe[title="Renamed fixture"]').count()).toBe(1);
+  expect(await f.evaluate(()=>(window as any).identity)).toBe(identity);
+  expect(await route()).toBe('/library');
+});
+
+
+test("Reload invalidates messages queued by the previous child document", async () => {
+  await page.goto(url('/library'));await settled('/library');
+  const message=await frame().evaluate(()=>(window as any).messages.at(-1));
+  await page.evaluate(({message,origin})=>{
+    const source=document.querySelector('iframe')!.contentWindow;
+    (Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Reload') as HTMLButtonElement).click();
+    dispatchEvent(new MessageEvent('message',{origin,source,data:{...message,type:'embedded:navigation',route:'/detail',title:'Stale'}}));
+  },{message,origin:child.url.origin});
+  await settled('/library');expect(await route()).toBe('/library');
 });

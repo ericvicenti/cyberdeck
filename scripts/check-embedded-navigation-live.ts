@@ -24,7 +24,7 @@ document.querySelector('#detail').onclick=()=>bridge.navigate('/detail?q=A%20%26
 </script>`;
 const browser = await chromium.launch();
 const context = await browser.newContext();
-await context.addInitScript(value => localStorage.setItem("cyberdeck-token",value),token);
+await context.addInitScript(({token,origin}) => { if (location.origin === origin) localStorage.setItem("cyberdeck-token",token); }, {token,origin});
 const errors:string[]=[],mutations:string[]=[],passed:string[]=[];
 await context.route("**/*",async route=>{
   const req=route.request(),u=new URL(req.url());
