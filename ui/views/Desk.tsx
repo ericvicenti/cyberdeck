@@ -22,6 +22,8 @@ type VoiceStatus = {
   health?: unknown;
   /** The Casework voice profile calls carry (Cartesia voice id + rate) and whether the runtime token to apply it is on hand. */
   profile?: { voice: string; speed: number; runtimeToken: boolean };
+  /** The weekly fleet digest trigger (`cyberdeck seed digest`): when it writes and where the documents live. */
+  digest?: { enabled: boolean; nextSummary?: string; lastFiredAt?: number; url?: string; lastError?: string };
 };
 type TranscriptHistory = { supported: boolean; messages?: { role: "user" | "assistant"; text: string; at?: number }[]; notices?: { id: string; at: number; text: string }[] };
 
@@ -303,6 +305,7 @@ export function Desk({ params, onLocked, visible = true }: { params: URLSearchPa
               {configured && <button onClick={resetSession} disabled={busy !== ""} data-testid="voice-new-session" className="hud-chip text-zinc-300 hover:text-zinc-100 disabled:opacity-40">{busy === "reset" ? "resetting…" : "new session"}</button>}
               {status?.profile && <span className="hud-chip text-zinc-300" data-testid="voice-profile" title={status.profile.runtimeToken ? `Cartesia voice ${status.profile.voice} at ${status.profile.speed}x, applied to every call` : `Cartesia voice ${status.profile.voice}: no runtime token on this node, calls keep the worker's default voice`}><span className={`led ${status.profile.runtimeToken ? "led-on" : "led-warn"}`} />voice {status.profile.voice.slice(0, 8)} ×{status.profile.speed}</span>}
               <span className="hud-chip text-zinc-300" data-testid="voice-node" title={v.config?.via ? `Voice is centralized: ${nodeName || "this node"} relays every call to the voice hub, ${v.config.via.name}${hubDown ? " (offline)" : ""}` : "This node runs the voice system itself"}><span className={`led ${hubDown ? "led-warn" : "led-on"}`} />voice {v.config?.via ? v.config.via.name : nodeName || "—"}{hubDown ? " offline" : ""}</span>
+              {status?.digest?.url && <a href={status.digest.url} target="_blank" rel="noreferrer" className="hud-chip text-zinc-300 hover:text-zinc-100" data-testid="voice-digest" title={`Weekly fleet digest the agent publishes ${status.digest.nextSummary ?? "on schedule"}${status.digest.lastFiredAt ? `; last written ${new Date(status.digest.lastFiredAt).toLocaleString()}` : "; not written yet"}${status.digest.lastError ? `; last error: ${status.digest.lastError}` : ""}. Opens the documents on hyper.media.`}><span className={`led ${!status.digest.enabled ? "led-off" : status.digest.lastError ? "led-warn" : "led-on"}`} />digest {status.digest.nextSummary ?? (status.digest.enabled ? "weekly" : "off")}</a>}
               {status?.identity && <span className="hud-chip text-zinc-300" title={status.identity.principal ?? ""}><span className={`led ${status.identity.available ? "led-on" : "led-warn"}`} />identity {status.identity.available ? (status.identity.principal ?? "ok").slice(0, 12) : "missing"}</span>}
             </div>
             {configured && note && <p className="mt-2 text-[11px] text-zinc-400" data-testid="voice-note">{note}</p>}
