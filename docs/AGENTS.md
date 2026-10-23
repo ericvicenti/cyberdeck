@@ -169,12 +169,20 @@ The agents server has to be able to open a connection to the node:
   identity shortcut only applies to a device logged in as the owner, and the agents server is
   not one.
 - **Hosted agents server off the tailnet** (`agent.hm` today): the node must be reachable from
-  the public internet. The clean option is Tailscale Funnel on the node
-  (`tailscale funnel --bg --https=443 http://127.0.0.1:4777`), which keeps TLS on the tailnet
-  cert and leaves the bearer token as the only gate. Rotate the token (`~/.cyberdeck/token`,
-  then `cyberdeck restart`) if it ever leaks; every paired node must be re-paired after a
-  rotation. Seed refuses to send a header to an agents server that is not on HTTPS, which is
-  not a constraint here because the hosted server is.
+  the public internet. `cyberdeck serve mcp` turns on Tailscale Funnel for **only** the MCP path:
+  `tailscale funnel --bg --https=8443 --set-path=/api/mcp http://127.0.0.1:4777/api/mcp`, i.e.
+  `https://<node>.<tailnet>.ts.net:8443/api/mcp` (`cyberdeck mcp` lists it as the public url,
+  `--json` as `public`; `cyberdeck serve mcp off` stops it). Funnel is per port, so the UI on 443
+  stays tailnet-only, every other path on 8443 is a 404 at Tailscale's edge, and the bearer token
+  is the only gate on the route: serve overwrites the `Tailscale-User-*` headers, so a public
+  caller cannot pose as the owner (verified against an echo backend, 2026-10-23). Never
+  `tailscale funnel --https=443` the node itself: that publishes the whole UI and API, and
+  `cyberdeck serve` / `cyberdeck mcp` print a warning when they see it. Rotate the token
+  (`~/.cyberdeck/token`, then `cyberdeck restart`) if it ever leaks; every paired node must be
+  re-paired after a rotation. Funnel needs the `funnel` node attribute in the tailnet policy
+  (yacht has it); the public DNS name only resolves while a funnel is on. Seed refuses to send a
+  header to an agents server that is not on HTTPS, which is not a constraint here because the
+  hosted server is.
 
 Alternatively run the agents server on the tailnet (the self-hosted option in Seed's
 `apps/agents.md`) and skip the public route altogether.

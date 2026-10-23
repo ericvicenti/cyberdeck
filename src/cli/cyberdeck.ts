@@ -4,7 +4,7 @@ import { join } from "path";
 import { readFileSync, existsSync } from "fs";
 import { homedir } from "os";
 import { CYBERDECK_HOME, loadConfig } from "../daemon/config";
-import { tailscaleBin, Tailscale } from "../daemon/tailscale";
+import { tailscaleBin, Tailscale, MCP_FUNNEL_PORT, MCP_PATH } from "../daemon/tailscale";
 
 const cfg = loadConfig();
 const BASE = `http://127.0.0.1:${cfg.port}`;
@@ -101,22 +101,45 @@ switch (cmd) {
     if (process.argv[3] === "off") {
       process.exit(await sh([bin, "serve", "--https=443", "off"]));
     }
+    if (process.argv[3] === "mcp") {
+      // Public MCP route for a hosted agents server (agent.hm) via Tailscale Funnel. Funnel is per port, so the
+      // tailnet-only UI on 443 stays tailnet-only and the MCP endpoint gets its own port with a single path
+      // handler: anything but /api/mcp answers 404 at the edge, /api/mcp still needs the bearer token
+      // (serve overwrites the Tailscale-User-* identity headers, so a public caller cannot pose as the owner).
+      // docs/AGENTS.md "Reachability".
+      const target = `http://127.0.0.1:${cfg.port}${MCP_PATH}`;
+      if (process.argv[4] === "off") {
+        process.exit(await sh([bin, "funnel", "--bg", `--https=${MCP_FUNNEL_PORT}`, `--set-path=${MCP_PATH}`, "off"]));
+      }
+      const code = await sh([bin, "funnel", "--bg", `--https=${MCP_FUNNEL_PORT}`, `--set-path=${MCP_PATH}`, target]);
+      if (code !== 0) process.exit(code);
+      const f = await new Tailscale().funnel(cfg.port);
+      console.log(f.mcpUrl ? `public MCP route: ${f.mcpUrl} (bearer-gated; \`cyberdeck mcp\` prints the header, \`cyberdeck serve mcp off\` stops it)` : "funnel set, but `tailscale serve status --json` does not show it yet; run `cyberdeck mcp` in a moment");
+      if (f.rootPublic) console.log(`WARNING: ${f.rootPublic} publishes this node's whole UI to the internet; run: tailscale funnel --https=${new URL(f.rootPublic).port || 443} off`);
+      break;
+    }
     const code = await sh([bin, "serve", "--bg", "--https=443", `http://127.0.0.1:${cfg.port}`]);
     if (code !== 0) process.exit(code);
     const self = await new Tailscale().self();
     console.log(self ? `serving https://${self.dnsName}` : "serving (run `tailscale status` for the hostname)");
+    const f = await new Tailscale().funnel(cfg.port);
+    if (f.rootPublic) console.log(`WARNING: ${f.rootPublic} is funneled to the public internet (the whole UI); run: tailscale funnel --https=${new URL(f.rootPublic).port || 443} off`);
     break;
   }
   case "mcp": {
     // Connection details for an MCP client (Seed Agents: Tools tab -> Add server).
-    const self = await new Tailscale().self().catch(() => null);
+    const ts = new Tailscale();
+    const self = await ts.self().catch(() => null);
+    const funnel = await ts.funnel(cfg.port).catch(() => ({ mcpUrl: null, rootPublic: null }));
     const urls = [`${BASE}/api/mcp`];
     if (self?.dnsName) urls.push(`https://${self.dnsName}/api/mcp (tailnet, needs \`cyberdeck serve\`)`);
-    if (process.argv[3] === "--json") { console.log(JSON.stringify({ urls: [urls[0], ...(self?.dnsName ? [`https://${self.dnsName}/api/mcp`] : [])], headers: { Authorization: `Bearer ${token()}` }, transport: "http" })); break; }
+    if (funnel.mcpUrl) urls.push(`${funnel.mcpUrl} (public internet via Tailscale Funnel, \`cyberdeck serve mcp\`)`);
+    if (process.argv[3] === "--json") { console.log(JSON.stringify({ urls: [urls[0], ...(self?.dnsName ? [`https://${self.dnsName}/api/mcp`] : []), ...(funnel.mcpUrl ? [funnel.mcpUrl] : [])], public: funnel.mcpUrl, headers: { Authorization: `Bearer ${token()}` }, transport: "http" })); break; }
     console.log(`Cyberdeck MCP server (Streamable HTTP, stateless)\n`);
     for (const u of urls) console.log(`  url:        ${u}`);
     console.log(`  header:     Authorization: Bearer ${token()}`);
-    console.log(`  transport:  http\n\nIn Seed Agents: Tools tab -> MCP servers -> Add server, paste the url and the header; name it "cyberdeck".\nSee docs/AGENTS.md for reachability (a hosted agents server needs a public route to this node).`);
+    console.log(`  transport:  http\n\nIn Seed Agents: Tools tab -> MCP servers -> Add server, paste the url and the header; name it "cyberdeck".\nSee docs/AGENTS.md for reachability (a hosted agents server needs the public route: \`cyberdeck serve mcp\`).`);
+    if (funnel.rootPublic) console.log(`\nWARNING: ${funnel.rootPublic} is funneled to the public internet (the whole UI, not just MCP); run: tailscale funnel --https=${new URL(funnel.rootPublic).port || 443} off`);
     break;
   }
   case "seed": {
@@ -254,6 +277,7 @@ usage: cyberdeck <command>
   logs       tail daemon logs
   update     pull own source, rebuild, restart
   serve      expose the UI as https://<node>.<tailnet> via tailscale serve (serve off: stop)
+  serve mcp  publish only /api/mcp to the internet on :8443 via tailscale funnel, for agent.hm (serve mcp off: stop)
   mcp        connection details for MCP clients such as Seed Agents (--json)
   seed       Seed agents bridge: status | setup | sync [--voice] | keygen | login | providers | reset-session | call | transcript | dogfood | runwatch | prompt [--apply]
   whoami     how the local daemon sees this caller`);

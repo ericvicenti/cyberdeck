@@ -8,6 +8,16 @@ import { existsSync } from "fs";
 
 export type Identity = { login: string; node: string };
 export type SelfInfo = { dnsName: string; login: string | null; ip4: string | null };
+/** What `tailscale funnel` publishes to the public internet for 127.0.0.1:`port` (see `Tailscale.funnel`). */
+export type FunnelInfo = {
+  /** The public `https://<node>.<tailnet>:8443/api/mcp` url when only the MCP path is funneled, else null. */
+  mcpUrl: string | null;
+  /** The public origin when the node's whole UI (`/`) is funneled: a misconfiguration worth shouting about. */
+  rootPublic: string | null;
+};
+/** The port `cyberdeck serve mcp` publishes on: 443 stays the tailnet-only UI, funnel ports are limited to 443/8443/10000. */
+export const MCP_FUNNEL_PORT = 8443;
+export const MCP_PATH = "/api/mcp";
 /** Runs the tailscale CLI; resolves to stdout, or null when the binary is missing or the command fails. */
 export type Runner = (args: string[]) => Promise<string | null>;
 
@@ -59,6 +69,7 @@ export class Tailscale {
   private whoisCache = new Map<string, { at: number; id: Identity | null }>();
   private selfCache: { at: number; info: SelfInfo | null } | null = null;
   private serveCache = new Map<number, { at: number; origin: string | null }>();
+  private funnelCache = new Map<number, { at: number; info: FunnelInfo }>();
   constructor(private run: Runner = defaultRunner) {}
 
   /** Identity of the tailnet peer at `ip`, or null if unknown / not a tailnet address. */
@@ -114,4 +125,42 @@ export class Tailscale {
     this.serveCache.set(port, { at: Date.now(), origin });
     return origin;
   }
+
+  /**
+   * Public (Funnel) exposure of 127.0.0.1:`port`, from `tailscale serve status --json` (`AllowFunnel` lists the
+   * host:port pairs open to the internet; `Web[host:port].Handlers[path].Proxy` says where each path goes).
+   * Funnel is per port, so the MCP route gets its own port with a single handler mounted at `/api/mcp` whose
+   * proxy target carries the path too (`--set-path /api/mcp http://127.0.0.1:<port>/api/mcp`: serve strips the
+   * mount prefix before proxying). `rootPublic` flags a port whose `/` handler leads to the node, i.e. the
+   * entire UI and API published, which `cyberdeck serve` and `cyberdeck mcp` warn about.
+   */
+  async funnel(port: number): Promise<FunnelInfo> {
+    const hit = this.funnelCache.get(port);
+    if (hit && Date.now() - hit.at < SELF_TTL) return hit.info;
+    const info = parseFunnel(await this.run(["serve", "status", "--json"]).catch(() => null), port);
+    this.funnelCache.set(port, { at: Date.now(), info });
+    return info;
+  }
+}
+
+const toNode = (port: number, path = "") => new RegExp(`^(https?://)?(127\\.0\\.0\\.1|localhost):${port}${path.replace(/\//g, "\\/")}/?$`);
+
+/** Pure half of `Tailscale.funnel`: `out` is the stdout of `tailscale serve status --json` (null when tailscale is absent). */
+export function parseFunnel(out: string | null, port: number): FunnelInfo {
+  const info: FunnelInfo = { mcpUrl: null, rootPublic: null };
+  if (!out) return info;
+  let j: any;
+  try { j = JSON.parse(out); } catch { return info; }
+  const allow = j?.AllowFunnel ?? {};
+  const web = j?.Web ?? {};
+  for (const [hostPort, on] of Object.entries<any>(allow)) {
+    if (!on) continue;
+    const handlers = web?.[hostPort]?.Handlers ?? {};
+    const origin = `https://${hostPort.replace(/:443$/, "")}`;
+    const rootProxy = String(handlers?.["/"]?.Proxy ?? "");
+    if (toNode(port).test(rootProxy)) { info.rootPublic ??= origin; continue; }
+    const mcpProxy = String(handlers?.[MCP_PATH]?.Proxy ?? "");
+    if (toNode(port, MCP_PATH).test(mcpProxy) && Object.keys(handlers).length === 1) info.mcpUrl ??= `${origin}${MCP_PATH}`;
+  }
+  return info;
 }
