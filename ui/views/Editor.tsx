@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouteTitle } from "../lib/navigation";
+import { useRouteTitle, nodeName } from "../lib/navigation";
 import { EditorView, keymap, lineNumbers, highlightActiveLine } from "@codemirror/view";
 import { EditorState, Compartment } from "@codemirror/state";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
@@ -7,10 +7,38 @@ import { bracketMatching, indentOnInput, syntaxHighlighting, defaultHighlightSty
 import { search, searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { languages } from "@codemirror/language-data";
-import { api, post, rawUrl, nodePath, navigate, routeNode, fmtBytes, ApiError } from "../lib/api";
+import { api, post as postToNode, rawUrl as rawNodeUrl, nodePath, navigate, fmtBytes, ApiError } from "../lib/api";
 import { SkipBackIcon, SkipFwdIcon, RepeatIcon, ShuffleIcon } from "../lib/icons";
 import videojs from "video.js";
 import "video.js/dist/video-js.css";
+
+// Each retained document owns its original node, including delayed media events.
+// Never resolve a background save, stream, or playlist against the current URL.
+function editorClient(node: string) {
+  return {
+    scoped: (path: string) => nodePath(node, path),
+    api: <T,>(path: string) => api<T>(path, { node }),
+    post: <T,>(path: string, body: unknown) => postToNode<T>(path, body, node),
+    rawUrl: (path: string, params: Record<string, string> = {}) => rawNodeUrl(path, params, node),
+  };
+}
+type EditorClient = ReturnType<typeof editorClient>;
+
+/** A document's URL selects its owner; hiding it does not discard drafts,
+ * undo history or playback. Authentication unmounts the entire workspace. */
+export function EditorWorkspace({ params, visible, onLocked }: {
+  params: URLSearchParams; visible: boolean; onLocked: () => void;
+}) {
+  const documents = useRef(new Map<string, URLSearchParams>());
+  const key = JSON.stringify([params.get("node") || "", params.get("path") || ""]);
+  if (visible) documents.current.set(key, new URLSearchParams(params));
+  return <>{[...documents.current].map(([id, ownParams]) => {
+    const active = visible && id === key;
+    return <div key={id} className={active ? "h-full" : "hidden"} inert={!active} aria-hidden={!active} data-editor-document={id}>
+      <Editor params={ownParams} visible={active} onLocked={onLocked} />
+    </div>;
+  })}</>;
+}
 
 const MEDIA_EXT: Record<string, "image" | "video" | "audio" | "pdf"> = {
   png: "image", jpg: "image", jpeg: "image", gif: "image", webp: "image", svg: "image", ico: "image", avif: "image",
@@ -28,7 +56,10 @@ const MEDIA_EXT: Record<string, "image" | "video" | "audio" | "pdf"> = {
 const NATIVE_VIDEO = new Set(["mp4", "webm", "m4v", "mov"]);
 const VIDEO_MIME: Record<string, string> = { mp4: "video/mp4", m4v: "video/mp4", webm: "video/webm", mov: "video/quicktime" };
 
-function VideoJsPlayer(props: { path: string; node: string; loop: boolean; onEnded: () => void }) {
+function VideoJsPlayer(props: { path: string; loop: boolean; onEnded: () => void; client: EditorClient; onError: (message: string) => void }) {
+  const { api, post, scoped, rawUrl } = props.client;
+  const callbacks = useRef(props);
+  callbacks.current = props;
   const host = useRef<HTMLDivElement>(null);
   const playerRef = useRef<ReturnType<typeof videojs> | null>(null);
   const ext = props.path.toLowerCase().split(".").pop() ?? "";
@@ -37,7 +68,7 @@ function VideoJsPlayer(props: { path: string; node: string; loop: boolean; onEnd
   const [ffmpegAvailable, setFfmpegAvailable] = useState(true);
 
   useEffect(() => {
-    api<{ ffmpeg: boolean }>(`/api/media/info?path=${encodeURIComponent(props.path)}`, { node: props.node })
+    api<{ ffmpeg: boolean }>(`/api/media/info?path=${encodeURIComponent(props.path)}`)
       .then((i) => setFfmpegAvailable(i.ffmpeg))
       .catch(() => {});
   }, [props.path]);
@@ -58,26 +89,32 @@ function VideoJsPlayer(props: { path: string; node: string; loop: boolean; onEnd
       playbackRates: [0.75, 1, 1.25, 1.5, 2],
     });
     playerRef.current = player;
-    player.on("ended", () => props.onEnded());
+    player.on("ended", () => callbacks.current.onEnded());
+    player.on("error", () => {
+      if (!disposed && (mode === "hls" || !ffmpegAvailable)) callbacks.current.onError("Media playback unavailable");
+    });
 
     (async () => {
       try {
         if (mode === "hls") {
           setStatus("preparing stream…");
-          const res = await post<{ url: string; transcoding: boolean }>("/api/media/hls/start", { path: props.path }, props.node);
+          const res = await post<{ url: string; transcoding: boolean }>("/api/media/hls/start", { path: props.path });
           if (disposed) return;
           setStatus(res.transcoding ? "transcoding in the background — seek range grows as it runs" : null);
-          player.src({ src: nodePath(props.node, res.url), type: "application/x-mpegURL" });
+          player.src({ src: scoped(res.url), type: "application/x-mpegURL" });
         } else {
           setStatus(null);
-          player.src({ src: rawUrl("/api/fs/read", { path: props.path }, props.node), type: VIDEO_MIME[ext] ?? "video/mp4" });
+          player.src({ src: rawUrl("/api/fs/read", { path: props.path }), type: VIDEO_MIME[ext] ?? "video/mp4" });
           // If the browser can't decode this file, fall back to transcoding.
           player.one("error", () => {
             if (!disposed && ffmpegAvailable) setMode("hls");
           });
         }
       } catch (err) {
-        if (!disposed) setStatus(`playback failed: ${err instanceof Error ? err.message : err}`);
+        if (!disposed) {
+          const message = `playback failed: ${err instanceof Error ? err.message : err}`;
+          setStatus(message); callbacks.current.onError(message);
+        }
       }
     })();
 
@@ -109,15 +146,17 @@ function VideoJsPlayer(props: { path: string; node: string; loop: boolean; onEnd
 
 // ---------- media player with folder playlist ----------
 
-function MediaPlayer({ path, node, kind }: { path: string; node: string; kind: "audio" | "video" }) {
+function MediaPlayer({ path, kind, node, visible, client, onError }: { path: string; kind: "audio" | "video"; node: string; visible: boolean; client: EditorClient; onError: (message: string) => void }) {
+  const { api, rawUrl } = client;
   const name = path.split("/").pop() ?? "";
   const dir = path.slice(0, path.lastIndexOf("/")) || "~";
+  const playerHost = useRef<HTMLDivElement>(null);
   const [playlist, setPlaylist] = useState<string[]>([]);
   const [loop, setLoop] = useState(false);
   const [shuffle, setShuffle] = useState(false);
 
   useEffect(() => {
-    api<{ entries: { name: string; type: string }[] }>(`/api/fs/list?path=${encodeURIComponent(dir)}`, { node })
+    api<{ entries: { name: string; type: string }[] }>(`/api/fs/list?path=${encodeURIComponent(dir)}`)
       .then((res) =>
         setPlaylist(
           res.entries
@@ -130,7 +169,13 @@ function MediaPlayer({ path, node, kind }: { path: string; node: string; kind: "
   }, [dir]);
 
   const idx = playlist.indexOf(name);
-  const goto = (n: string) => navigate("edit", { path: `${dir}/${n}`, node: node || undefined });
+  const goto = (n: string) => {
+    if (!visible || n === name) return;
+    // Choosing another track replaces playback; ordinary browser navigation
+    // only hides the player and must leave it running.
+    playerHost.current?.querySelectorAll<HTMLMediaElement>("audio, video").forEach(player => player.pause());
+    navigate("edit", { path: `${dir === "/" ? "" : dir}/${n}`, node });
+  };
   const step = (delta: number) => {
     if (playlist.length < 2) return;
     if (shuffle) {
@@ -145,10 +190,10 @@ function MediaPlayer({ path, node, kind }: { path: string; node: string; kind: "
     `rounded-lg p-2 ${on ? "bg-emerald-500/15 text-emerald-400" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"}`;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col lg:flex-row" data-testid="media-player">
+    <div ref={playerHost} className="flex min-h-0 flex-1 flex-col lg:flex-row" data-testid="media-player">
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-4 sm:p-8">
         {kind === "video" ? (
-          <VideoJsPlayer key={path} path={path} node={node} loop={loop} onEnded={() => !loop && step(1)} />
+          <VideoJsPlayer key={path} path={path} loop={loop} client={client} onError={onError} onEnded={() => !loop && step(1)} />
         ) : (
           <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 text-center shadow-2xl">
             <div className="mx-auto flex h-28 w-28 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500/25 to-sky-500/20 text-5xl">
@@ -158,7 +203,7 @@ function MediaPlayer({ path, node, kind }: { path: string; node: string; kind: "
             <div className="mt-0.5 text-[11px] text-zinc-500">
               {idx + 1} of {playlist.length} in {dir.split("/").pop() || "~"}
             </div>
-            <audio key={path} src={rawUrl("/api/fs/read", { path }, node)} controls autoPlay loop={loop} onEnded={() => !loop && step(1)} className="mt-4 w-full" />
+            <audio key={path} src={rawUrl("/api/fs/read", { path })} controls autoPlay loop={loop} onError={() => onError("Media playback unavailable")} onEnded={() => !loop && step(1)} className="mt-4 w-full" />
           </div>
         )}
         <div className="flex items-center gap-1.5" data-testid="media-transport">
@@ -201,9 +246,16 @@ function MediaPlayer({ path, node, kind }: { path: string; node: string; kind: "
   );
 }
 
-export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked: () => void }) {
+export function Editor({ params, onLocked, visible = true }: { params: URLSearchParams; onLocked: () => void; visible?: boolean }) {
+  const active = useRef(visible);
+  active.current = visible;
+  const lock = useRef(onLocked);
+  lock.current = onLocked;
+  const savingRef = useRef(false);
+  const node = params.get("node") || "";
+  const [client] = useState(() => editorClient(node));
+  const { api, post, rawUrl } = client;
   const path = params.get("path") ?? "";
-  const node = routeNode(params);
   const name = path.split("/").pop() ?? "";
   const dir = path.slice(0, path.lastIndexOf("/")) || "~";
   const ext = name.toLowerCase().split(".").pop() ?? "";
@@ -218,27 +270,34 @@ export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [size, setSize] = useState(0);
+  const [retry, setRetry] = useState(0);
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const langCompartment = useRef(new Compartment());
 
-  useRouteTitle(!path ? "Choose a file · Editor" : loadedPath === path && state === "error" ? `${path} unavailable · Editor` : undefined);
+  useEffect(() => { if (visible) view.current?.requestMeasure(); }, [visible]);
+
+  const errorTitle = !path ? "Choose a file · Editor" : loadedPath === path && state === "error" ? `${path} unavailable · Editor` : undefined;
+  useRouteTitle(visible && errorTitle ? `${errorTitle}${node ? ` · ${nodeName(node)}` : ""}` : undefined);
   const save = useCallback(async () => {
     const editor = view.current;
-    if (!editor || currentPath.current !== path) return;
+    if (!editor || currentPath.current !== path || savingRef.current) return;
+    savingRef.current = true;
     const current = () => currentPath.current === path && view.current === editor;
+    const savedDocument = editor.state.doc;
     setSaving(true);
     try {
-      await post("/api/fs/write", { path, content: editor.state.doc.toString() }, node);
+      await post("/api/fs/write", { path, content: savedDocument.toString() });
       if (!current()) return;
-      setDirty(false);
+      setDirty(editor.state.doc !== savedDocument);
       setSavedAt(Date.now());
     } catch (err) {
       if (current()) setError(String(err instanceof Error ? err.message : err));
     } finally {
+      savingRef.current = false;
       if (current()) setSaving(false);
     }
-  }, [path, node]);
+  }, [path]);
 
   useEffect(() => {
     setState("loading"); setError(""); setLoadedPath(""); setDirty(false); setSavedAt(null); setSaving(false);
@@ -250,7 +309,7 @@ export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked
     let cancelled = false;
     (async () => {
       try {
-        const res = await api<{ content: string; size: number }>(`/api/fs/text?path=${encodeURIComponent(path)}`, { node });
+        const res = await api<{ content: string; size: number }>(`/api/fs/text?path=${encodeURIComponent(path)}`);
         if (cancelled) return;
         setLoadedPath(path);
         setSize(res.size);
@@ -293,7 +352,7 @@ export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked
         });
       } catch (err) {
         if (cancelled) return;
-        if (err instanceof ApiError && err.status === 401) return onLocked();
+        if (err instanceof ApiError && err.status === 401 && active.current) return lock.current();
         setLoadedPath(path);
         if (err instanceof ApiError && err.status === 415) setState("binary");
         else {
@@ -307,7 +366,9 @@ export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked
       view.current?.destroy();
       view.current = null;
     };
-  }, [path, node]);
+  }, [path, retry]);
+
+  const mediaError = (message: string) => { setLoadedPath(path); setState("error"); setError(message); };
 
   // Warn before closing with unsaved changes.
   useEffect(() => {
@@ -318,11 +379,11 @@ export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked
     return () => window.removeEventListener("beforeunload", onBefore);
   }, [dirty]);
 
-  if (!path) return <section className="p-6"><h1>Choose a file</h1><p className="mt-3">Open a file from Files to preview or edit it.</p><button className="mt-3 text-cyan-300" onClick={() => navigate("files")}>Open Files</button></section>;
+  if (!path) return <section className="p-6"><h1>Choose a file</h1><p className="mt-3">Open a file from Files to preview or edit it.</p><button className="mt-3 text-cyan-300" onClick={() => navigate("files", { node })}>Open Files</button></section>;
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-zinc-800 px-3 py-2 sm:px-4">
-        <button onClick={() => navigate("files", { path: dir, node: node || undefined })} className="rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">
+        <button onClick={() => navigate("files", { path: dir, node })} className="rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">
           ← {dir.split("/").pop() || "~"}
         </button>
         <div className="min-w-0 flex-1">
@@ -339,7 +400,7 @@ export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked
               {savedAt && !dirty ? " · saved" : ""}
             </span>
             <a
-              href={rawUrl("/api/fs/read", { path, download: "1" }, node)}
+              href={rawUrl("/api/fs/read", { path, download: "1" })}
               download={name}
               className="rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
             >
@@ -357,21 +418,21 @@ export function Editor({ params, onLocked }: { params: URLSearchParams; onLocked
         )}
       </div>
 
-      {loadedPath === path && error && <div role="alert" className="m-4 rounded-lg border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">{error}</div>}
+      {loadedPath === path && error && <div role="alert" className="m-4 rounded-lg border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">{error}{state === "error" && <button className="ml-3 underline" onClick={() => setRetry(n => n + 1)}>Retry preview</button>}</div>}
 
       {media === "image" && (
         <div className="flex flex-1 items-center justify-center overflow-auto p-8">
-          <img src={rawUrl("/api/fs/read", { path }, node)} alt={name} className="max-h-full max-w-full rounded-lg shadow-2xl" />
+          <img key={retry} src={rawUrl("/api/fs/read", { path })} alt={name} onError={() => mediaError("Image preview unavailable")} className="max-h-full max-w-full rounded-lg shadow-2xl" />
         </div>
       )}
-      {(media === "video" || media === "audio") && <MediaPlayer path={path} node={node} kind={media} />}
-      {media === "pdf" && <iframe src={rawUrl("/api/fs/read", { path }, node)} className="flex-1" title={name} />}
+      {(media === "video" || media === "audio") && <MediaPlayer key={retry} path={path} kind={media} node={node} visible={visible} client={client} onError={mediaError} />}
+      {media === "pdf" && <iframe key={retry} src={rawUrl("/api/fs/read", { path })} className="flex-1" title={name} />}
 
       {!media && state === "binary" && (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 text-zinc-500">
           <div className="text-4xl">📦</div>
           <div className="text-sm">Binary file — no text preview.</div>
-          <a href={rawUrl("/api/fs/read", { path, download: "1" }, node)} download={name} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">
+          <a href={rawUrl("/api/fs/read", { path, download: "1" })} download={name} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">
             Download
           </a>
         </div>

@@ -16,7 +16,7 @@ import { Agents } from "./views/Agents";
 import { Services } from "./views/Services";
 import { Data } from "./views/Data";
 import { Files } from "./views/Files";
-import { Editor } from "./views/Editor";
+import { EditorWorkspace } from "./views/Editor";
 import { Term } from "./views/Term";
 import { Cmux } from "./views/Cmux";
 import { TokenGate } from "./views/TokenGate";
@@ -107,7 +107,6 @@ export function App() {
       {route.view === "services" && <Services params={route.params} onLocked={lock} />}
       {route.view === "data" && <Data params={route.params} onLocked={lock} />}
       {route.view === "files" && <Files params={route.params} onLocked={lock} key={`files-${nodeId}`} />}
-      {route.view === "edit" && <Editor params={route.params} onLocked={lock} key={`edit-${nodeId}`} />}
       {route.view === "term" && <Term params={route.params} onLocked={lock} />}
       {route.view === "cmux" && <Cmux params={route.params} onLocked={lock} />}
       {route.view === "cloud" && <Cloud params={route.params} onLocked={lock} key={`cloud-${nodeId}`} />}
@@ -153,6 +152,7 @@ export function App() {
         </aside>
 
         <main className="min-w-0 flex-1 overflow-hidden">{view}
+          <EditorWorkspace params={route.params} visible={route.view === "edit"} onLocked={lock} />
           <RetainedView visible={route.view === "applications"} params={route.params}>{(params, visible) => <Applications params={params} visible={visible} onLocked={lock} />}</RetainedView>
           <RetainedView visible={route.view === "desk"} params={route.params}>{(params, visible) => <Desk params={params} visible={visible} onLocked={lock} />}</RetainedView></main>
       </div>
