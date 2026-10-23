@@ -304,7 +304,7 @@ function CaseworkCard() {
   );
 }
 
-export function Home({ onLocked }: { onLocked: () => void }) {
+export function Home({ params, onLocked }: { params: URLSearchParams; onLocked: () => void }) {
   const [info, setInfo] = useState<FleetInfo | null>(null);
   const [selfStatus, setSelfStatus] = useState<NodeStatus | null>(null);
   // Deck widgets: from this node, else the first peer with the checkout. undefined = not answered yet,
@@ -444,7 +444,7 @@ export function Home({ onLocked }: { onLocked: () => void }) {
           {dash && <span className="text-[10px] text-zinc-600">updated {fmtAgo(dash.at)}</span>}
         </div>
 
-        <NetworkMap />
+        <NetworkMap params={params} />
 
         <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="dashboard">
           {/* row 1: usage, backup */}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { updateParams, useRouteTitle } from "../lib/navigation";
 import { api, fmtAgo } from "../lib/api";
 import { NETWORK_INTERVAL, type NetworkNode, type NetworkSample, type NetworkSnapshot } from "../../src/shared/network";
 
@@ -6,14 +7,12 @@ const speed = (value: number | null | undefined) => value == null ? "—" : valu
 const pairKey = (a: string, b: string) => [a, b].sort().join(":");
 const fresh = (s?: NetworkSample) => !!s && Date.now() - s.at < NETWORK_INTERVAL;
 
-export function NetworkMap() {
+export function NetworkMap({ params }: { params: URLSearchParams }) {
   const [local, setLocal] = useState<NetworkSnapshot | null>(null);
   const [snapshots, setSnapshots] = useState<Record<string, NetworkSnapshot>>({});
   const [unavailable, setUnavailable] = useState<string[]>([]);
-  const [source, setSource] = useState("");
-  const [target, setTarget] = useState("");
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState<{ source: string; target: string; text: string } | null>(null);
   const [sending, setSending] = useState(false);
   const [retry, setRetry] = useState(0);
   useEffect(() => {
@@ -27,13 +26,12 @@ export function NetworkMap() {
         const peers = own.nodes.filter(n => n.id);
         const remote = await Promise.all(peers.map(async n => {
           try {
-            const s = await api<NetworkSnapshot>(`/api/nodes/${n.id}/proxy/network`, { signal: AbortSignal.timeout(8_000) });
+            const s = await api<NetworkSnapshot>(`/api/nodes/${encodeURIComponent(n.id!)}/proxy/network`, { signal: AbortSignal.timeout(8_000) });
             return Array.isArray(s.samples) && Array.isArray(s.nodes) ? [n.name, s] as const : null;
           } catch { return null; }
         }));
         if (canceled) return;
-        setLocal(own); setSource(s => s || own.source);
-        setTarget(t => t || own.nodes.find(n => n.name === "sentinel" && n.id)?.name || own.nodes.find(n => n.id)?.name || "");
+        setLocal(own);
         setSnapshots(Object.fromEntries([[own.source, own], ...remote.filter((s): s is readonly [string, NetworkSnapshot] => s !== null)]));
         setUnavailable(peers.filter((_, i) => !remote[i]).map(n => n.name));
         setError("");
@@ -52,12 +50,36 @@ export function NetworkMap() {
     if (!own) nodes.push({ ...n, id: null, local: false });
     else if (own.kind === "host" && n.kind !== "host") Object.assign(own, { kind: n.kind, services: n.services, roles: n.roles });
   }
+  // Endpoint selection is content, not a request to run a bandwidth test.
+  // Leave ordinary Home links short; once a pair is requested, spell out both
+  // endpoints so the same link means the same connection on another machine.
+  const explicit = params.has("networkFrom") || params.has("networkTo");
+  const requestedSource = params.get("networkFrom")?.trim() || "";
+  const requestedTarget = params.get("networkTo")?.trim() || "";
+  const source = requestedSource || local?.source || "";
+  const target = requestedTarget || local?.nodes.find(n => n.name === "sentinel" && n.name !== source && n.id)?.name
+    || local?.nodes.find(n => n.name !== source && n.id)?.name || "";
+  useEffect(() => {
+    if (!explicit || !local) return;
+    if (params.get("networkFrom") !== (source || null) || params.get("networkTo") !== (target || null))
+      updateParams({ networkFrom: source || null, networkTo: target || null }, "replace");
+  }, [explicit, local, source, target, params]);
+  const select = (from: string, to: string) => {
+    setNotice(null);
+    updateParams({ networkFrom: from || null, networkTo: to || null });
+  };
+  const missing = local && [source, target].filter(name => name && !nodes.some(n => n.name === name));
+  const invalidPair = !!source && source === target;
+  const pairError = missing && missing.length ? `Network host not found: ${[...new Set(missing)].join(", ")}`
+    : invalidPair ? "Choose two different network hosts" : "";
+  useRouteTitle(!explicit ? undefined : error ? "Network unavailable"
+    : pairError || `${source || "Choose source"} → ${target || "Choose target"} · Network`);
   const samples = Object.values(snapshots).flatMap(s => s.samples).sort((a, b) => b.at - a.at);
-  const selected = samples.find(s => pairKey(s.source, s.target) === pairKey(source, target));
+  const selected = !pairError ? samples.find(s => pairKey(s.source, s.target) === pairKey(source, target)) : undefined;
   const up = selected?.source === source ? selected?.uploadMbps : selected?.downloadMbps;
   const down = selected?.source === source ? selected?.downloadMbps : selected?.uploadMbps;
   const current = snapshots[source];
-  const destination = current?.nodes.find(n => n.name === target && n.id);
+  const destination = !pairError && current?.nodes.find(n => n.name === target && n.id);
   const sourceNode = nodes.find(n => n.name === source);
   const targetNode = nodes.find(n => n.name === target);
   const cooling = !!current?.samples.find(s => s.target === target && Date.now() - s.at < 60_000);
@@ -75,14 +97,14 @@ export function NetworkMap() {
   const healthy = [...links.values()].filter(l => fresh(l.sample) && !l.sample?.error).length;
 
   async function testNow() {
-    if (!destination || !sourceNode) return;
-    setSending(true); setNotice("");
+    if (!destination || !sourceNode || (!sourceNode.local && !sourceNode.id)) return;
+    setSending(true); setNotice(null);
     try {
-      const path = sourceNode.local ? "/api/network/test" : `/api/nodes/${sourceNode.id}/proxy/network/test`;
+      const path = sourceNode.local ? "/api/network/test" : `/api/nodes/${encodeURIComponent(sourceNode.id!)}/proxy/network/test`;
       await api(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ target: destination.id }) });
-      setNotice(`Testing ${source} ↔ ${target}. Results refresh automatically.`);
+      setNotice({ source, target, text: `Testing ${source} ↔ ${target}. Results refresh automatically.` });
       setRetry(r => r + 1);
-    } catch (e) { setNotice(e instanceof Error ? e.message : "Test failed"); }
+    } catch (e) { setNotice({ source, target, text: e instanceof Error ? e.message : "Test failed" }); }
     finally { setSending(false); }
   }
 
@@ -113,7 +135,7 @@ export function NetworkMap() {
                 const p = positions.get(n.name)!;
                 const active = n.name === source || n.name === target;
                 const reporting = !!snapshots[n.name];
-                return <g key={n.name} transform={`translate(${p.x},${p.y})`} role="button" tabIndex={0} aria-label={`Inspect ${n.name}`} aria-pressed={n.name === target} onClick={() => { if (n.name !== source) { setTarget(n.name); setNotice(""); } }} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (n.name !== source) setTarget(n.name); } }} className="network-host cursor-pointer">
+                return <g key={n.name} transform={`translate(${p.x},${p.y})`} role="button" tabIndex={0} aria-label={`Inspect ${n.name}`} aria-pressed={n.name === target} onClick={() => { if (n.name !== source) select(source, n.name); }} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (n.name !== source) select(source, n.name); } }} className="network-host cursor-pointer">
                   <rect x="-80" y="-25" width="160" height="55" rx="9" fill="#0b111c" stroke={active ? "#22d3ee" : "#283046"} strokeWidth={active ? 1.5 : 1}/>
                   <circle cx="-62" cy="-6" r="3" fill={reporting ? "#a3e635" : "#76819c"}/>
                   <text x="-51" y="-2" fill={active ? "#eef2fb" : "#bcc6dc"} fontSize="13">{n.name}</text>
@@ -128,17 +150,18 @@ export function NetworkMap() {
         <div className="border-t border-cyan-400/15 bg-zinc-950/50 p-4 lg:border-l lg:border-t-0">
           <div className="hud-label mb-3">Inspect a connection</div>
           <div className="grid grid-cols-2 gap-2">
-            <label className="text-[10px] text-zinc-500">From<select aria-label="Network source" className="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 p-2 text-xs text-zinc-200" value={source} onChange={e => { setSource(e.target.value); if (e.target.value === target) setTarget(source); setNotice(""); }}>{nodes.map(n => <option key={n.name}>{n.name}</option>)}</select></label>
-            <label className="text-[10px] text-zinc-500">To<select aria-label="Network target" className="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 p-2 text-xs text-zinc-200" value={target} onChange={e => { setTarget(e.target.value); setNotice(""); }}>{nodes.filter(n => n.name !== source).map(n => <option key={n.name}>{n.name}</option>)}</select></label>
+            <label className="text-[10px] text-zinc-500">From<select aria-label="Network source" className="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 p-2 text-xs text-zinc-200" value={source} onChange={e => select(e.target.value, e.target.value === target ? source : target)}>{!sourceNode && <option value={source}>{source || "Choose source"}</option>}{nodes.map(n => <option key={n.name}>{n.name}</option>)}</select></label>
+            <label className="text-[10px] text-zinc-500">To<select aria-label="Network target" className="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 p-2 text-xs text-zinc-200" value={target} onChange={e => select(source, e.target.value)}>{(!targetNode || invalidPair) && <option value={target}>{target || "Choose target"}</option>}{nodes.filter(n => n.name !== source).map(n => <option key={n.name}>{n.name}</option>)}</select></label>
           </div>
+          {pairError && <p role="alert" className="mt-3 text-xs text-amber-400">{pairError}. <button className="underline" onClick={() => updateParams({ networkFrom: null, networkTo: null })}>Clear selection</button></p>}
           <div className="mt-5 text-[10px] text-zinc-500">{source} → {target}</div><div className="mt-1 text-2xl tracking-tight text-sky-300">{speed(up)}</div>
           <div className="mt-3 flex justify-between text-xs"><span className="text-zinc-500">← reverse</span><span className="text-zinc-200">{speed(down)}</span></div>
           <div className="mt-2 flex justify-between text-xs"><span className="text-zinc-500">HTTP round trip</span><span className="text-zinc-200">{selected?.latencyMs == null ? "—" : `${selected.latencyMs.toFixed(1)} ms`}</span></div>
           <p className={`mt-3 text-[10px] ${!fresh(selected) || selected?.error ? "text-amber-400" : "text-zinc-500"}`} title={selected ? new Date(selected.at).toLocaleString() : undefined}>{selected ? `${fresh(selected) ? "Sample" : "Stale sample"} · ${fmtAgo(selected.at)}` : "No measurements yet"}</p>
           {selected?.error && <p className="mt-2 text-[10px] text-amber-400">{selected.error}</p>}
           {!destination && <p className="mt-3 text-[10px] text-zinc-400">{!current ? "Source telemetry unavailable. Update or reconnect its Cyberdeck daemon." : "These hosts are not paired. Connect their private Cyberdeck endpoints to enable direct tests."}</p>}
-          <button className="hud-chip neon mt-4 w-full py-2 disabled:opacity-40" disabled={!destination || testing || sending || cooling} onClick={() => void testNow()}>{sending || testing ? `Testing ${current?.running ?? target}…` : cooling ? "Retest available in a minute" : "Test connection ↗"}</button>
-          {notice && <p role="status" className="mt-2 text-[10px] text-zinc-400">{notice}</p>}
+          <button className="hud-chip neon mt-4 w-full py-2 disabled:opacity-40" disabled={!destination || !sourceNode || (!sourceNode.local && !sourceNode.id) || testing || sending || cooling} onClick={() => void testNow()}>{sending || testing ? `Testing ${current?.running ?? target}…` : cooling ? "Retest available in a minute" : "Test connection ↗"}</button>
+          {notice && notice.source === source && notice.target === target && <p role="status" className="mt-2 text-[10px] text-zinc-400">{notice.text}</p>}
           <div className="mt-5 border-t border-zinc-800 pt-3"><div className="hud-label">{target} / expected services</div><div className="mt-2 flex flex-wrap gap-1">{[...new Set(targetNode?.services.length ? targetNode.services : targetNode?.roles ?? [])].map(s => <span key={s} className="max-w-full break-all rounded border border-zinc-800 px-1.5 py-1 text-[9px] text-zinc-400">{s}</span>)}</div></div>
         </div>
       </div>
