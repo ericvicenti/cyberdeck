@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { canUseNativeN64, nativeRequest, prepareNativeRom, type NativeLibrary } from "../lib/vault-native";
 import { PlayerController } from "../lib/vault-controller";
+import { useRouteTitle } from "../lib/navigation";
 import { api, token } from "../lib/api";
 import { downloadGame } from "../lib/vault-download";
 import {
@@ -27,11 +28,16 @@ export function VaultPlayer({
   game,
   close,
   changed,
+  visible = true,
 }: {
   game: VaultGame;
   close: () => void;
   changed: () => void;
+  visible?: boolean;
 }) {
+  const active = useRef(visible);
+  active.current = visible;
+  useRouteTitle(visible ? `${game.title} · The Vault` : undefined);
   const dialog = useRef<HTMLDialogElement>(null),
     frame = useRef<HTMLIFrameElement>(null),
     input = useRef<HTMLInputElement>(null);
@@ -75,7 +81,6 @@ export function VaultPlayer({
     if (rom.name.toLowerCase().endsWith(".7z")) { setNativeLibrary(null); return; }
     const abort = new AbortController(); let alive = true, timer: ReturnType<typeof setInterval> | undefined;
     nativeStarting.current = true; setNativeLaunching(true); setStatus("Starting your game on this TV…");
-    document.documentElement.setAttribute("data-vault-playing", "");
     void (async () => {
       try {
         const latest = await nativeRequest<NativeLibrary>("", abort.signal);
@@ -95,8 +100,17 @@ export function VaultPlayer({
         if (alive) { setNativeLaunching(false); setError(e instanceof Error ? e.message : "The TV player couldn't start."); }
       }
     })();
-    return () => { alive = false; abort.abort(); clearInterval(timer); nativeStarting.current = false; document.documentElement.removeAttribute("data-vault-playing"); };
+    return () => { alive = false; abort.abort(); clearInterval(timer); nativeStarting.current = false; };
   }, [rom, nativeLibrary, generation]);
+  // Hiding a modal removes it from the browser's top layer, but keeps its
+  // iframe, save timer and native game owner alive. Hidden games cannot consume
+  // keyboard/controller events or steal focus from the newly selected view.
+  useEffect(() => {
+    if (visible) dialog.current?.showModal(); else dialog.current?.close();
+    if (visible && rom) document.documentElement.setAttribute("data-vault-playing", "");
+    else document.documentElement.removeAttribute("data-vault-playing");
+    return () => { document.documentElement.removeAttribute("data-vault-playing"); };
+  }, [visible, rom]);
   const [menu, setMenu] = useState(false), [hint, setHint] = useState(true);
   const menuRef = useRef(menu); menuRef.current = menu;
   const hintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -109,7 +123,7 @@ export function VaultPlayer({
   };
   const menuAction = useRef(showMenu); menuAction.current = showMenu;
   useEffect(() => {
-    if (!rom) return;
+    if (!rom || !visible) return;
     const controller = new PlayerController(); let raf = 0;
     const move = (by: number) => {
       const buttons = [...dialog.current!.querySelectorAll<HTMLButtonElement>(".vault-pause-panel button:not(:disabled), .vault-player-error button")];
@@ -134,17 +148,17 @@ export function VaultPlayer({
     window.addEventListener("fullscreenchange", fullscreen);
     window.addEventListener("keydown", key, true);
     return () => { cancelAnimationFrame(raf); clearTimeout(hintTimer.current); window.removeEventListener("keydown", key, true); window.removeEventListener("fullscreenchange", fullscreen); };
-  }, [rom]);
+  }, [rom, visible]);
   useEffect(() => {
-    if (error && rom) {
+    if (visible && error && rom) {
       if (nativeLibrary) { setMenu(true); menuRef.current = true; }
       else menuAction.current(true);
       requestAnimationFrame(() => dialog.current?.querySelector<HTMLButtonElement>(".vault-player-error button")?.focus());
     }
-  }, [error]);
+  }, [error, visible]);
   useEffect(() => {
-    if (menu) requestAnimationFrame(() => dialog.current?.querySelector<HTMLButtonElement>(".vault-pause-panel button:not(:disabled)")?.focus());
-  }, [menu]);
+    if (visible && menu) requestAnimationFrame(() => dialog.current?.querySelector<HTMLButtonElement>(".vault-pause-panel button:not(:disabled)")?.focus());
+  }, [menu, visible]);
   const core = PLAYER_SYSTEMS[game.system];
   const stateKey = (r: StoredRom) => `${core.core}:${r.digest}`;
   const post = (type: string, extra: Record<string, unknown> = {}) =>
@@ -169,8 +183,6 @@ export function VaultPlayer({
   const exitRef = useRef(exit);
   exitRef.current = exit;
   useEffect(() => {
-    const prior = document.activeElement as HTMLElement | null;
-    dialog.current?.showModal();
     let alive = true;
     getRom(game.id)
       .then((r) => {
@@ -194,7 +206,6 @@ export function VaultPlayer({
       transfer.current?.abort();
       transfer.current = null;
       dialog.current?.close();
-      prior?.focus();
     };
   }, [game.id]);
   useEffect(() => {
@@ -205,7 +216,6 @@ export function VaultPlayer({
     setStarted(false);
     setHasSave(false);
     setStatus("Loading the player…");
-    document.documentElement.setAttribute("data-vault-playing", "");
     let closingTimeout: ReturnType<typeof setTimeout> | undefined;
     const receive = async (event: MessageEvent) => {
       if (
@@ -239,8 +249,7 @@ export function VaultPlayer({
         );
       if (message.type === "started") {
         setStarted(true);
-        frame.current?.focus();
-        reveal();
+        if (active.current) { frame.current?.focus(); reveal(); }
         if (menuRef.current) post("pause", { paused: true });
         setStatus("Playing · Progress saves every 30 seconds");
       }
@@ -252,8 +261,8 @@ export function VaultPlayer({
         setError(message.message);
         exitPending.current = false;
       }
-      if (message.type === "menu-request") menuAction.current(!menuRef.current);
-      if (message.type === "pointer") reveal();
+      if (active.current && message.type === "menu-request") menuAction.current(!menuRef.current);
+      if (active.current && message.type === "pointer") reveal();
       if (message.type === "not-started" && message.closing) close();
       if (message.type === "state") {
         if (
@@ -296,7 +305,7 @@ export function VaultPlayer({
       }
     };
     window.addEventListener("message", receive);
-    const onExit = () => menuAction.current(true);
+    const onExit = () => { if (active.current) menuAction.current(true); };
     window.addEventListener("vault-player-exit", onExit);
     // Install the listener before the iframe begins its handshake.
     frame.current!.src = "/vault-player.html";
@@ -326,7 +335,7 @@ export function VaultPlayer({
       clearTimeout(closingTimeout);
       window.removeEventListener("message", receive);
       window.removeEventListener("vault-player-exit", onExit);
-      document.documentElement.removeAttribute("data-vault-playing");
+
     };
   }, [rom, generation, nativeLibrary]);
   const cancelDownload = () => {
@@ -418,7 +427,6 @@ export function VaultPlayer({
         e.preventDefault();
         if (rom) showMenu(!menu); else exit();
       }}
-      onClose={close}
     >
       <input
         ref={input}

@@ -1,5 +1,4 @@
 import { SteamVault } from "./Steam";
-import { VaultPlayer } from "./VaultPlayer";
 import { PLAYER_SYSTEMS } from "../../src/shared/vault-player";
 import { listRoms, type StoredRom } from "../lib/vault-storage";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
@@ -220,13 +219,15 @@ function Detail({
   close,
   saved,
   toggle,
-  play,
+  play, activeGame, resume,
 }: {
   game: VaultGame;
   close: () => void;
   saved: boolean;
   toggle: () => void;
   play: () => void;
+  activeGame: VaultGame | null;
+  resume: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -280,8 +281,9 @@ function Detail({
             {game.version && <span>Version {game.version}</span>}
           </div>
           <div className="vault-detail-buttons">
-            <button className="vault-primary" autoFocus disabled={!PLAYER_SYSTEMS[game.system]} onClick={play}>Play</button>
+            <button className="vault-primary" autoFocus disabled={!PLAYER_SYSTEMS[game.system] || !!activeGame} onClick={play}>Play</button>
           </div>
+          {activeGame && <p className="vault-detail-note">{activeGame.title} is still running. <button className="underline" onClick={resume}>Resume and exit it before starting another game</button>.</p>}
           {!PLAYER_SYSTEMS[game.system] && <p className="vault-detail-note">Playback for this console is not available yet.</p>}
 
         </div>
@@ -292,10 +294,13 @@ function Detail({
 
 export function Vault({
   params,
-  onLocked,
+  onLocked, play, playing, libraryVersion,
 }: {
   params: URLSearchParams;
   onLocked: () => void;
+  play: (game: VaultGame) => void;
+  playing: VaultGame | null;
+  libraryVersion: number;
 }) {
   const rawTab = params.get("tab") ?? "discover";
   const tab = ["discover", "consoles", "saved", "steam"].includes(rawTab)
@@ -318,13 +323,17 @@ export function Vault({
     ? params.get("game")!
     : "";
   const [steamSupported, setSteamSupported] = useState(false);
-  const [playing, setPlaying] = useState<VaultGame | null>(null);
   const launch = async (game: VaultGame) => {
+    if (playing && playing.id !== game.id) {
+      setSaveError(`Resume and exit ${playing.title} before starting another game.`);
+      return;
+    }
+    const requested = location.hash;
     // Finish entering the fullscreen top layer before opening the modal above it.
     if (!document.fullscreenElement) await document.documentElement.requestFullscreen?.().catch(() => {});
-    setPlaying(game);
-    setSelected(null);
-    updateParams({ game: null }, "replace");
+    if (location.hash !== requested) return;
+    play(game);
+    updateParams({ game: game.id }, "replace");
   };
   const [playLibrary, setPlayLibrary] = useState<StoredRom[]>([]);
   const refreshPlayLibrary = () => {
@@ -332,7 +341,7 @@ export function Vault({
       .then(setPlayLibrary)
       .catch(() => {});
   };
-  useEffect(refreshPlayLibrary, []);
+  useEffect(refreshPlayLibrary, [libraryVersion]);
   const [query, setQuery] = useState(q),
     [searchSystem, setSearchSystem] = useState(system);
   const [saved, setSaved] = useState(readList),
@@ -834,20 +843,13 @@ export function Vault({
           </a>
         </footer>
       </div>
+      {playing && requestedGame !== playing.id && <button className="fixed bottom-16 right-6 z-30 rounded-lg bg-lime-400 px-4 py-3 text-black" onClick={() => go({ game: playing.id })}>Resume {playing.title}</button>}
       {saveError && (
         <p role="alert" className="vault-save-error">
           {saveError}
         </p>
       )}
-      {playing && (
-        <VaultPlayer
-          key={playing.id}
-          game={playing}
-          close={() => setPlaying(null)}
-          changed={refreshPlayLibrary}
-        />
-      )}
-      {selected && (
+      {selected && selected.id !== playing?.id && (
         <Detail
           key={selected.id}
           game={selected}
@@ -855,6 +857,8 @@ export function Vault({
           saved={saved.some((g) => g.id === selected.id)}
           toggle={() => toggle(selected)}
           play={() => void launch(selected)}
+          activeGame={playing}
+          resume={() => playing && go({ game: playing.id })}
         />
       )}
       {requestedGame && detailReady && !selected && (
