@@ -17,7 +17,7 @@ import { seedConfig } from "../src/daemon/config";
 import { caseworkAllows } from "../src/daemon/api/casework";
 import { createVoiceRelay, secureCallUrl, agoText, hubUnreachable, HUB_DOWN_TTL_MS } from "../src/daemon/api/voice";
 import { Tailscale } from "../src/daemon/tailscale";
-import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME, fleetPrompt, RUNWATCH_TRIGGER_NAME, RUNWATCH_PROMPT, DIGEST_TRIGGER_NAME, DIGEST_SIGNER_LABEL, digestPrompt } from "../src/daemon/seed";
+import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME, checkinNoteStatus, fleetPrompt, RUNWATCH_TRIGGER_NAME, RUNWATCH_PROMPT, DIGEST_TRIGGER_NAME, DIGEST_SIGNER_LABEL, digestPrompt } from "../src/daemon/seed";
 import { testConfig, TEST_TOKEN, tmpHomeDir } from "./helpers";
 
 // Deterministic signer; the bridge builds the keypair from this instead of opening the Seed vault.
@@ -301,6 +301,8 @@ describe("seed config", () => {
     expect(caseworkAllows("POST", "/api/voice/livekit")).toBe(true);
     expect(caseworkAllows("GET", "/api/voice/status")).toBe(true);
     expect(caseworkAllows("GET", "/api/voice/transcript")).toBe(true);
+    expect(caseworkAllows("GET", "/api/voice/control")).toBe(true);
+    expect(caseworkAllows("POST", "/api/voice/control")).toBe(false);
     expect(caseworkAllows("POST", "/api/voice/session/reset")).toBe(true);
     expect(caseworkAllows("POST", "/api/voice/setup")).toBe(false);
     expect(caseworkAllows("POST", "/api/voice/dogfood")).toBe(false);
@@ -443,6 +445,32 @@ describe("configured node", () => {
     expect(none.profile).toMatchObject({ voice: "v-other", applied: false });
     expect(none.profile.error).toContain("no voice runtime token");
     expect(voiced.runtimeCalls.length).toBe(calls + 1);
+  });
+  test("control: the first poll is a baseline, listen notices arrive once, bad since is a 400", async () => {
+    const base = await (await req(a, KEY, "/api/voice/control")).json();
+    expect(base).toEqual({ now: expect.any(Number), controls: [] });
+    expect((await req(a, KEY, "/api/voice/control?since=soon")).status).toBe(400);
+    // What the `listen` MCP tool does on the hub: a control notice with a transcript line.
+    const bridge = new SeedBridge({ config: seedConfig({ seed: { agentsUrl: voiced.url } }), port: 4777, token: TEST_TOKEN, home: mkdtempSync(join(tmpdir(), "cd-seed-")) });
+    const n = bridge.control("mute");
+    expect(n).toMatchObject({ text: "Microphone muted at your request; unmute when you want me back.", control: { action: "mute" } });
+    expect(bridge.controls(base.now - 1).map((x) => x.control)).toEqual([{ action: "mute" }]);
+    expect(bridge.controls(n.at)).toEqual([]);
+    expect(bridge.controls(0, n.at - 1)).toEqual([]);
+    expect(bridge.notices(5).at(-1)?.control).toEqual({ action: "mute" });
+  });
+  test("checkinNoteStatus reads the inbox for the firing's day in the trigger's zone", () => {
+    const inbox = "# Inbox\n\n- 2026-10-22 (clipper) fleet check-in: 6/9 online\n- 2026-10-21 (yacht) fleet check-in: 6/9 up\n- 2026-10-23 (yacht) something else\n";
+    // 2026-10-23 07:00 Europe/Madrid (05:00Z): fired, no line that day.
+    const fired = Date.UTC(2026, 9, 23, 5, 0, 4);
+    expect(checkinNoteStatus(inbox, fired, "Europe/Madrid")).toEqual({ lastNoteDate: "2026-10-22", missedNote: true });
+    expect(checkinNoteStatus(inbox, Date.UTC(2026, 9, 22, 5, 0, 0), "Europe/Madrid")).toEqual({ lastNoteDate: "2026-10-22", missedNote: false });
+    // The firing's day is the trigger zone's: 22:30Z on the 22nd is already the 23rd in Madrid (no line yet), still the 22nd in UTC.
+    expect(checkinNoteStatus(inbox, Date.UTC(2026, 9, 22, 22, 30, 0), "Europe/Madrid")).toEqual({ lastNoteDate: "2026-10-22", missedNote: true });
+    expect(checkinNoteStatus(inbox, Date.UTC(2026, 9, 22, 22, 30, 0), "UTC")).toEqual({ lastNoteDate: "2026-10-22", missedNote: false });
+    expect(checkinNoteStatus(inbox, undefined)).toEqual({ lastNoteDate: "2026-10-22" });
+    expect(checkinNoteStatus(null, fired)).toEqual({ missedNote: true });
+    expect(checkinNoteStatus("", undefined)).toEqual({});
   });
   test("transcript returns user and assistant text only", async () => {
     const t = await (await req(a, KEY, "/api/voice/transcript?limit=5")).json();

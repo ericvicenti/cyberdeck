@@ -227,13 +227,14 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
   const hubMissing = (c: any): string | null => (deps.relay?.pinned && !c.req.header(DIRECT_HEADER) ? hubUnpaired(deps.relay.pinned) : null);
   // The peer did not answer (asleep, off the tailnet): voice is off here for now, and the answer says which hub,
   // since when, and that it comes back by itself. Shapes per route, so the Desk and the iPad read them like "not configured".
-  type OfflineKind = "config" | "action" | "status" | "transcript";
+  type OfflineKind = "config" | "action" | "status" | "transcript" | "control";
   const offline = (c: any, node: NodeRow, outage: HubOutage, kind: OfflineKind, local?: unknown) => {
     const reason = hubUnreachable(node, outage);
     const tail = { via: viaOf(node), hub: hubInfo(node, outage) };
     if (kind === "config") return c.json({ configured: false, provider: "none", engine: "seed", reason, ...tail });
     if (kind === "action") return c.json({ error: "voice hub unreachable", reason, ...tail }, 503);
     if (kind === "transcript") return c.json({ supported: true, messages: [], error: reason, ...tail }, 503);
+    if (kind === "control") return c.json({ now: Date.now(), controls: [], error: reason, ...tail }, 503);
     return c.json({ ...(local as object), configured: false, reason, ...tail, local });
   };
   // Forwards the request to the peer and returns its answer with `via` (and the peer's status code). A peer that does
@@ -331,6 +332,21 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
     if (missing) return c.json({ supported: true, messages: [], error: missing }, 503);
     try { return c.json(await bridge.transcript(Number.isFinite(limit) ? limit : 20)); }
     catch (e) { return c.json({ supported: true, messages: [], ...errorBody(e) }, errorStatus(e)); }
+  });
+
+  // What the agent asked of the live call through its `listen` tool (mute / unmute / hangup) since the client last
+  // asked: the Desk and the iPad poll this every few seconds while a call is up. Without `since` nothing is pending
+  // and the answer's `now` is the baseline for the next poll (the server's clock, so a skewed browser never misses one).
+  app.get("/api/voice/control", async (c) => {
+    const raw = c.req.query("since");
+    const node = await relayFor(c);
+    if (node) return relayed(c, node, `/api/voice/control${raw !== undefined ? `?since=${encodeURIComponent(raw)}` : ""}`, "control");
+    const missing = hubMissing(c);
+    if (missing) return c.json({ now: Date.now(), controls: [], error: missing }, 503);
+    const now = Date.now();
+    const since = raw === undefined ? now : Number(raw);
+    if (!Number.isFinite(since)) return c.json({ error: "since must be a Unix millisecond timestamp" }, 400);
+    return c.json({ now, controls: bridge.controls(since, now) });
   });
 
   // Daily fleet check-in schedule trigger on the agent (idempotent; a stale prompt is rewritten). Node token only.

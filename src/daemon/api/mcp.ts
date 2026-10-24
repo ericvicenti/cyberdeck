@@ -26,7 +26,7 @@ import { matchRepo, repoDetail, type RepoDetail } from "../repodetail";
 import { registerNodeTools } from "./mcp-node";
 import type { Kiosk } from "./kiosk";
 import { MEDIA_ACTIONS, mediaSentence, type MediaState } from "../screenmedia";
-import type { AnnounceInput, AnnounceResult, DelegateResult, DelegateStatus } from "../seed";
+import type { AnnounceInput, AnnounceResult, ControlAction, DelegateResult, DelegateStatus, Notice } from "../seed";
 
 export const MCP_PATH = "/api/mcp";
 export const MCP_SERVER_NAME = "cyberdeck";
@@ -51,7 +51,7 @@ you can say as-is). \`sessions_search\` finds a past cc/cx session and tells the
 \`collab_run\`, and read its result with \`run_log\`. When \`services\` shows something down, read
 \`service_logs\` first and say what you found; call \`services_restart\` only after the owner agrees. \`media\` reads and drives the fleet's screen (the kiosk TV running
 Afterglow): what is playing, play/pause/seek/volume, a search or a downloaded title put on the screen. \`todo_add\` / \`todo_done\` keep the handoff list current (confirm before removing), \`handoff_note\` records what you did on a host, and \`note\` drops a line into the owner's inbox that
-every agent reads at session start. All times are ISO 8601 or Unix milliseconds.
+every agent reads at session start. \`listen\` is the owner's voice control over the call itself: "stop listening" mutes the microphone (action mute), "listen again" unmutes, "that's all / hang up" ends the call (say goodbye first, then action hangup). All times are ISO 8601 or Unix milliseconds.
 
 On this node the server also carries the reach a terminal coding agent has: \`shell\` (a command through the owner's
 login shell on this node, or on another fleet host with \`host\`), \`read_file\`, \`write_file\`, \`edit_file\`, \`list_dir\`
@@ -71,6 +71,8 @@ export type McpDeps = {
   version: string;
   /** Leave a line on the Desk transcript (SeedBridge.announce); absent when this daemon has no bridge. */
   announce?: (input: AnnounceInput) => AnnounceResult;
+  /** The `listen` tool: mute / unmute the owner's microphone or leave the call, applied by the Desk and the iPad (`SeedBridge.control`). */
+  control?: (action: ControlAction) => Notice;
   /** Hand a task to the harness agent (SeedBridge.delegate); absent without a bridge. */
   delegate?: (task: string, title?: string) => Promise<DelegateResult>;
   /** Read a delegated session's newest answer (SeedBridge.delegateResult); absent without a bridge. */
@@ -559,6 +561,18 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
       const r = deps.announce({ text: line, title, status, runId, sessionId, summary });
       if (!r.announced) return spoken(`Not announced: ${r.reason ?? "nothing to say"}.`, { announced: false, reason: r.reason }, brief, { announced: false });
       return spoken(`Announced on the Desk: ${plain(r.notice!.text)}`, { announced: true, notice: r.notice }, brief, { announced: true, id: r.notice!.id });
+    }
+  );
+
+  server.tool(
+    "listen",
+    "Control the owner's microphone and the call from inside the conversation. Owner says stop listening, mute, be quiet, hold on: action mute (then stay silent until unmuted). Owner says you can listen again, unmute: action unmute. Owner says that's all, hang up, goodbye, end the call: say a short goodbye first, then action hangup, because nothing said after it is heard. The web Desk and the iPad apply it within a few seconds; the transcript shows a line saying so.",
+    { action: z.enum(["mute", "unmute", "hangup"]).describe("mute, unmute or hangup"), brief: BRIEF },
+    async ({ action, brief }) => {
+      if (!deps.control) return fail("This node has no Seed bridge to control the call through.");
+      const notice = deps.control(action);
+      const line = action === "mute" ? "Muted; I stop listening until you unmute." : action === "unmute" ? "Listening again." : "Ending the call.";
+      return spoken(line, { action, notice }, brief, { action, id: notice.id });
     }
   );
 

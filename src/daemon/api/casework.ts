@@ -80,7 +80,7 @@ export function caseworkAllows(method: string, path: string): boolean {
   if (path.startsWith("/api/media/")) return get || method === "PUT";
   if (path === "/api/command" || path === "/api/experiences/validate" || path === "/api/experiences/error" || path === "/api/casework/run") return post;
   // Voice: the app's AI call flow (docs/VOICE.md). Setup stays with the node token.
-  if (path === "/api/voice/config" || path === "/api/voice/status" || path === "/api/voice/transcript") return get;
+  if (path === "/api/voice/config" || path === "/api/voice/status" || path === "/api/voice/transcript" || path === "/api/voice/control") return get;
   if (path === "/api/voice/livekit" || path === "/api/voice/session/reset") return post;
   if (path === "/api/fleet/nodes") return get;
   if (path.startsWith("/api/control/")) {

@@ -50,13 +50,20 @@ export type SeedStatus = {
   profile?: VoiceProfile & { runtimeToken: boolean; source: string };
 };
 
-export type DogfoodStatus = { triggerId: string; name: string; enabled: boolean; lastFiredAt?: number; lastError?: string; nextSummary?: string };
+export type DogfoodStatus = { triggerId: string; name: string; enabled: boolean; lastFiredAt?: number; lastError?: string; nextSummary?: string;
+  /** Check-in only: the date (YYYY-MM-DD) of the newest `fleet check-in` line in the Deck inbox, and whether the last firing left none. */
+  lastNoteDate?: string; missedNote?: boolean };
 export type DogfoodOptions = { timezone?: string; timeOfDay?: string };
 export type DigestOptions = DogfoodOptions & { dayOfWeek?: number };
 /** The digest trigger plus where it publishes: `account` is the signing identity's hm account, `signer` its secret name on the agents server, `url` the public listing. */
 export type DigestStatus = DogfoodStatus & { account?: string; signer?: string; url?: string };
 /** A line left for the owner on the Desk transcript without a call: the `announce` MCP tool writes one, the run-completed trigger drives it. */
-export type Notice = { id: string; at: number; text: string; run?: { id?: string; title?: string; status?: string; sessionId?: string } };
+export type Notice = { id: string; at: number; text: string; run?: { id?: string; title?: string; status?: string; sessionId?: string };
+  /** A `listen` tool call: the Desk and the iPad apply it to the live call (mute / unmute the mic, or leave). */
+  control?: { action: ControlAction } };
+/** What the agent may do to the owner's microphone and call through the `listen` MCP tool. */
+export type ControlAction = "mute" | "unmute" | "hangup";
+export const CONTROL_ACTIONS: readonly ControlAction[] = ["mute", "unmute", "hangup"];
 export type AnnounceInput = { text?: string; title?: string; status?: string; runId?: string; sessionId?: string; /** The run's answer, appended to a composed line (`delegateResult`). */ summary?: string };
 /** A task handed to the harness agent (`delegate`): the session the answer lands in. */
 export type DelegateResult = { sessionId: string; title: string; agentId: string };
@@ -109,7 +116,7 @@ const VOICE_ID_RE = /^[a-zA-Z0-9-]{1,100}$/;
 const MCP_SERVER_NAME = "cyberdeck";
 export const DOGFOOD_TRIGGER_NAME = "cyberdeck-fleet-checkin";
 export const DOGFOOD_PROMPT =
-  "Daily fleet check-in. Use your cyberdeck tools only (no guessing), always with brief: true: call cyberdeck__fleet_status, cyberdeck__services (probe: true), cyberdeck__repos (kind: 'unpushed') and cyberdeck__todo. Then call cyberdeck__note exactly once with ONE line under 400 characters in this shape: 'fleet check-in: <hosts up/down>, <services down or all up>, <repos with unpushed work>, <oldest TODO item worth attention>'. Nobody reads your final answer: the note is the only output of this run, and the run has failed if cyberdeck__note was not called. If a tool fails, say which in the note. Do not start any other work.";
+  "Daily fleet check-in. Make exactly these five tool calls, in this order, each with brief: true, and no other tool call: 1) cyberdeck__fleet_status, 2) cyberdeck__services with probe: true, 3) cyberdeck__repos with kind: 'unpushed', 4) cyberdeck__todo, 5) cyberdeck__note with text = ONE line under 400 characters in this shape: 'fleet check-in: <hosts up/down>, <services down or all up>, <repos with unpushed work>, <oldest TODO item worth attention>'. Do not look anything up further, do not read tool contracts, do not call todo again: write the note from what the four answers said, and if one of them failed say which inside the note. The note is the only output of this run and nobody reads your text answer, so answer with nothing once the note is written; the run has failed if cyberdeck__note was not called.";
 export const RUNWATCH_TRIGGER_NAME = "cyberdeck-run-completed";
 /** The fallback thread when the headless tool call cannot run: the agent relays the event to `announce` itself. */
 export const RUNWATCH_PROMPT =
@@ -126,6 +133,20 @@ export function digestUrl(account: string): string { return `https://hyper.media
  */
 export function digestPrompt(account: string): string {
   return `Weekly fleet digest. The document slug is today's date as YYYY-MM-DD (for example fleet-digest-2026-10-26). Use your cyberdeck tools only (no guessing): call cyberdeck__fleet_status, cyberdeck__services (probe: true), cyberdeck__repos (kind: 'unpushed') and cyberdeck__todo. Read hm://${account}/:directory and, if an earlier fleet-digest document exists, read the newest one so the new document can say what changed. Then read ~/tools/write/documents once and call write exactly once: address 'hm://${account}/fleet-digest-<date>', options {name: 'Fleet digest <date>'}, content = markdown under 3000 characters with the sections 'Hosts' (up and down, by name), 'Services' (down, or all up), 'Repos' (unpushed work by host), 'TODO' (the oldest items worth attention) and 'Since last week'. The document is public: never include tokens, keys, passwords, IP addresses or file paths. Then call cyberdeck__note exactly once with ONE line under 400 characters: 'fleet digest <date>: hm://${account}/fleet-digest-<date> - <one sentence>', and cyberdeck__announce exactly once with text 'Fleet digest <date> is published at hm://${account}/fleet-digest-<date>'. Nobody reads your final answer: the document, the note and the announcement are the only outputs of this run; if a tool fails, say which in the note. Do not start any other work.`;
+}
+/**
+ * Did the check-in's last firing leave its inbox line? The trigger runs in a fresh session and the note is its
+ * only output, so the Deck inbox (`notes/inbox.md`, lines `- YYYY-MM-DD (host) fleet check-in: …`) is the record.
+ * The firing's day is taken in the trigger's own timezone; a note dated that day or later means it landed.
+ */
+export function checkinNoteStatus(inbox: string | null, lastFiredAt: number | undefined, timezone = "Europe/Madrid"): { lastNoteDate?: string; missedNote?: boolean } {
+  const dates = inbox ? [...inbox.matchAll(/^-\s+(\d{4}-\d{2}-\d{2})\s+\([^)]*\)\s+fleet check-in:/gm)].map((m) => m[1]) : [];
+  const lastNoteDate = dates.length ? dates.reduce((a, b) => (b > a ? b : a)) : undefined;
+  if (!lastFiredAt) return lastNoteDate ? { lastNoteDate } : {};
+  let fired: string;
+  try { fired = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(lastFiredAt)); }
+  catch { fired = new Date(lastFiredAt).toISOString().slice(0, 10); }
+  return { ...(lastNoteDate ? { lastNoteDate } : {}), missedNote: !lastNoteDate || lastNoteDate < fired };
 }
 const NOTICES_MAX = 50;
 function clipText(text: string, max: number): string { return text.length > max ? `${text.slice(0, max - 1)}…` : text; }
@@ -196,6 +217,8 @@ Work from facts, not memory: call your cyberdeck tools before answering and neve
 Before anything that changes a machine or the shared handoff (restarting a service, queueing or starting a collab task, removing a handoff entry) say what you are about to do and wait for a yes. Reading status, logs, notes, repos and sessions needs no confirmation. Leave a trace: handoff_note for what you did on a host, note for something Eric should see later, todo_add for work someone has to pick up.
 
 Hand long jobs to the fleet agent instead of doing them in the call: anything that touches several machines or takes more than a few seconds (check every host and say what is down, probe all services, read the logs on three servers, compare the repos on two laptops). Call delegate with the task in full sentences and a short title, tell Eric you handed it off and that a line appears on the Desk when it is done, and go on with his next question. When he asks what it found, call delegate_result with that session id and read the answer; if it is still running, say so and offer to check again.
+
+Eric controls the call by voice too: "stop listening", "mute", "hold on" means call listen with action mute (then stay silent until he unmutes); "you can listen again" means unmute; "that's all", "hang up", "goodbye" means say a short goodbye first, then call listen with action hangup, because nothing after it is heard.
 
 When a tool fails, say which one and what it said, retry at most once, and offer the next step. When you do not know, say so plainly.`;
 
@@ -636,6 +659,23 @@ export class SeedBridge {
     return { announced: true, notice };
   }
 
+  /**
+   * The `listen` MCP tool: a control notice the live call acts on within a few seconds (the Desk and the iPad
+   * poll `/api/voice/control`), with a line in the transcript that says what happened and why.
+   */
+  control(action: ControlAction): Notice {
+    const text = action === "mute" ? "Microphone muted at your request; unmute when you want me back." : action === "unmute" ? "Microphone back on." : "Call ended at your request.";
+    const notice: Notice = { id: `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, at: Date.now(), text, control: { action } };
+    this.#state.notices = [...(this.#state.notices ?? []), notice].slice(-NOTICES_MAX);
+    this.#save();
+    return notice;
+  }
+
+  /** Control notices with `since < at <= now`, oldest first: what a live call that last asked at `since` still has to apply. */
+  controls(since: number, now = Date.now()): Notice[] {
+    return (this.#state.notices ?? []).filter((n) => n.control && n.at > since && n.at <= now);
+  }
+
   /** The newest notices, oldest first. */
   notices(limit = 20): Notice[] {
     const n = Math.max(1, Math.min(NOTICES_MAX, Math.floor(limit) || 20));
@@ -644,7 +684,14 @@ export class SeedBridge {
 
   #toDogfood(t: TriggerInfo): DogfoodStatus {
     const summary = scheduleSummary(t.source);
-    return { triggerId: t.id, name: t.name, enabled: t.enabled !== false, ...(t.lastFiredAt ? { lastFiredAt: t.lastFiredAt } : {}), ...(t.lastError ? { lastError: t.lastError } : {}), ...(summary ? { nextSummary: summary } : {}) };
+    const note = t.name === DOGFOOD_TRIGGER_NAME ? checkinNoteStatus(this.#inbox(), t.lastFiredAt, t.source?.schedule?.timezone) : {};
+    return { triggerId: t.id, name: t.name, enabled: t.enabled !== false, ...(t.lastFiredAt ? { lastFiredAt: t.lastFiredAt } : {}), ...(t.lastError ? { lastError: t.lastError } : {}), ...(summary ? { nextSummary: summary } : {}), ...note };
+  }
+
+  /** The Deck inbox on this node (the `note` tool writes it through `deck note`), or null without a Deck checkout. */
+  #inbox(): string | null {
+    if (!this.#fleetDir) return null;
+    try { return readFileSync(join(this.#fleetDir, "notes", "inbox.md"), "utf8"); } catch { return null; }
   }
 
   /**

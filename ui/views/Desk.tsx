@@ -114,6 +114,32 @@ export function Desk({ params, onLocked, visible = true }: { params: URLSearchPa
     const t = setInterval(() => { if (v.phase === "idle" && document.visibilityState === "visible") void loadHistory(); }, 20_000);
     return () => clearInterval(t);
   }, [v.config?.configured, v.config?.via?.node, v.phase]);
+  // A live call obeys the agent's `listen` tool: mute / unmute the mic or hang up, applied here within a few
+  // seconds. The first poll without `since` takes the server's clock as the baseline, so nothing from before the
+  // call (or a skewed browser clock) is replayed.
+  const voiceRef = useRef(v);
+  voiceRef.current = v;
+  useEffect(() => {
+    if (v.phase !== "live") return;
+    let since: number | undefined;
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const r = await api<{ now: number; controls?: { id: string; at: number; control?: { action?: string } }[] }>(since === undefined ? "/api/voice/control" : `/api/voice/control?since=${since}`);
+        if (stopped) return;
+        since = r.now;
+        const cur = voiceRef.current;
+        for (const n of r.controls ?? []) {
+          const a = n.control?.action;
+          if (a === "hangup") { cur.stop(); break; }
+          if ((a === "mute" && !cur.muted) || (a === "unmute" && cur.muted)) cur.toggleMute();
+        }
+      } catch { /* the next tick asks again */ }
+    };
+    void tick();
+    const t = setInterval(() => { void tick(); }, 3_000);
+    return () => { stopped = true; clearInterval(t); };
+  }, [v.phase]);
   // After a call ends, the session on the agents server holds the full exchange: reload it
   // and drop the live lines so nothing shows twice.
   useEffect(() => {

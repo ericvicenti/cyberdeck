@@ -211,6 +211,30 @@ function TalkTab({ json }: { json: <T,>(p: string, i?: RequestInit) => Promise<T
     });
   }, [log]);
 
+  // The agent's `listen` tool (stop listening / listen again / hang up) reaches the native call from here: while the
+  // call is up, ask the node every few seconds what it wants applied; the first answer's `now` is the baseline.
+  const controlSince = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (!active) { controlSince.current = undefined; return; }
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const since = controlSince.current;
+        const r = await json<{ now: number; controls?: { at: number; control?: { action?: string } }[] }>(since === undefined ? '/api/voice/control' : `/api/voice/control?since=${since}`);
+        if (stopped) return;
+        controlSince.current = r.now;
+        for (const n of r.controls ?? []) {
+          const a = n.control?.action;
+          if (a === 'hangup') { await run({ name: 'call.stop' }); break; }
+          if (a === 'mute' || a === 'unmute') await run({ name: 'call.mute', args: { muted: a === 'mute' } });
+        }
+      } catch { /* asked again on the next tick */ }
+    };
+    void tick();
+    const t = setInterval(() => { void tick(); }, 3000);
+    return () => { stopped = true; clearInterval(t); };
+  }, [active, json, run]);
+
   async function toggle() {
     if (toggling.current) return;
     toggling.current = true; setBusy(true); setError('');

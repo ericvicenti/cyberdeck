@@ -414,6 +414,20 @@ The iPad Talk tab (`casework/cyberdeck.tsx`) has the same two modes over the app
 Talk tab reads "TALK · LISTENING / THINKING / SPEAKING / MUTED / CONNECTING" with a matching LED from
 whatever tab is open, so a glance at the top of the screen says what the agent is doing.
 
+### Stop listening, by voice
+
+"Stop listening", "mute", "hold on", "that's all", "hang up" are things said to the agent, so the agent must
+be able to act on them: the `listen` MCP tool (`action: mute | unmute | hangup`) writes a *control notice*
+on the hub's bridge (`SeedBridge.control`, kept with the `announce` notices in seed.json, so the transcript
+also shows "Microphone muted at your request" / "Call ended at your request"). While a call is up the web
+Desk and the iPad Talk tab poll `GET /api/voice/control` every 3 s (relayed to the hub like the other voice
+routes; the pairing key may read it): the first poll, without `since`, returns the server's `now` as the
+baseline, every later poll passes it back and gets the control notices with `since < at <= now`, and the client
+applies them (`toggleMute` / `stop` on the Desk, `call.mute` / `call.stop` on the iPad). The companion's fleet
+persona tells it to say goodbye *before* `hangup`, because nothing after it is heard, and to stay silent after
+`mute` until unmuted. Tests: `tests/voice.test.ts` "control: …", `tests/mcp.test.ts` "write tools say what
+they did".
+
 ## The web Casework client is this Desk
 
 Decided 2026-10-15: the browser version of the Casework Desk is Cyberdeck's `#/desk`, not a web build of

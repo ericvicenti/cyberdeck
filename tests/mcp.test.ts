@@ -94,7 +94,7 @@ describe("mcp tools", () => {
     const client = await connect(srv.base);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["announce", "collab_add", "collab_run", "collab_tasks", "deck_context", "delegate", "delegate_result", "edit_file", "fleet_status", "grep", "handoff", "handoff_note", "hosts", "list_dir", "media", "note", "projects", "read_file", "repos", "repos_detail", "run_log", "scan", "service_logs", "services", "services_restart", "sessions", "sessions_search", "shell", "status", "todo", "todo_add", "todo_done", "write_file"]);
+    expect(names).toEqual(["announce", "collab_add", "collab_run", "collab_tasks", "deck_context", "delegate", "delegate_result", "edit_file", "fleet_status", "grep", "handoff", "handoff_note", "hosts", "list_dir", "listen", "media", "note", "projects", "read_file", "repos", "repos_detail", "run_log", "scan", "service_logs", "services", "services_restart", "sessions", "sessions_search", "shell", "status", "todo", "todo_add", "todo_done", "write_file"]);
     for (const t of tools) {
       expect(t.name).toMatch(/^[a-z0-9_]{1,40}$/);
       expect(t.description?.length ?? 0).toBeGreaterThan(20);
@@ -392,6 +392,12 @@ describe("mcp brief mode", () => {
     expect(sentence(await call(client, "todo_done", { match: "Demo", brief: true }))).toBe("Removed from the handoff list: 2026-10-07 Demo thing");
     expect(sentence(await call(client, "handoff_note", { host: "other", text: "checked", brief: true }))).toBe("Recorded on other's handoff note (handoff/other-seed.md).");
     expect(sentence(await call(client, "note", { text: "hello **there**", brief: true }))).toBe("Noted in the inbox: hello there");
+    // listen writes a control notice on this daemon's own Seed bridge; a live Desk or iPad call polls it.
+    const before = await (await fetch(`${srv.base}/api/voice/control`, { headers: { Authorization: `Bearer ${TEST_TOKEN}` } })).json();
+    expect(sentence(await call(client, "listen", { action: "mute", brief: true }))).toBe("Muted; I stop listening until you unmute.");
+    expect(parsed(await call(client, "listen", { action: "hangup" }))).toMatchObject({ action: "hangup", notice: { text: "Call ended at your request.", control: { action: "hangup" } } });
+    const pending = await (await fetch(`${srv.base}/api/voice/control?since=${before.now - 1}`, { headers: { Authorization: `Bearer ${TEST_TOKEN}` } })).json();
+    expect(pending.controls.map((n: any) => n.control.action)).toEqual(["mute", "hangup"]);
     // announce writes to this daemon's own Seed bridge (no agents server needed): the Desk transcript shows it.
     expect(sentence(await call(client, "announce", { title: "Check the **backups**", status: "succeeded", runId: "r1", sessionId: "s1", brief: true }))).toBe('Announced on the Desk: Done: "Check the backups" finished.');
     expect(parsed(await call(client, "announce", { text: "Enuc is back.", runId: "r2", sessionId: "s2" }))).toMatchObject({ announced: true, notice: { text: "Enuc is back.", run: { id: "r2", sessionId: "s2" } } });
