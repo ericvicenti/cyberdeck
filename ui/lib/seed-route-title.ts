@@ -10,6 +10,15 @@ export async function seedEntityTitle(client: SeedAgentsClient, route: SeedAgent
   if (route.key === "agent") {
     const { agent } = await client.send({ _: "GetAgent", agentId: route.agentId });
     const name = label(agent.definition.name, route.agentId);
+    if (route.memoryPath) {
+      // Resolve existence using the parent directory's metadata. Do not fetch a
+      // second copy of the selected file just to name a browser tab.
+      try {
+        const parent = route.memoryPath.slice(0, Math.max(0, route.memoryPath.lastIndexOf("/")));
+        const { entries } = await client.send({ _: "ListAgentMemoryDir", agentId: route.agentId, path: parent });
+        if (!entries.some(entry => entry.path === route.memoryPath && entry.type === "file")) return `Memory file not found · ${name} · Seed`;
+      } catch (error) { return failureTitle(error, route, "Memory file"); }
+    }
     const detail = route.memoryPath || (route.triggerId
       ? label((await client.send({ _: "GetAgentTrigger", triggerId: route.triggerId })).trigger.name, route.triggerId)
       : tabs[route.tab || "sessions"]);
@@ -25,9 +34,9 @@ export async function seedEntityTitle(client: SeedAgentsClient, route: SeedAgent
   }
 }
 
-function failureTitle(error: unknown, route: SeedAgentsRoute): string {
+function failureTitle(error: unknown, route: SeedAgentsRoute, selectedEntity?: string): string {
   const status = (error as { status?: number })?.status;
-  const entity = route.key === "agent-session" ? "Session" : route.key === "agent-run" ? "Run" : route.key === "agent" && route.triggerId ? "Agent or trigger" : "Agent";
+  const entity = selectedEntity || (route.key === "agent-session" ? "Session" : route.key === "agent-run" ? "Run" : route.key === "agent" && route.triggerId ? "Agent or trigger" : "Agent");
   return status === 401 || status === 403 ? "Access denied · Seed"
     : `${entity} ${status === 404 ? "not found" : "unavailable"} · Seed`;
 }

@@ -11,6 +11,7 @@ const actions: string[] = [], errors: string[] = [], unexpected: string[] = [];
 const pending = new Set<() => void>();
 let hold = false;
 let renamed = "";
+let memoryRemoved = false;
 const readActions = new Set(["ListAgents","GetAgent","GetSession","GetRun","GetAgentTrigger","ListSessions","ListRuns","ListAgentTriggers","ListAgentMemoryDir","ReadAgentMemoryFile","ListAgentTools","ListAgentCollaborators","ListAgentInvites","ListModelProviders","ListProviderModels","ListMcpServers","ListSigningIdentities","GetRunJournal"]);
 const ok = (value: unknown) => new Response(cbor.encode(value) as unknown as BodyInit,{headers:{"content-type":"application/cbor"}});
 const fail = (status: number, message: string) => new Response(cbor.encode({_:"Error",message}) as unknown as BodyInit,{status,headers:{"content-type":"application/cbor"}});
@@ -30,6 +31,12 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,async fetch(req,server) {
     if(id === "missing")return fail(404,"Entity not found");
     if(id === "denied")return fail(403,"Access denied");
     if(id === "offline")return fail(503,"Fixture unavailable");
+    if (action._ === "ListAgentMemoryDir") {
+      if (hold && action.path === "slow") await new Promise<void>(r=>pending.add(r));
+      if (action.path === "denied") return fail(403,"Memory access denied");
+      if (action.path === "offline") return fail(503,"Memory unavailable");
+      if (action.path === "missing-dir") return fail(404,"Memory directory not found");
+    }
     switch(action._){
       case "GetAgent":return ok({_:"GetAgentResponse",agent:agent(id,node),sessionCount:0});
       case "GetSession":return ok({_:"GetSessionResponse",session:session(id,node),events:[],systemPromptMarkdown:""});
@@ -39,8 +46,8 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,async fetch(req,server) {
       case "ListSessions":return ok({_:"ListSessionsResponse",sessions:[session("one",node),session("two",node)]});
       case "ListRuns":return ok({_:"ListRunsResponse",runs:[]});
       case "ListAgentTriggers":return ok({_:"ListAgentTriggersResponse",triggers:[]});
-      case "ListAgentMemoryDir":return ok({_:"ListAgentMemoryDirResponse",agentId:action.agentId,path:action.path||"",entries:[],entryCount:0});
-      case "ReadAgentMemoryFile":return ok({_:"ReadAgentMemoryFileResponse",agentId:action.agentId,path:action.path,content:"Fixture note"});
+      case "ListAgentMemoryDir":return ok({_:"ListAgentMemoryDirResponse",agentId:action.agentId,path:action.path||"",entries:memoryRemoved ? [] : [{path:"notes/today.md",type:"file",size:12,updatedAt:1},{path:"notes/folder",type:"dir",size:0,updatedAt:1}],totalBytes:12});
+      case "ReadAgentMemoryFile":return ok({_:"ReadAgentMemoryFileResponse",agentId:action.agentId,file:{path:action.path,size:12,updatedAt:1,encoding:"utf8",content:"Fixture note"}});
       case "ListAgentTools":return ok({_:"ListAgentToolsResponse",tools:[]});
       case "ListAgentCollaborators":return ok({_:"ListAgentCollaboratorsResponse",collaborators:[]});
       case "ListAgentInvites":return ok({_:"ListAgentInvitesResponse",invites:[]});
@@ -77,7 +84,7 @@ async function fresh(fn:(page:Page)=>Promise<void>){
  const page=await browser.newPage({viewport:{width:1280,height:900}});page.setDefaultTimeout(12000);page.on("pageerror",e=>errors.push(e.message));
  await page.route("**/*",route=>new URL(route.request().url()).origin===server.url.origin?route.continue():route.abort());
  try{await fn(page);}catch(e){console.error(JSON.stringify({title:await page.title(),body:(await page.locator("body").innerText()).slice(0,1800),errors,actions:actions.slice(-15)}));throw e;}
- finally{hold=false;renamed="";for(const release of pending)release();pending.clear();await page.close();}
+ finally{hold=false;renamed="";memoryRemoved=false;for(const release of pending)release();pending.clear();await page.close();}
 }
 const href=(path:string,node="")=>`${server.url}#/seed?${new URLSearchParams({r:path,...(node?{node}:{})})}`;
 const title=(page:Page,value:string)=>page.waitForFunction(value=>document.title===value,value);
@@ -153,4 +160,37 @@ test("Sessions Seed links use the embedded entity title and restore without crea
  await page.goBack();await title(page,"local First conversation · Seed session · Cyberdeck");
  await page.evaluate(()=>location.hash="#/term?session=seed-missing");await title(page,"Session not found · Seed · Cyberdeck");
  await page.getByTestId("nav-data").click();await title(page,"Data · Cyberdeck");
+}),30000);
+
+
+test("Seed nested memory metadata failures retain URLs and identify the missing file",()=>fresh(async page=>{
+ for(const [file,value] of [["notes/missing.md","Memory file not found · local Alpha assistant"],["missing-dir/file.md","Memory file not found"],["denied/file.md","Access denied"],["offline/file.md","Memory file unavailable"],["notes/folder","Memory file not found · local Alpha assistant"]]){
+  const url=href(`agent/alpha?tab=memory&file=${encodeURIComponent(file)}`);
+  await page.goto(url);await title(page,`${value} · Seed · Cyberdeck`);
+  expect(new URL(page.url()).hash).toBe(new URL(url).hash);
+  await page.reload();await title(page,`${value} · Seed · Cyberdeck`);
+ }
+ await page.getByTestId("nav-data").click();await title(page,"Data · Cyberdeck");
+}),30000);
+
+test("Seed memory deletion refreshes its title; history and fresh tabs restore a valid file",()=>fresh(async page=>{
+ const path="agent/alpha?tab=memory&file=notes%2Ftoday.md";
+ await page.goto(href(path));await title(page,"notes/today.md · local Alpha assistant · Seed · Cyberdeck");
+ const url=page.url(),length=await page.evaluate(()=>history.length);
+ memoryRemoved=true;await page.evaluate(()=>window.dispatchEvent(new Event("focus")));
+ await title(page,"Memory file not found · local Alpha assistant · Seed · Cyberdeck");
+ expect(page.url()).toBe(url);expect(await page.evaluate(()=>history.length)).toBe(length);
+ memoryRemoved=false;
+ await page.evaluate(()=>location.hash="#/seed?r=agent%2Fbeta%3Ftab%3Dsettings");await title(page,"Settings · local Beta assistant · Seed · Cyberdeck");
+ await page.goBack();await title(page,"notes/today.md · local Alpha assistant · Seed · Cyberdeck");
+ await fresh(async tab=>{await tab.goto(url);await title(tab,"notes/today.md · local Alpha assistant · Seed · Cyberdeck");});
+}),30000);
+
+test("A late memory-directory failure cannot rename another route or selected node",()=>fresh(async page=>{
+ hold=true;
+ await page.goto(href("agent/alpha?tab=memory&file=slow%2Ffile.md"));
+ while(!pending.size)await page.waitForTimeout(10);
+ await page.evaluate(()=>location.hash="#/seed?node=peer-b&r=agent%2Fbeta%3Ftab%3Dsettings");await title(page,"Settings · peer-b Beta assistant · Seed · Peer B · Cyberdeck");
+ for(const release of pending)release();pending.clear();await page.waitForTimeout(100);
+ expect(await page.title()).toBe("Settings · peer-b Beta assistant · Seed · Peer B · Cyberdeck");
 }),30000);

@@ -11,7 +11,7 @@ const origin=process.env.CYBERDECK_TEST_ORIGIN||"http://127.0.0.1:4777", host=pr
 const token=host?(()=>{const p=Bun.spawnSync(["ssh","-o","BatchMode=yes","-o","ConnectTimeout=10",host,"cat ~/.cyberdeck/token"]);if(p.exitCode)throw new Error("Cannot read host token");return p.stdout.toString().trim();})():readFileSync(join(homedir(),".cyberdeck/token"),"utf8").trim();
 if(!token)throw new Error("Empty credential");
 // Subscribe only reads the live event stream; it does not start an agent.
-const reads=new Set(["ListAgents","GetAgent","GetSession","GetRun","ListSessions","ListRuns","ListAgentTriggers","ListModelProviders","ListProviderModels","ListSigningIdentities","ListAgentInvites","ListAgentCollaborators","ListMcpServers","Subscribe"]);
+const reads=new Set(["ListAgents","GetAgent","GetSession","GetRun","ListSessions","ListRuns","ListAgentTriggers","ListModelProviders","ListProviderModels","ListSigningIdentities","ListAgentMemoryDir","ReadAgentMemoryFile","ListAgentInvites","ListAgentCollaborators","ListMcpServers","Subscribe"]);
 const browser=await chromium.launch(), context=await browser.newContext({viewport:{width:1360,height:1000}});
 const errors:string[]=[],blocked:string[]=[],passed:string[]=[],observed=new Set<string>();
 await context.addInitScript(value=>localStorage.setItem("cyberdeck-token",value),token);
@@ -76,6 +76,12 @@ try{
   const tab=await context.newPage();tab.on("pageerror",e=>errors.push(e.message));tab.setDefaultTimeout(25000);
   await tab.goto(url);await tab.waitForFunction(expected=>document.title===expected,expected);await tab.close();
   passed.push("reload and new tab");
+  stage="Missing memory file";
+  const memoryUrl=`${origin}/#/seed?${new URLSearchParams({r:path+"?tab=memory&file=__cyberdeck_navigation_missing_20261024__.md"})}`;
+  const missing=`${clean(`Memory file not found · ${agent.definition.name!.trim()} · Seed`)} · Cyberdeck`;
+  await page.goto(memoryUrl);await page.waitForFunction(expected=>document.title===expected,missing);
+  await page.reload();await page.waitForFunction(expected=>document.title===expected,missing);
+  passed.push("actual missing memory file title and reload");
   await page.getByTestId("nav-data").click();await page.waitForFunction(()=>document.title==="Data · Cyberdeck");
   passed.push("title cleanup");
   if(errors.length||blocked.length)throw new Error("Page error or attempted non-read action");

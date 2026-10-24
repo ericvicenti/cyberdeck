@@ -1,8 +1,8 @@
 # Cyberdeck navigation coverage
 
-Updated 2026-10-23. This is an implementation inventory, not a completion claim.
+Updated 2026-10-24. This is an implementation inventory, not a completion claim.
 The nightly routine and fleet deployment status live in Deck's
-`handoff/routines/cyberdeck-navigation/2026-10-23.md`.
+`handoff/routines/cyberdeck-navigation/2026-10-24.md`.
 
 ## Source and rollout status
 
@@ -58,7 +58,7 @@ credentials should not be replayed from a link.
 | App / api / navigation | primary view, node, not-found, auth, titles | Covered, including legacy `service`→`svc`, Steam app→Vault tab. More parameter validation and every error title remain. |
 | `fleet` / Home | local/fleet overview, node links; pairing and account/reset dialogs; NetworkMap selected endpoints | Overview and node links covered. `networkFrom` / `networkTo` identify an inspected connection by host name, independent of the serving node. Selections push once; partial/whitespace links replace canonical defaults; Back/Forward, reload and fresh tabs restore both endpoints. Unknown/same-host links keep honest errors and titles; unavailable telemetry retains the requested pair. Pairing/reset/benchmark actions remain explicit and never replay from links. |
 | `controls` / Controls | control diagram, bindings/editor, reset notice | Static route/title covered where installed. Binding changes are settings, not navigation. Keyboard/gamepad mode preferences remain local. |
-| `applications` / Applications | application id, Casework example, pairing dialog, reload | Id, unknown-id and unavailable-listing errors/titles covered; failed lookups retain the requested link instead of showing an ordinary app list. Pairing is an explicit operation. Visited generic iframe documents now survive primary-view, application and node navigation. Opt-in generic SPA navigation now restores root-relative child routes/titles via an origin/source/request-bound bridge and keeps one history owner. Noncooperating apps still require adoption; unsupported nested links report a restoration error. See `docs/EMBEDDED-NAVIGATION.md`. |
+| `applications` / Applications | application id, Casework example, pairing dialog, reload | Id, unknown-id and unavailable-listing errors/titles covered; failed lookups retain the requested link instead of showing an ordinary app list. Pairing is an explicit operation. Visited generic iframe documents now survive primary-view, application and node navigation. Opt-in generic SPA navigation now restores root-relative child routes/titles via an origin/source/request-bound bridge and keeps one history owner. Commander has a tested bridge integration (activation pending Starlight) for its main views, trainer tabs/inspectors/filters, workshop tabs/run inspection and community directory; its remaining nested states are listed below. Unsupported nested links in noncooperating apps report a restoration error. See `docs/EMBEDDED-NAVIGATION.md`. |
 | `applications?app=afterglow` / AfterglowFrame + BoticalMedia/public/navigation.js | child route, season/episode, search/filter, person dialog, music and YouTube state | Existing bridge retained: exact origin+source, parent-only history, route restoration, stable iframe, title cleanup. Browser regressions now prove document/timer continuity across primary views, other apps and node changes, plus hidden-message isolation and route/title restoration. A pending parent route rejects stale child acknowledgements. Missing, malformed and legacy child routes normalize with replace, preserving the iframe document and prior history. No production media is played by these checks. |
 | `applications?app=vimm` / Vault | tabs, system, query, letter, page; selected retro title modal | Covered. `game=<catalog-id>` restores a detail from its shelf/catalog/list context on fresh open, reload and history without starting playback. Invalid tab/system/query/letter/page/game values normalize; missing IDs retain an honest error/title. My list and ready-to-play metadata remain browser-local by design. |
 | VaultPlayer / vault download and storage | running emulator, ROM cache, save state, native N64 handoff, pause menu | Runtime session; do not replay Play/downloads from URL. Verify continuation across all relevant URL changes. Existing regression suites exercise generated fixture ROMs only. |
@@ -66,7 +66,7 @@ credentials should not be replayed from a link.
 | GamesSection / Games | installed native games and import form | Part of Applications. Play/import are actions; no automatic execution from links. |
 | CaseworkConsole | selected device, events, camera/media/QR, calls, native scene actions | Selected device is covered by `device=<id>`, including canonical default, reload/history, missing-device error/title and no action replay. Device IDs are serving-node-local. Media preview URL semantics and call/session lifecycle still pending. |
 | `applications?app=afterglow&tab=music` / Spotify (the listening room), SpotifyRecordings, SpotifyVisualizer | shelves, entities, query, pagination, recordings, immersive mode | One player everywhere, inside Afterglow: `shelf`, `id`, `q`, `radio`, `page`, `immersive` and `shelf=history&recording=<id>` restore through direct links, reload and history; OAuth returns to the requested content; no link starts playback; the SDK/player stays mounted through URL and primary-view changes. Legacy `#/spotify` links are rewritten. |
-| `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session, run, server, node | Nested route canonicalization, malformed/unknown path errors, route-based titles, Back/Forward and node-preserving new-window links covered. Backend, identity and server failures keep accurate titles across nested routes, reload and node transitions; late failures cannot retitle another node. Agent/tab/trigger names, memory paths, session titles (including untitled sessions) and run titles now resolve through authenticated read-only metadata on the selected node. Missing/access-denied/unavailable entities have matching titles. Route/host ownership rejects late responses; focus and 30-second visible-page refresh pick up renames. URL-supplied external servers retain route-based titles; remaining nested-file errors and lifecycle cases still need coverage. |
+| `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session, run, server, node | Nested route canonicalization, malformed/unknown path errors, route-based titles, Back/Forward and node-preserving new-window links covered. Backend, identity and server failures keep accurate titles across nested routes, reload and node transitions; late failures cannot retitle another node. Agent/tab/trigger names, memory paths, session titles (including untitled sessions) and run titles now resolve through authenticated read-only metadata on the selected node. Missing/access-denied/unavailable entities have matching titles. Route/host ownership rejects late responses; focus and 30-second visible-page refresh pick up renames. URL-supplied external servers retain route-based titles; memory-directory metadata now distinguishes missing files, directories, access denial and unavailable parents. File-content read failures after successful metadata and further lifecycle cases still need coverage. |
 | `desktop` / Desktop | selected node and connection | Primary route/title and URL-selected node covered; connect/input/credentials remain explicit runtime actions. |
 | `desk` / Desk + voice | Fleet/Services/Agents glance tab, voice call, transcript, setup, mute | `tab=services` / `tab=agents` restore from fresh links and history; default fleet ignores stale local preferences, invalid tabs replace to the default, and titles match. Tab transitions retain the voice subtree without reconnecting. Calls and permissions stay explicit. The call owner now stays mounted across primary views, node changes and screen-remote navigation. Voice requests stay on the serving daemon’s hub relay; idle configuration refreshes on return. Simulated live-room tests prove no disconnect/reconnect during navigation, release of push-to-talk when hidden, and disconnect on authentication lock. Real calls/microphones are not used by tests. |
 | `projects` / Projects | selected project, nested slug, unassigned repos, query | URL selection, canonical default, filter, title, missing project covered. Nested slugs use the same `p` key. Editing launches Files/Editor. |
@@ -142,7 +142,7 @@ this run commits only its own Network Map, Seed title and Sessions navigation ch
 Enuc, Iris, Sentinel, Botical and Clipper were captured before rebuilding; Starlight
 was offline. See the latest Deck report for measured rollout/verification results.
 
-Remaining: adoption of the generic embedded adapter by configured child apps; Seed titles for URL-supplied
+Remaining: the nested Commander states listed below; Seed titles for URL-supplied
 external servers and nested-file errors; the rest of the error/lifecycle matrix; reconciliation and verification of the
 previous lifecycle patches on main; and offline Starlight. This inventory is not an
 app-wide acceptance claim. Network URLs describe an inspection, never a test command.
@@ -182,3 +182,70 @@ Use `CYBERDECK_TEST_UI` for a captured installed-tree build. The adapter is opt-
 this does not claim Commander or arbitrary third-party apps adopted it. Afterglow's
 protocol and source remain unchanged. See `docs/EMBEDDED-NAVIGATION.md` for the
 child integration contract and the limitations of independent history writers.
+
+
+## 2026-10-24 Commander adoption and measured source state
+
+Commander has a tested implementation of the generic adapter for canonical query
+routes, title updates and parent-owned history. Starlight went offline during this
+run; client activation and live verification remain pending. Its child is shared by
+the fleet; updating its
+client assets does not require rebuilding Cyberdeck or restarting either service.
+The child waits for a trusted parent before mounting a default view. Opening an
+embedded trainer/replay link therefore does not initialize a game/account first.
+Trusted parent origins are an explicit build configuration, never a URL parameter.
+
+Covered child state: room invitations, replay and tactic-recording identifiers,
+replay run inspection, workshop tabs/run inspection, community source/kind/ladder/
+search/page, trainer tabs/matches/experiments/filter/search/limit/log worker.
+Errors have matching titles and retain requested identifiers. The live Commander
+seat/board and latest replay/recording owner survive internal view changes;
+hidden boards ignore game keys. Links never join, leave or issue game commands.
+
+Still open in Commander: selected workshop tactic/version and version-history
+panels, trainer decision/perspective, replay frame/perspective, remote generals.io
+invitation/session state, and the remaining nested error matrix. The adapter is
+implemented; this is not deployment confirmation, full child-view coverage or app-wide acceptance.
+
+`Commander/e2e/navigation.spec.ts` serves the actual built child and, when
+`CYBERDECK_UI` is supplied, this built parent with synthetic HTTP/Socket.IO data.
+Run `CYBERDECK_UI=/path/to/Cyberdeck/dist/ui bunx playwright test --config navigation.config.ts`
+in the Commander checkout. It covers direct/reload/new-tab links, canonicalization,
+Back/Forward, one-entry edits, rapid transitions, hidden sessions/playback, late
+metadata, wrong source/origin messages and authentication disposal. No production
+game or account is used by these fixtures.
+
+`CYBERDECK_TEST_ORIGIN=<loopback-tunnel> CYBERDECK_PARENT_ORIGIN=<trusted-private-origin> CYBERDECK_TEST_TOKEN_HOST=<ssh-alias> bun scripts/check-commander-navigation-live.ts`
+checks the installed Commander observatory through a real Cyberdeck parent. It
+blocks API writes and all game connections, uses only trainer reads, and confines
+the token to its parent origin. Omit the token host for Yacht. The separate generic
+fixture verifier and Afterglow suite remain unchanged.
+
+The October 24 capture found all seven hosts reachable. Yacht, Starlight, Enuc,
+Iris, Sentinel and Clipper had clean source at `37346df`; Botical retained sixteen
+source overlays at its own revision. Five of the clean hosts served the exact
+new main UI artifact. Earlier Editor/Vault/Casework retention overlays remain in
+this routine's October 19–21 worktrees and Botical, but are absent from those six
+clean source trees. Their reconciliation is still pending; do not infer their
+fleet-wide availability from older reports, or commit another session's work.
+This run preserves those snapshots and prepares separate builds for the clean-main
+and Botical sources. Its Cyberdeck overlay changes only `ui/lib/seed-route-title.ts`;
+old assets and source backups are retained, and services are not restarted.
+See the Deck run report for live verification, source fingerprints and backups.
+
+
+## 2026-10-24 Seed memory metadata errors
+
+Memory titles check the selected file against its parent directory metadata, with
+no second content download. Missing files/directories, directories used as files,
+denied access and unavailable metadata get honest titles while preserving the URL.
+Focus refresh detects deletion, and stale directory replies cannot rename another
+route, node or authentication screen. A successful metadata lookup followed by a
+file-content failure remains outside this title helper's coverage.
+
+`bun test tests/seed-titles-browser.test.ts tests/seed-navigation.test.ts --timeout 30000`
+covers these cases against the real published Seed UI and built Cyberdeck client,
+using synthetic metadata and signatures. `CYBERDECK_TEST_UI` selects an exact host
+build. `scripts/check-seed-titles-live.ts` verifies installed titles/history/reload
+with authenticated read-only metadata and a deliberately nonexistent file path;
+no agent, session, trigger or memory mutation is permitted.
