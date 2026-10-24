@@ -148,6 +148,17 @@ export function checkinNoteStatus(inbox: string | null, lastFiredAt: number | un
   catch { fired = new Date(lastFiredAt).toISOString().slice(0, 10); }
   return { ...(lastNoteDate ? { lastNoteDate } : {}), missedNote: !lastNoteDate || lastNoteDate < fired };
 }
+/**
+ * The plain text of a trigger prompt as the agents server returns it: the string we sent, or the
+ * `seed-prompt-blocks` document it was parsed into (paragraph blocks with `text`). Underscores and
+ * whitespace are dropped before comparing, because the block parser reads `__` as formatting.
+ */
+export function promptText(prompt: unknown): string {
+  if (typeof prompt === "string") return prompt;
+  const blocks = Array.isArray(prompt) ? prompt : prompt && typeof prompt === "object" && Array.isArray((prompt as any).blocks) ? (prompt as any).blocks : [];
+  return blocks.map((b: any) => (typeof b?.block?.text === "string" ? b.block.text : typeof b?.text === "string" ? b.text : "")).filter(Boolean).join("\n");
+}
+export const samePrompt = (a: unknown, b: unknown): boolean => promptText(a).replace(/[_\s]+/g, "") === promptText(b).replace(/[_\s]+/g, "");
 const NOTICES_MAX = 50;
 function clipText(text: string, max: number): string { return text.length > max ? `${text.slice(0, max - 1)}…` : text; }
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -709,8 +720,9 @@ export class SeedBridge {
     let trigger = existing;
     let created = false;
     let updated = false;
-    if (trigger && typeof trigger.prompt === "string" && trigger.prompt !== DOGFOOD_PROMPT) {
-      // The prompt ships with Cyberdeck: a trigger made by an older build gets the current wording.
+    if (trigger && !samePrompt(trigger.prompt, DOGFOOD_PROMPT)) {
+      // The prompt ships with Cyberdeck: a trigger made by an older build gets the current wording. The server
+      // hands the prompt back as parsed blocks, not the string we sent, so the comparison goes through the text.
       const res = await this.action<{ trigger?: TriggerInfo }>({ _: "UpdateAgentTrigger", triggerId: trigger.id, patch: { prompt: DOGFOOD_PROMPT } });
       trigger = { ...trigger, ...(res.trigger ?? {}), prompt: DOGFOOD_PROMPT };
       updated = true;

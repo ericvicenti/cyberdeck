@@ -17,7 +17,7 @@ import { seedConfig } from "../src/daemon/config";
 import { caseworkAllows } from "../src/daemon/api/casework";
 import { createVoiceRelay, secureCallUrl, agoText, hubUnreachable, HUB_DOWN_TTL_MS } from "../src/daemon/api/voice";
 import { Tailscale } from "../src/daemon/tailscale";
-import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME, checkinNoteStatus, fleetPrompt, RUNWATCH_TRIGGER_NAME, RUNWATCH_PROMPT, DIGEST_TRIGGER_NAME, DIGEST_SIGNER_LABEL, digestPrompt } from "../src/daemon/seed";
+import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME, checkinNoteStatus, fleetPrompt, promptText, samePrompt, RUNWATCH_TRIGGER_NAME, RUNWATCH_PROMPT, DIGEST_TRIGGER_NAME, DIGEST_SIGNER_LABEL, digestPrompt } from "../src/daemon/seed";
 import { testConfig, TEST_TOKEN, tmpHomeDir } from "./helpers";
 
 // Deterministic signer; the bridge builds the keypair from this instead of opening the Seed vault.
@@ -458,6 +458,15 @@ describe("configured node", () => {
     expect(bridge.controls(n.at)).toEqual([]);
     expect(bridge.controls(0, n.at - 1)).toEqual([]);
     expect(bridge.notices(5).at(-1)?.control).toEqual({ action: "mute" });
+  });
+  test("samePrompt sees through the agents server's prompt blocks", () => {
+    const blocks = { type: "seed-prompt-blocks", blocks: [{ block: { type: "Paragraph", id: "x", text: "Call cyberdeckfleetstatus, then  note." } }] };
+    expect(promptText(blocks)).toBe("Call cyberdeckfleetstatus, then  note.");
+    expect(promptText("plain")).toBe("plain");
+    expect(promptText(undefined)).toBe("");
+    expect(samePrompt(blocks, "Call cyberdeck__fleet_status, then note.")).toBe(true);
+    expect(samePrompt(blocks, "Call cyberdeck__fleet_status, then todo.")).toBe(false);
+    expect(samePrompt(undefined, DOGFOOD_PROMPT)).toBe(false);
   });
   test("checkinNoteStatus reads the inbox for the firing's day in the trigger's zone", () => {
     const inbox = "# Inbox\n\n- 2026-10-22 (clipper) fleet check-in: 6/9 online\n- 2026-10-21 (yacht) fleet check-in: 6/9 up\n- 2026-10-23 (yacht) something else\n";
