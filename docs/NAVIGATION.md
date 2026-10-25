@@ -1,8 +1,8 @@
 # Cyberdeck navigation coverage
 
-Updated 2026-10-24. This is an implementation inventory, not a completion claim.
+Updated 2026-10-25. This is an implementation inventory, not a completion claim.
 The nightly routine and fleet deployment status live in Deck's
-`handoff/routines/cyberdeck-navigation/2026-10-24.md`.
+`handoff/routines/cyberdeck-navigation/2026-10-25.md`.
 
 ## Source and rollout status
 
@@ -13,6 +13,8 @@ history writer, including replace notifications and node-preserving new-window
 links; malformed and unknown nested paths render a not-found view. Services and
 cmux now distinguish missing selections from ordinary content. Native keyboard
 Enter/save events reach React and editors; the TV runtime is on main.
+The October 19–21 Editor, Vault player and Casework continuity work is now
+reconciled into current main with its production-bundle browser tests.
 
 ## URL contract
 
@@ -61,10 +63,10 @@ credentials should not be replayed from a link.
 | `applications` / Applications | application id, Casework example, pairing dialog, reload | Id, unknown-id and unavailable-listing errors/titles covered; failed lookups retain the requested link instead of showing an ordinary app list. Pairing is an explicit operation. Visited generic iframe documents now survive primary-view, application and node navigation. Opt-in generic SPA navigation now restores root-relative child routes/titles via an origin/source/request-bound bridge and keeps one history owner. Commander has a tested bridge integration (activation pending Starlight) for its main views, trainer tabs/inspectors/filters, workshop tabs/run inspection and community directory; its remaining nested states are listed below. Unsupported nested links in noncooperating apps report a restoration error. See `docs/EMBEDDED-NAVIGATION.md`. |
 | `applications?app=afterglow` / AfterglowFrame + BoticalMedia/public/navigation.js | child route, season/episode, search/filter, person dialog, music and YouTube state | Existing bridge retained: exact origin+source, parent-only history, route restoration, stable iframe, title cleanup. Browser regressions now prove document/timer continuity across primary views, other apps and node changes, plus hidden-message isolation and route/title restoration. A pending parent route rejects stale child acknowledgements. Missing, malformed and legacy child routes normalize with replace, preserving the iframe document and prior history. No production media is played by these checks. |
 | `applications?app=vimm` / Vault | tabs, system, query, letter, page; selected retro title modal | Covered. `game=<catalog-id>` restores a detail from its shelf/catalog/list context on fresh open, reload and history without starting playback. Invalid tab/system/query/letter/page/game values normalize; missing IDs retain an honest error/title. My list and ready-to-play metadata remain browser-local by design. |
-| VaultPlayer / vault download and storage | running emulator, ROM cache, save state, native N64 handoff, pause menu | Runtime session; do not replay Play/downloads from URL. Verify continuation across all relevant URL changes. Existing regression suites exercise generated fixture ROMs only. |
+| VaultPlayer / vault download and storage | running emulator, ROM cache, save state, native N64 handoff, pause menu | Play retains the selected game detail URL, while fresh links and reloads show details without starting or downloading a game. The owner survives app, primary-view, node and screen-remote navigation. Hidden games leave the modal top layer, release keyboard/controller handlers and cannot steal focus or titles. Resume returns to the existing core; explicit Save & exit completes it. Real NES homebrew fixtures prove continuity and responsive save/exit. Native N64/gamepad hardware remains unverified. |
 | SteamVault / Steam | selected game, PC tab, query; native install/game/session/cloud-save decisions | `steam=<id>` detail added, resolves from serving-node library, restores without Play. Game/cloud decision/quit remain runtime/confirmation actions. Keep background Steam/client/kiosk alive. |
 | GamesSection / Games | installed native games and import form | Part of Applications. Play/import are actions; no automatic execution from links. |
-| CaseworkConsole | selected device, events, camera/media/QR, calls, native scene actions | Selected device is covered by `device=<id>`, including canonical default, reload/history, missing-device error/title and no action replay. Device IDs are serving-node-local. Media preview URL semantics and call/session lifecycle still pending. |
+| CaseworkConsole | selected device, events, camera/media/QR, calls, native scene actions | Selected device is covered by `device=<id>`, including canonical default, reload/history, missing-device error/title and no action replay. Visited consoles retain their socket, calls and previews across apps, primary views, node URLs and history; lock tears them down. `media=<stored-name>` fetches only an existing authenticated upload: fresh open, reload and history never capture, upload or autoplay. Invalid, missing and denied previews have matching errors/titles. Tests use synthetic devices/tracks only. |
 | `applications?app=afterglow&tab=music` / Spotify (the listening room), SpotifyRecordings, SpotifyVisualizer | shelves, entities, query, pagination, recordings, immersive mode | One player everywhere, inside Afterglow: `shelf`, `id`, `q`, `radio`, `page`, `immersive` and `shelf=history&recording=<id>` restore through direct links, reload and history; OAuth returns to the requested content; no link starts playback; the SDK/player stays mounted through URL and primary-view changes. Legacy `#/spotify` links are rewritten. |
 | `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session, run, server, node | Nested route canonicalization, malformed/unknown path errors, route-based titles, Back/Forward and node-preserving new-window links covered. Backend, identity and server failures keep accurate titles across nested routes, reload and node transitions; late failures cannot retitle another node. Agent/tab/trigger names, memory paths, session titles (including untitled sessions) and run titles now resolve through authenticated read-only metadata on the selected node. Missing/access-denied/unavailable entities have matching titles. Route/host ownership rejects late responses; focus and 30-second visible-page refresh pick up renames. URL-supplied external servers retain route-based titles; memory-directory metadata now distinguishes missing files, directories, access denial and unavailable parents. File-content read failures after successful metadata and further lifecycle cases still need coverage. |
 | `desktop` / Desktop | selected node and connection | Primary route/title and URL-selected node covered; connect/input/credentials remain explicit runtime actions. |
@@ -74,7 +76,7 @@ credentials should not be replayed from a link.
 | `services` / Services | host and service focus | Existing URL parameters retained; legacy Home `service` links fixed centrally. Missing host/service selections and unavailable backend now have matching titles and visible errors. Start/restart/log commands remain explicit. |
 | `data` / Data | root filter, repo query | Covered. Scans are actions; table has a fixed 100-item cap, not a pageable UI. |
 | `files` / Files, TreeNode, dialogs | path, hidden files, sort/order, query, deep search, File Info modal | Covered, including stale listing/deep-search protection. Multi-selection, expanded tree folders, clipboard, rename/chmod/delete/import drafts stay transient; assess any desired navigable selection separately. Failed directory/info has a matching title. |
-| `edit` / Editor | file path, text/media/markdown, playlist; video transport mode, loop/shuffle | Path/title reconstruct content; empty paths and missing text have accurate views/titles. Loading and save results are scoped to the current file/editor, including rapid transitions; stale results cannot overwrite another file or clear its unsaved indicator. Media failure titles and preserving media/unsaved edits across primary-view changes remain; playback preferences stay runtime state. |
+| `edit` / Editor | file path, text/media/markdown, playlist; video transport mode, loop/shuffle | Path/title reconstruct content; empty paths and missing text have accurate views/titles. Documents are retained per node/path across files, primary views and history, preserving unsaved buffers, undo and media. Saves capture a revision and cannot clear later edits; duplicate saves are serialized. Requests and delayed media events stay bound to the original node. Hidden ended/error events cannot navigate or retitle another view. Explicit playlist selection pauses the old track; ordinary navigation leaves playback intact. Drafts remain in memory until tab close, refresh or lock. PDF-viewer errors and persisted playback position/preferences remain outside this slice. |
 | `term` / Term, TermPane, SeedPane, PromptBar | node/session, new-session form, cwd prefill; transcript pagination | `filter` selects the tab-strip machine (`self` = serving node, absent = every machine); `target` selects the New form destination independently of the underlying session node. Both restore on reload/new-tab/Back/Forward, and selecting a session retains its filter. Default selection waits for its owner and replaces once; offline/unknown nodes have distinct errors, delayed peers do not become false missing sessions. Seed session links use authenticated entity titles. Links never create a process. Daemon persistence covered in existing E2E. Transcript pagination/drafts and remaining backend errors remain. |
 | `cmux` / Cmux | surface, scrollback, creation form | Surface/scrollback URL/default/title covered. Polling screen response guarded. Workspace creation, input and desktop focus are explicit actions. Missing surfaces have a not-found state/title and never poll a nonexistent terminal. Backend unavailable has its own title. |
 | `cloud` / Cloud + RemoteBrowser | profile, target URL, archive query, provider+conversation | Covered. Remote URL/title state mirrors into the parent route after a request acknowledgement; initial profile state cannot overwrite direct links, redirects replace the requested URL, page/user navigation pushes once, and Back/Forward restores without remounting the persistent browser. The UI settles unacknowledged state for older daemons during rolling updates. Missing profiles, invalid target URLs and unavailable browsers show matching errors/titles before any browser socket is opened. |
@@ -87,11 +89,10 @@ credentials should not be replayed from a link.
 Build first: `bun run typecheck && bun run build`.
 Read-only real-browser fixtures:
 `bun test tests/navigation-browser.test.ts tests/afterglow-navigation.test.ts`.
-Steam/Vault fixture regressions:
-`bun test tests/steam-browser.test.ts tests/vimm-browser.test.ts`.
-Casework selected-device navigation is exercised by the kitchen-sink case in
-`bun test tests/e2e.test.ts` (this host may need a larger timeout while Seed
-development renderers are saturating the CPU).
+Editor, Vault and Casework continuity fixtures:
+`bun test tests/navigation-browser.test.ts tests/vault-navigation.test.ts tests/casework-navigation.test.ts --timeout 30000`.
+The Vault fixture uses generated original NES homebrew; Casework uses synthetic
+devices, tracks and uploads. Neither suite starts production media or actions.
 Real sandboxed daemon regression: `bun test tests/e2e.test.ts` (includes generated
 shell/files and isolates daemon home; does not control installed sessions).
 Cloud archive/browser history and rolling-protocol regressions are in
@@ -134,17 +135,14 @@ selection swaps, missing hosts, delayed responses, title cleanup and authenticat
 checks actual served routes in a separate browser and rejects all API writes. Omit the
 token host for local Yacht. It does not run a network benchmark or use a kiosk context.
 
-The October 19–21 runs left additional Editor/Vault/Casework lifecycle work in their
-isolated worktrees and installed overlays, still uncommitted. October 21 manifests
-confirm six installations; its unfinished report did not reflect that deployment,
-and its live check recorded failures. Preserve those overlays and their history;
-this run commits only its own Network Map, Seed title and Sessions navigation changes. The current installed trees on Yacht,
-Enuc, Iris, Sentinel, Botical and Clipper were captured before rebuilding; Starlight
-was offline. See the latest Deck report for measured rollout/verification results.
+The October 19–21 Editor/Vault/Casework lifecycle patches were recovered from the
+isolated worktrees, reconciled against current main, and reverified on 2026-10-25.
+Their older installed overlays and rollback history remain evidence only; current
+fleet availability is recorded in the latest Deck run report.
 
 Remaining: the nested Commander states listed below; Seed titles for URL-supplied
-external servers and nested-file errors; the rest of the error/lifecycle matrix; reconciliation and verification of the
-previous lifecycle patches on main; and offline Starlight. This inventory is not an
+external servers and nested-file errors; the rest of the error/lifecycle matrix;
+native/physical-device cases; and offline Starlight. This inventory is not an
 app-wide acceptance claim. Network URLs describe an inspection, never a test command.
 
 
@@ -225,13 +223,9 @@ The October 24 capture found all seven hosts reachable. Yacht, Starlight, Enuc,
 Iris, Sentinel and Clipper had clean source at `37346df`; Botical retained sixteen
 source overlays at its own revision. Five of the clean hosts served the exact
 new main UI artifact. Earlier Editor/Vault/Casework retention overlays remain in
-this routine's October 19–21 worktrees and Botical, but are absent from those six
-clean source trees. Their reconciliation is still pending; do not infer their
-fleet-wide availability from older reports, or commit another session's work.
-This run preserves those snapshots and prepares separate builds for the clean-main
-and Botical sources. Its Cyberdeck overlay changes only `ui/lib/seed-route-title.ts`;
-old assets and source backups are retained, and services are not restarted.
-See the Deck run report for live verification, source fingerprints and backups.
+the October 19–21 snapshots and Botical. Current main supersedes those exact owned
+hunks after the 2026-10-25 reconciliation; do not reapply an older whole overlay.
+See the Deck run reports for source fingerprints and rollback backups.
 
 
 ## 2026-10-24 Seed memory metadata errors

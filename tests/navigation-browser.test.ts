@@ -1,10 +1,14 @@
-import { afterAll, beforeAll, expect, test as bunTest } from "bun:test";
+import { afterAll, beforeAll, beforeEach, expect, test as bunTest } from "bun:test";
 import { chromium, type Browser, type Page } from "playwright";
 import { join } from "node:path";
 
 // Real production React bundle, deterministic read-only API. No fleet, process,
 // media, authentication service, or user data is changed by these tests.
 const test = (name: string, fn: () => Promise<void>) => bunTest(name, fn, 30000);
+const silence = new Uint8Array(44 + 16000 * 2);
+const wav = new DataView(silence.buffer);
+for (const [offset, text] of [[0,"RIFF"],[8,"WAVE"],[12,"fmt "],[36,"data"]] as const) for (let i=0;i<text.length;i++) silence[offset+i]=text.charCodeAt(i);
+wav.setUint32(4,silence.length-8,true);wav.setUint32(16,16,true);wav.setUint16(20,1,true);wav.setUint16(22,1,true);wav.setUint32(24,8000,true);wav.setUint32(28,16000,true);wav.setUint16(32,2,true);wav.setUint16(34,16,true);wav.setUint32(40,silence.length-44,true);
 const requests: string[] = [], mutations: string[] = [], errors: string[] = [];
 const browserSockets = new Set<any>();
 const browserMessages: any[] = [];
@@ -108,7 +112,13 @@ let visit = 0;
 async function go(route: string) { await page.goto(`${server.url}?visit=${++visit}#/${route}`); }
 async function title(value: string) { try { await page.waitForFunction(value => document.title === value, value); } catch (e) { throw new Error(`Expected title ${value}, got ${await page.title()}; errors=${errors.join("; ")}; hash=${await hash()}; bar=${await page.getByPlaceholder("https://").inputValue().catch(()=>"none")}; messages=${JSON.stringify(browserMessages.slice(-12))}`); } }
 async function settle() { await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))); }
-beforeAll(async () => { browser = await chromium.launch(); page = await browser.newPage({viewport:{width:1440,height:1000}}); page.setDefaultTimeout(15000); page.on("pageerror",e => errors.push(e.message)); });
+beforeAll(async () => { browser = await chromium.launch(); });
+beforeEach(async () => {
+  await page?.close();
+  page = await browser.newPage({viewport:{width:1440,height:1000}});
+  page.setDefaultTimeout(15000);
+  page.on("pageerror",e => errors.push(e.message));
+});
 afterAll(async () => { for (const release of deferred.values()) release(); await browser?.close(); server.stop(true); });
 
 test("primary views have titles and unknown routes render a useful error on fresh open", async () => {
@@ -515,30 +525,30 @@ test("Editor empty and failed links have honest titles, and another file clears 
   await go("edit?path=%2Fmissing.txt");await page.getByRole("alert").filter({hasText:"File not found"}).waitFor();await title("/missing.txt unavailable · Editor · Cyberdeck");
   await page.reload();await title("/missing.txt unavailable · Editor · Cyberdeck");
   await page.evaluate(()=>location.hash="#/edit?path=%2Fone.txt");
-  await page.locator(".cm-content").getByText("Text for /one.txt",{exact:true}).waitFor();
+  await page.locator(".cm-content:visible").getByText("Text for /one.txt",{exact:true}).waitFor();
   expect(await page.getByRole("alert").count()).toBe(0);await title("/one.txt · Editor · Cyberdeck");
-  await page.locator(".cm-content").fill("Unsaved first draft");expect(await page.getByTestId("save-btn").isEnabled()).toBe(true);
+  await page.locator(".cm-content:visible").fill("Unsaved first draft");expect(await page.locator('[data-testid="save-btn"]:visible').isEnabled()).toBe(true);
   await page.evaluate(()=>location.hash="#/edit?path=%2Ftwo.txt");
-  await page.locator(".cm-content").getByText("Text for /two.txt",{exact:true}).waitFor();
-  expect(await page.getByTestId("save-btn").isEnabled()).toBe(false);
+  await page.locator(".cm-content:visible").getByText("Text for /two.txt",{exact:true}).waitFor();
+  expect(await page.locator('[data-testid="save-btn"]:visible').isEnabled()).toBe(false);
   await page.evaluate(()=>location.hash="#/edit?path=%2Fbinary.bin");await page.getByText("Binary file — no text preview.").waitFor();
   expect(await page.getByRole("alert").count()).toBe(0);
 });
 
 test("late Editor loads and saves cannot overwrite another file or clear its unsaved indicator", async () => {
   await go("edit?path=%2Fslow.txt");while(!deferred.has("editor"))await page.waitForTimeout(10);
-  await page.evaluate(()=>location.hash="#/edit?path=%2Fone.txt");await page.locator(".cm-content").getByText("Text for /one.txt",{exact:true}).waitFor();
+  await page.evaluate(()=>location.hash="#/edit?path=%2Fone.txt");await page.locator(".cm-content:visible").getByText("Text for /one.txt",{exact:true}).waitFor();
   deferred.get("editor")!();deferred.delete("editor");await page.waitForTimeout(30);
-  expect(await page.locator(".cm-content").textContent()).toBe("Text for /one.txt");
+  expect(await page.locator(".cm-content:visible").textContent()).toBe("Text for /one.txt");
   let release: (() => void) | undefined;
   await page.route("**/api/fs/write",async route=>{await new Promise<void>(resolve=>release=resolve);await route.fulfill({json:{ok:true}});});
   try {
-    await page.locator(".cm-content").fill("First draft");await page.getByTestId("save-btn").click();
+    await page.locator(".cm-content:visible").fill("First draft");await page.locator('[data-testid="save-btn"]:visible').click();
     while(!release)await page.waitForTimeout(10);
-    await page.evaluate(()=>location.hash="#/edit?path=%2Ftwo.txt");await page.locator(".cm-content").getByText("Text for /two.txt",{exact:true}).waitFor();
-    await page.locator(".cm-content").fill("Second draft");release();await page.waitForTimeout(50);
-    expect(await page.locator(".cm-content").textContent()).toBe("Second draft");
-    expect(await page.getByTestId("save-btn").isEnabled()).toBe(true);await title("/two.txt · Editor · Cyberdeck");
+    await page.evaluate(()=>location.hash="#/edit?path=%2Ftwo.txt");await page.locator(".cm-content:visible").getByText("Text for /two.txt",{exact:true}).waitFor();
+    await page.locator(".cm-content:visible").fill("Second draft");release();await page.waitForTimeout(50);
+    expect(await page.locator(".cm-content:visible").textContent()).toBe("Second draft");
+    expect(await page.locator('[data-testid="save-btn"]:visible').isEnabled()).toBe(true);await title("/two.txt · Editor · Cyberdeck");
   } finally {release?.();await page.unroute("**/api/fs/write");}
 });
 
@@ -638,4 +648,84 @@ test("local session defaults remain usable when fleet metadata is unavailable", 
     await go("term");await title("Shell one · local · Sessions · Cyberdeck");
     expect(await param("session")).toBe("one");expect(await param("node")).toBe(null);expect(mutations).toEqual([]);
   } finally {await page.unroute("**/api/fleet/nodes");}
+});
+test("Editor preserves drafts and undo across files, primary views and nodes without cross-node saves", async () => {
+  await go("edit?path=%2Fone.txt&node=peer-a");
+  const editor = () => page.locator(".cm-content:visible");
+  await editor().getByText("Text for /one.txt",{exact:true}).waitFor();
+  await editor().fill("Peer A unsaved draft");
+  await editor().press("End"); await editor().press("!");
+  await page.getByTestId("nav-files").click(); await page.getByTestId("files-table").waitFor();
+  await title("Files · Cyberdeck");
+  await page.goBack(); await editor().getByText("Peer A unsaved draft!",{exact:true}).waitFor();
+  await editor().press(process.platform === "darwin" ? "Meta+z" : "Control+z");
+  expect(await editor().textContent()).toBe("Peer A unsaved draft");
+  await page.evaluate(()=>{const p=new URLSearchParams(location.hash.split("?")[1]);p.set("node","peer-b");location.hash=location.hash.split("?")[0]+"?"+p;});
+  await editor().getByText("Text for /one.txt",{exact:true}).waitFor();
+  await editor().fill("Peer B unsaved draft");
+  await page.goBack(); await editor().getByText("Peer A unsaved draft",{exact:true}).waitFor();
+  const writes: {url:string;content:string}[] = [];
+  await page.route("**/api/**/fs/write",async route=>{writes.push({url:new URL(route.request().url()).pathname,content:route.request().postDataJSON().content});await route.fulfill({json:{ok:true}});});
+  try {
+    await page.locator('[data-testid="save-btn"]:visible').click();
+    await page.waitForFunction(()=>document.querySelector<HTMLButtonElement>('[data-editor-document]:not([aria-hidden="true"]) [data-testid="save-btn"]')?.disabled);
+    expect(writes).toEqual([{url:"/api/nodes/peer-a/proxy/fs/write",content:"Peer A unsaved draft"}]);
+    await page.goForward();await editor().getByText("Peer B unsaved draft",{exact:true}).waitFor();
+    expect(await page.locator('[data-testid="save-btn"]:visible').isEnabled()).toBe(true);
+    const fresh=await browser.newPage();await fresh.goto(page.url());await fresh.locator(".cm-content").getByText("Text for /one.txt",{exact:true}).waitFor();
+    expect(await fresh.evaluate(()=>new URLSearchParams(location.hash.split("?")[1]).get("node"))).toBe("peer-b");await fresh.close();
+  } finally {await page.unroute("**/api/**/fs/write");}
+});
+
+test("Editor retains media through history and node changes; hidden ends and errors cannot navigate or retitle", async () => {
+  await page.route("**/api/**fs/read**",route=>route.fulfill({contentType:"audio/wav",body:Buffer.from(silence)}));
+  try {
+    await go("edit?path=%2Fone.wav&node=peer-a");
+    const audio=page.locator("audio");await audio.waitFor();
+    await audio.evaluate(async (element:HTMLAudioElement)=>{element.dataset.proof="retained";element.loop=true;await element.play();});
+    await page.getByTestId("nav-files").click();await page.getByTestId("files-table").waitFor();
+    await page.getByTestId("files-node").selectOption("peer-b");
+    const before=await hash();
+    await audio.evaluate(element=>{element.dispatchEvent(new Event("ended"));element.dispatchEvent(new Event("error"));});
+    await settle();expect(await hash()).toBe(before);await title("~ · Files · Peer B · Cyberdeck");
+    expect(await audio.getAttribute("src")).toContain("/api/nodes/peer-a/proxy/fs/read");
+    expect(await audio.evaluate((element:HTMLAudioElement)=>element.paused)).toBe(false);
+    await page.goBack();await page.goBack();
+    await page.locator("audio:visible").waitFor();expect(await audio.getAttribute("data-proof")).toBe("retained");
+    await title("/one.wav unavailable · Editor · Peer A · Cyberdeck");
+    await page.reload();await page.locator("audio:visible").waitFor();
+    expect(await audio.getAttribute("data-proof")).toBe(null);await title("/one.wav · Editor · Peer A · Cyberdeck");
+    expect(await param("node")).toBe("peer-a");
+  } finally {await page.unroute("**/api/**fs/read**");}
+});
+
+test("Editor saving captures a revision; later typing remains dirty and authentication disposes retained documents", async () => {
+  let release:(()=>void)|undefined;
+  await page.route("**/api/fs/write",async route=>{await new Promise<void>(r=>release=r);await route.fulfill({json:{ok:true}});});
+  try {
+    await go("edit?path=%2Fone.txt");await page.locator(".cm-content:visible").getByText("Text for /one.txt",{exact:true}).waitFor();
+    await page.locator(".cm-content:visible").fill("Saved revision");await page.locator('[data-testid="save-btn"]:visible').click();
+    while(!release)await page.waitForTimeout(10);
+    await page.locator(".cm-content:visible").fill("Newer unsaved revision");release();
+    await page.getByRole("button",{name:"Save ⌘S"}).waitFor();
+    expect(await page.locator('[data-testid="save-btn"]:visible').isEnabled()).toBe(true);
+    await page.route("**/api/fs/list**",route=>route.fulfill({status:401,json:{error:"Locked"}}));
+    await page.getByTestId("nav-files").click();await page.getByPlaceholder("access token").waitFor();
+    expect(await page.locator("[data-editor-document]").count()).toBe(0);await title("Locked · Cyberdeck");
+  } finally {release?.();await page.unroute("**/api/fs/write");await page.unroute("**/api/fs/list**");}
+});
+
+
+test("Editor playlist selection hands playback to one track while ordinary navigation preserves it", async () => {
+  await page.route("**/api/fs/list**", route => route.fulfill({json:{path:"/music",entries:[entry("one.wav"),entry("two.wav")]}}));
+  await page.route("**/api/fs/read**", route => route.fulfill({contentType:"audio/wav",body:Buffer.from(silence)}));
+  await go("edit?path=%2Fmusic%2Fone.wav");
+  const first = page.locator('audio[src*="one.wav"]');
+  await first.evaluate(async (audio:HTMLAudioElement) => { audio.loop=true; await audio.play(); });
+  await page.getByRole("button",{name:"2 two.wav",exact:false}).click();
+  await page.locator("audio:visible").evaluate(async (audio:HTMLAudioElement) => { audio.loop=true; await audio.play(); });
+  expect(await first.evaluate((audio:HTMLAudioElement)=>audio.paused)).toBe(true);
+  await page.getByTestId("nav-applications").click();
+  expect(await page.locator('audio[src*="two.wav"]').evaluate((audio:HTMLAudioElement)=>audio.paused)).toBe(false);
+  await page.goBack();expect(await page.locator('audio[src*="two.wav"]:visible').count()).toBe(1);
 });

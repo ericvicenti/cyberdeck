@@ -4,17 +4,22 @@ import { Spotify } from "./Spotify";
 import { AfterglowTabs } from "./AfterglowFrame";
 import { ApplicationFrames } from "./ApplicationFrames";
 import { Vault } from "./Vault";
+import { VaultPlayer } from "./VaultPlayer";
+import type { VaultGame } from "../../src/shared/vimm";
 import { pairingOrigin } from "../lib/pairing";
 import { useEffect, useState } from "react";
 import { api, ApiError, navigate } from "../lib/api";
 import { GamesSection } from "./Games";
-import { CaseworkConsole, inCasework, openNative, type CaseworkApp } from "./CaseworkConsole";
+import { inCasework, openNative, type CaseworkApp } from "./CaseworkConsole";
+import { CaseworkConsoles } from "./CaseworkConsoles";
 type Application = { id: string; name: string; description: string; url: string };
 /** The app Back returns from; its card takes focus again on the list. */
 let lastApp = "";
 /** `casework.apps` are the example apps that run natively in the Casework Desk app (the kitchen sink). */
 type Listing = { applications: Application[]; casework?: { apps: CaseworkApp[]; devices: { id: string }[]; kiosk: boolean } };
 export function Applications({ params, onLocked, visible = true }: { params: URLSearchParams; onLocked: () => void; visible?: boolean }) {
+  const [vaultGame, setVaultGame] = useState<VaultGame | null>(null);
+  const [vaultLibraryVersion, setVaultLibraryVersion] = useState(0);
   const [apps, setApps] = useState<Application[]>([]);
   const [casework, setCasework] = useState<Listing["casework"]>();
   const [error, setError] = useState("");
@@ -43,15 +48,9 @@ export function Applications({ params, onLocked, visible = true }: { params: URL
   if (!visible || music) return null;
   if (listingUnavailable) return <section className="p-6"><h1 className="text-xl">Applications unavailable</h1><p role="alert" className="my-3 text-red-300">{listingError}</p><p>The requested application could not be checked. Reload to try again.</p></section>;
   if (missing) return <section className="p-6"><h1 className="text-xl">Application not found</h1><p className="my-3">“{params.get("app")}” is not configured on this machine.</p><button onClick={() => navigate("applications")}>← Applications</button></section>;
-  if (params.get("app") === "vimm") return <Vault params={params} onLocked={onLocked} />;
-  if (params.get("app") === "steam") return <Vault params={new URLSearchParams("tab=steam")} onLocked={onLocked} />;
-  if (example) return <section className="flex h-full flex-col" aria-label={example.name}>
-    <div className="flex shrink-0 items-center gap-4 border-b border-zinc-800 px-4 py-2 text-sm">
-      <button data-tv-frame-back onClick={() => navigate("applications")} className="text-cyan-300">← Applications</button>
-      <strong>{example.name}</strong><span className="text-zinc-500">Casework example app</span>
-    </div>
-    <div className="min-h-0 flex-1"><CaseworkConsole app={example} params={params} onLocked={onLocked} /></div>
-  </section>;
+  if (params.get("app") === "vimm") return <Vault params={params} onLocked={onLocked} play={setVaultGame} playing={vaultGame} libraryVersion={vaultLibraryVersion} />;
+  if (params.get("app") === "steam") return <Vault params={new URLSearchParams("tab=steam")} onLocked={onLocked} play={setVaultGame} playing={vaultGame} libraryVersion={vaultLibraryVersion} />;
+  if (example) return null;
   if (app) return null;
   return <section className="h-full overflow-auto p-6"><h1 className="text-2xl font-semibold">Applications</h1><p className="mt-2 text-sm text-zinc-400">Your apps in Cyberdeck.</p><button className="mt-4 mr-3 rounded-lg border border-zinc-700 px-4 py-2 text-sm" onClick={() => navigate("controls")}>Controller & keyboard controls</button>
     <button className="mt-4 rounded-lg border border-cyan-700 px-4 py-2 text-sm text-cyan-300" onClick={pair}>Connect Casework remote</button>
@@ -70,6 +69,10 @@ export function Applications({ params, onLocked, visible = true }: { params: URL
   };
   const musicActive = visible && music;
   return <>{content()}
+    {vaultGame && <VaultPlayer key={vaultGame.id} game={vaultGame}
+      visible={visible && params.get("app") === "vimm" && params.get("game") === vaultGame.id}
+      close={() => setVaultGame(null)} changed={() => setVaultLibraryVersion(n => n + 1)} />}
+    <CaseworkConsoles app={example} params={params} visible={visible && !music} onLocked={onLocked} />
     {musicOpened && (
       <div className={musicActive ? "flex h-full flex-col" : "hidden"} inert={!musicActive} aria-hidden={!musicActive} data-testid="afterglow-music">
         <div className="flex shrink-0 items-center gap-4 border-b border-zinc-800 px-4 py-2 text-sm">
