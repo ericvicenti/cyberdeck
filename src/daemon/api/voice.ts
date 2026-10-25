@@ -20,6 +20,9 @@ export type VoiceDeps = {
   serveOrigin?: (port: number) => Promise<string | null>;
   /** The paired node that answers for voice when this daemon has none (createVoiceRelay). */
   relay?: VoiceRelay;
+  /** Further bridges from `seed.profiles` (a hosted agents server such as agent.hm), by name. A request with
+   *  `?profile=<name>` is answered by that bridge, on this node, never relayed. */
+  profiles?: Map<string, SeedBridge>;
 };
 
 /** Where a relayed answer came from. */
@@ -215,6 +218,15 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
     }, 5000).unref?.();
   }
 
+  // `?profile=<name>` picks a `seed.profiles` bridge: another agents server this node signs into itself, so the hub
+  // relay and the hub-missing answer do not apply. The default bridge otherwise.
+  type Pick = { bridge: SeedBridge; direct: boolean; error: null } | { bridge: null; direct: false; error: string };
+  const pick = (c: any): Pick => {
+    const name = c.req.query("profile");
+    if (!name) return { bridge, direct: false, error: null };
+    const b = deps.profiles?.get(name);
+    return b ? { bridge: b, direct: true, error: null } : { bridge: null, direct: false, error: `unknown seed profile "${name}" (config seed.profiles: ${[...(deps.profiles?.keys() ?? [])].join(", ") || "none"})` };
+  };
   // The peer that answers for this node: the pinned hub whatever the local bridge says, else (for a node
   // without a bridge) the discovered peer. Never when the caller asked this node directly.
   const relayFor = async (c: any): Promise<NodeRow | null> => {
@@ -273,14 +285,16 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
   });
 
   app.post("/api/voice/livekit", async (c) => {
-    const node = await relayFor(c);
+    const p = pick(c);
+    if (!p.bridge) return c.json({ error: p.error }, 404);
+    const node = p.direct ? null : await relayFor(c);
     if (node) return relayed(c, node, "/api/voice/livekit", "action", { method: "POST" });
-    const missing = hubMissing(c);
+    const missing = p.direct ? null : hubMissing(c);
     if (missing) return c.json({ error: "voice not configured", reason: missing }, 503);
-    const s = await bridge.status();
+    const s = await p.bridge.status();
     if (!s.configured) return c.json({ error: "voice not configured", reason: s.reason }, 503);
     try {
-      const v = await bridge.createVoiceSession();
+      const v = await p.bridge.createVoiceSession();
       const secureUrl = deps.serveOrigin ? await secureCallUrl(v.url, deps.serveOrigin) : null;
       return c.json(secureUrl ? { ...v, secureUrl } : v);
     } catch (e) {
@@ -291,7 +305,10 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
 
   // This node's own bridge; when a peer answers for it, the peer's status with `via` and this node's under `local`.
   app.get("/api/voice/status", async (c) => {
-    const s = await bridge.status();
+    const p = pick(c);
+    if (!p.bridge) return c.json({ error: p.error }, 404);
+    const s = await p.bridge.status();
+    if (p.direct) return c.json(s);
     const node = await relayFor(c);
     if (node) {
       const known = deps.relay?.outage();
@@ -316,21 +333,25 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
   // Body {room?}: a live call's room is switched to the new session too (the caller keeps talking).
   app.post("/api/voice/session/reset", async (c) => {
     const body = await c.req.json().catch(() => ({}));
-    const node = await relayFor(c);
+    const p = pick(c);
+    if (!p.bridge) return c.json({ error: p.error }, 404);
+    const node = p.direct ? null : await relayFor(c);
     if (node) return relayed(c, node, "/api/voice/session/reset", "action", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}) });
-    const missing = hubMissing(c);
+    const missing = p.direct ? null : hubMissing(c);
     if (missing) return c.json({ error: "voice not configured", reason: missing }, 503);
-    try { return c.json(await bridge.resetSession({ room: typeof body?.room === "string" ? body.room : undefined })); }
+    try { return c.json(await p.bridge.resetSession({ room: typeof body?.room === "string" ? body.room : undefined })); }
     catch (e) { return c.json(errorBody(e), errorStatus(e)); }
   });
 
   app.get("/api/voice/transcript", async (c) => {
     const limit = Number(c.req.query("limit") ?? 20);
-    const node = await relayFor(c);
+    const p = pick(c);
+    if (!p.bridge) return c.json({ error: p.error }, 404);
+    const node = p.direct ? null : await relayFor(c);
     if (node) return relayed(c, node, `/api/voice/transcript?limit=${Number.isFinite(limit) ? limit : 20}`, "transcript");
-    const missing = hubMissing(c);
+    const missing = p.direct ? null : hubMissing(c);
     if (missing) return c.json({ supported: true, messages: [], error: missing }, 503);
-    try { return c.json(await bridge.transcript(Number.isFinite(limit) ? limit : 20)); }
+    try { return c.json(await p.bridge.transcript(Number.isFinite(limit) ? limit : 20)); }
     catch (e) { return c.json({ supported: true, messages: [], ...errorBody(e) }, errorStatus(e)); }
   });
 
@@ -409,6 +430,16 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
     try { return c.json(await bridge.syncHarness({ voice: body?.voice === true, force: body?.force === true })); }
     catch (e) { console.error("seed: harness sync failed:", e instanceof Error ? e.message : e); return c.json(errorBody(e), errorStatus(e)); }
   });
+  // Every bridge of this node: the default first, then each `seed.profiles` entry, with where it points and whether it is set up.
+  app.get("/api/voice/profiles", async (c) => {
+    if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);
+    const all: [string | null, SeedBridge][] = [[null, bridge], ...[...(deps.profiles ?? [])]];
+    const profiles = await Promise.all(all.map(async ([name, b]) => {
+      const s = await b.status();
+      return { name, agentsUrl: s.agentsUrl, mcpUrl: s.mcpUrl, configured: s.configured, ...(s.reason ? { reason: s.reason } : {}), identity: s.identity, ...(s.agent ? { agent: s.agent } : {}), ...(s.sessionId ? { sessionId: s.sessionId } : {}), health: s.health ?? null, stateFile: b.stateFile };
+    }));
+    return c.json({ profiles });
+  });
   // Node identity and provider sign-in (machines without a Seed vault, docs/VOICE.md).
   app.post("/api/voice/keygen", async (c) => {
     if (!deps.isFullAuth(c)) return c.json({ error: "full authentication required" }, 403);
@@ -417,23 +448,29 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
     catch (e) { return c.json(errorBody(e), 500); }
   });
   app.get("/api/voice/providers", async (c) => {
-    try { return c.json({ providers: await bridge.providers() }); }
+    const p = pick(c);
+    if (!p.bridge) return c.json({ error: p.error }, 404);
+    try { return c.json({ providers: await p.bridge.providers() }); }
     catch (e) { return c.json(errorBody(e), errorStatus(e)); }
   });
   app.post("/api/voice/login", async (c) => {
     if (!deps.isFullAuth(c)) return c.json({ error: "full authentication required" }, 403);
     const body = await c.req.json().catch(() => ({}));
+    const p = pick(c);
+    if (!p.bridge) return c.json({ error: p.error }, 404);
     try {
-      if (typeof body?.code === "string" && body.code.trim()) return c.json(await bridge.loginSubmit(body.code, typeof body.loginId === "string" ? body.loginId : undefined));
-      if (body?.status === true) return c.json(await bridge.loginStatus(typeof body.loginId === "string" ? body.loginId : undefined));
-      return c.json(await bridge.loginStart(typeof body?.providerType === "string" ? body.providerType : undefined));
+      if (typeof body?.code === "string" && body.code.trim()) return c.json(await p.bridge.loginSubmit(body.code, typeof body.loginId === "string" ? body.loginId : undefined));
+      if (body?.status === true) return c.json(await p.bridge.loginStatus(typeof body.loginId === "string" ? body.loginId : undefined));
+      return c.json(await p.bridge.loginStart(typeof body?.providerType === "string" ? body.providerType : undefined));
     } catch (e) { return c.json(errorBody(e), errorStatus(e)); }
   });
   app.post("/api/voice/setup", async (c) => {
     if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);
     const body = await c.req.json().catch(() => ({}));
+    const p = pick(c);
+    if (!p.bridge) return c.json({ error: p.error }, 404);
     try {
-      return c.json(await bridge.setup({ fresh: body?.new === true || body?.fresh === true, adopt: body?.adopt !== false, name: typeof body?.name === "string" ? body.name : undefined }));
+      return c.json(await p.bridge.setup({ fresh: body?.new === true || body?.fresh === true, adopt: body?.adopt !== false, name: typeof body?.name === "string" ? body.name : undefined }));
     } catch (e) {
       console.error("voice: setup failed:", e instanceof Error ? e.message : e);
       return c.json(errorBody(e), errorStatus(e));

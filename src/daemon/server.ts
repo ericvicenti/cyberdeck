@@ -13,7 +13,7 @@ import { createBunWebSocket } from "hono/bun";
 import { serveStatic } from "hono/bun";
 import { join } from "path";
 import type { Database } from "bun:sqlite";
-import { saveConfigPatch, seedConfig, type CyberdeckConfig, voiceHub } from "./config";
+import { saveConfigPatch, seedConfig, seedProfileNames, type CyberdeckConfig, voiceHub } from "./config";
 import { getConnInfo } from "hono/bun";
 import { Tailscale, isLoopback, isTailscaleIp } from "./tailscale";
 import { bus } from "./events";
@@ -235,12 +235,18 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   // Seed agents bridge: voice calls from the Casework app / web Desk go to a Seed agent (docs/VOICE.md).
   const seedCfg = seedConfig(cfg);
   const seed = new SeedBridge({ config: seedCfg, port: cfg.port, token, home: opts.seed?.home, companionFile: opts.seed?.companionFile ?? seedCfg.companionFile, runtimeFile: opts.seed?.runtimeFile ?? seedCfg.runtimeFile, roots: cfg.roots, fleetDir: cfg.fleetDir, nodeTools: cfg.mcp?.nodeTools !== false });
+  // Further agents servers (`seed.profiles`, e.g. a hosted one): a bridge each, state in seed-<name>.json, reached with ?profile=<name>.
+  const seedProfiles = new Map<string, SeedBridge>();
+  for (const name of seedProfileNames(cfg)) {
+    const pc = seedConfig(cfg, process.env, name);
+    seedProfiles.set(name, new SeedBridge({ config: pc, port: cfg.port, token, home: opts.seed?.home, profile: name, companionFile: opts.seed?.companionFile ?? pc.companionFile, runtimeFile: opts.seed?.runtimeFile ?? pc.runtimeFile, roots: cfg.roots, fleetDir: cfg.fleetDir, nodeTools: cfg.mcp?.nodeTools !== false }));
+  }
   // Voice is centralized on the hub (config voice.hub): every voice route relays to that paired node. Without
   // a hub, a node without a bridge relays to the first paired node that has one.
   const voiceRelay = createVoiceRelay(() => db.query("SELECT id, name, url, token, added_at, last_seen FROM nodes ORDER BY last_seen DESC").all() as NodeRow[], undefined, { hub: voiceHub(cfg), self: cfg.nodeName });
   casework = registerCaseworkRoutes(app, { token, nodeName: cfg.nodeName, kiosk: cfg.kiosk?.enabled, upgradeWebSocket, isFullAuth, experiencesDir: opts.caseworkExperiencesDir, key: opts.caseworkKey, voice: () => voiceSummary(seed, voiceRelay), secureOrigin: () => ts.serveOrigin(cfg.port), seedBridge: cfg.casework });
   registerDesktopRoutes(app, cfg, upgradeWebSocket, isFullAuth);
-  registerVoiceRoutes(app, seed, { isFullAuth, serveOrigin: (port) => ts.serveOrigin(port), relay: voiceRelay });
+  registerVoiceRoutes(app, seed, { isFullAuth, serveOrigin: (port) => ts.serveOrigin(port), relay: voiceRelay, profiles: seedProfiles });
   // Seed's own agents UI in the browser: signing stays here, requests reach the agents server through us.
   registerSeedAgentsRoutes(app, seed, { token, upgradeWebSocket, isFullAuth, getNode: (id) => db.query("SELECT * FROM nodes WHERE id = ?").get(id) as import("./api/fleet").NodeRow | null });
   registerDashboardRoutes(app, db, cfg);

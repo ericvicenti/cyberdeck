@@ -183,7 +183,10 @@ The agents server has to be able to open a connection to the node:
   re-paired after a rotation. Funnel needs the `funnel` node attribute in the tailnet policy
   (yacht has it); the public DNS name only resolves while a funnel is on. Seed refuses to send a
   header to an agents server that is not on HTTPS, which is not a constraint here because the
-  hosted server is.
+  hosted server is. Registering it there is a Seed profile: `seed.profiles.prod = {agentsUrl:
+  "https://agentic.seed.hyper.media", mcpUrl: <the public url>}` in config.json, then `cyberdeck seed --profile
+  prod setup` creates the agent on the hosted server and points it at that url (docs/VOICE.md,
+  "Profiles").
 
 Alternatively run the agents server on the tailnet (the self-hosted option in Seed's
 `apps/agents.md`) and skip the public route altogether.

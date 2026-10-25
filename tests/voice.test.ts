@@ -13,7 +13,7 @@ import * as blobs from "@seed-hypermedia/client/blobs";
 import * as cbor from "@seed-hypermedia/client/cbor";
 import { initSchema } from "../src/daemon/db";
 import { createServer } from "../src/daemon/server";
-import { seedConfig } from "../src/daemon/config";
+import { seedConfig, seedProfileNames } from "../src/daemon/config";
 import { caseworkAllows } from "../src/daemon/api/casework";
 import { createVoiceRelay, secureCallUrl, agoText, hubUnreachable, HUB_DOWN_TTL_MS } from "../src/daemon/api/voice";
 import { Tailscale } from "../src/daemon/tailscale";
@@ -295,6 +295,36 @@ describe("seed config", () => {
     expect(seedConfig({ seed: { agentsUrl: "http://a:1/", identity: "" } }, env).identity).toBe("main");
     const over = seedConfig({ seed: { agentsUrl: "http://a:1" } }, { CYBERDECK_SEED_AGENTS_URL: "http://b:2", CYBERDECK_SEED_IDENTITY: "alt" } as NodeJS.ProcessEnv);
     expect(over).toMatchObject({ agentsUrl: "http://b:2", identity: "alt" });
+  });
+  test("profiles: a seed.profiles entry layers over the seed block, never takes the env, and keeps its own agent pointers", () => {
+    const cfg = { seed: { model: "gpt-6-sol", agentId: "default-agent", sessionId: "default-session", profiles: { prod: { agentsUrl: "https://agent.hm/", mcpUrl: " https://yacht.example.ts.net:8443/api/mcp " }, "Bad Name": { agentsUrl: "http://x" } } } };
+    const env = { CYBERDECK_SEED_AGENTS_URL: "http://env:2", CYBERDECK_SEED_MODEL: "gpt-6-astra" } as NodeJS.ProcessEnv;
+    expect(seedProfileNames(cfg)).toEqual(["prod"]);
+    const prod = seedConfig(cfg, env, "prod");
+    expect(prod).toMatchObject({ agentsUrl: "https://agent.hm", mcpUrl: "https://yacht.example.ts.net:8443/api/mcp", model: "gpt-6-sol", identity: "main" });
+    expect(prod.agentId).toBeUndefined();
+    expect(prod.sessionId).toBeUndefined();
+    expect((prod as any).profiles).toBeUndefined();
+    // The default bridge: env wins, and the profiles block is not part of its settings.
+    const def = seedConfig(cfg, env);
+    expect(def).toMatchObject({ agentsUrl: "http://env:2", model: "gpt-6-astra", agentId: "default-agent" });
+    expect((def as any).profiles).toBeUndefined();
+    expect(() => seedConfig(cfg, env, "nope")).toThrow(/unknown seed profile "nope".*prod/);
+    expect(() => seedConfig(cfg, env, "Bad Name")).toThrow(/unknown seed profile/);
+  });
+  test("profiles: setup refuses a remote agents server without a public MCP url before touching the network", async () => {
+    const fetchCalls: string[] = [];
+    const cfg = seedConfig({ seed: { profiles: { prod: { agentsUrl: "https://agent.hm" } } } }, {} as NodeJS.ProcessEnv, "prod");
+    const bridge = new SeedBridge({ config: cfg, profile: "prod", port: 4777, token: TEST_TOKEN, home: mkdtempSync(join(tmpdir(), "cd-seed-")), fetch: (async (input: any) => { fetchCalls.push(String(input)); return new Response("{}"); }) as typeof fetch });
+    expect(bridge.stateFile.endsWith("/seed-prod.json")).toBe(true);
+    expect(bridge.mcpUrl).toBe("http://127.0.0.1:4777/api/mcp");
+    expect(bridge.agentsLocal).toBe(false);
+    await expect(bridge.setup()).rejects.toThrow(/seed profile "prod".*agent\.hm.*mcpUrl.*cyberdeck serve mcp/);
+    expect(fetchCalls.filter((u) => u.includes("/api/message"))).toEqual([]);
+    // With the public route in config the url is what setup registers; a loopback server never needs it.
+    const withUrl = new SeedBridge({ config: { ...cfg, mcpUrl: "https://yacht.example.ts.net:8443/api/mcp" }, profile: "prod", port: 4777, token: TEST_TOKEN, home: mkdtempSync(join(tmpdir(), "cd-seed-")) });
+    expect(withUrl.mcpUrl).toBe("https://yacht.example.ts.net:8443/api/mcp");
+    expect(new SeedBridge({ config: { ...cfg, agentsUrl: "http://localhost:3053" }, profile: "prod", port: 4777, token: TEST_TOKEN, home: mkdtempSync(join(tmpdir(), "cd-seed-")) }).agentsLocal).toBe(true);
   });
   test("the pairing key reaches the call routes but not setup", () => {
     expect(caseworkAllows("GET", "/api/voice/config")).toBe(true);
@@ -1118,3 +1148,59 @@ test("Seed query UI defaults, starts, resumes after reload, and sends a follow-u
     expect(await page.locator('[data-testid="plan-runner"]').count()).toBe(1);
   } finally { await browser.close(); }
 }, 45000);
+
+describe("seed profiles", () => {
+  // A second agents server (think agent.hm) next to the default one: its own bridge, own state file, own agent; the hub relay
+  // never applies to it, and the MCP server it is told about is the public route from config, not loopback.
+  let hosted: ReturnType<typeof fakeAgents>, p: Node;
+  const MCP_PUBLIC = "https://yacht.example.ts.net:8443/api/mcp";
+  beforeAll(() => {
+    hosted = fakeAgents({ voice: false });
+    p = startNode(voiced.url, "voice-profiles", undefined, undefined, { seed: { profiles: { prod: { agentsUrl: hosted.url, mcpUrl: MCP_PUBLIC } } } });
+  });
+  afterAll(() => { p.stop(); p.cleanup(); hosted.stop(); });
+
+  test("profiles lists the default and the entry; ?profile= addresses the entry and an unknown name is a 404", async () => {
+    const list = await (await req(p, TEST_TOKEN, "/api/voice/profiles")).json();
+    expect(list.profiles.map((x: any) => [x.name, x.agentsUrl, x.mcpUrl, x.configured])).toEqual([[null, voiced.url, `http://127.0.0.1:4777/api/mcp`, false], ["prod", hosted.url, MCP_PUBLIC, false]]);
+    expect(list.profiles[1].stateFile).toBe(join(p.home, "seed-prod.json"));
+    expect((await req(p, TEST_TOKEN, "/api/voice/profiles", { headers: { authorization: `Bearer ${KEY}` } })).status).toBe(403);
+    const s = await (await req(p, TEST_TOKEN, "/api/voice/status?profile=prod")).json();
+    expect(s).toMatchObject({ seedProfile: "prod", agentsUrl: hosted.url, mcpUrl: MCP_PUBLIC, configured: false, health: { ok: true, voice: false } });
+    expect(s.via).toBeUndefined();
+    expect(s.local).toBeUndefined();
+    const def = await (await req(p, TEST_TOKEN, "/api/voice/status")).json();
+    expect(def.seedProfile).toBeUndefined();
+    expect(def.agentsUrl).toBe(voiced.url);
+    const missing = await req(p, TEST_TOKEN, "/api/voice/status?profile=nope");
+    expect(missing.status).toBe(404);
+    expect((await missing.json()).error).toMatch(/unknown seed profile "nope".*prod/);
+    expect((await req(p, TEST_TOKEN, "/api/voice/setup?profile=nope", { method: "POST", body: "{}" })).status).toBe(404);
+    expect((await req(p, TEST_TOKEN, "/api/voice/providers?profile=nope")).status).toBe(404);
+  });
+
+  test("setup of a profile registers the public MCP url on that server only and keeps its state apart", async () => {
+    const before = voiced.actions.length;
+    const r = await req(p, TEST_TOKEN, "/api/voice/setup?profile=prod", { method: "POST", body: JSON.stringify({ adopt: false }) });
+    expect(r.status).toBe(200);
+    const body = await r.json();
+    expect(body.mcp).toMatchObject({ name: "cyberdeck", url: MCP_PUBLIC });
+    expect(body.agent.origin).toBe("created");
+    expect(hosted.mcp.get("cyberdeck")).toMatchObject({ url: MCP_PUBLIC, transport: "http" });
+    expect(voiced.actions.length).toBe(before); // the default server saw nothing
+    const state = JSON.parse(readFileSync(join(p.home, "seed-prod.json"), "utf8"));
+    expect(state.agentId).toBe(body.agent.id);
+    expect(existsSync(join(p.home, "seed.json"))).toBe(false); // the default bridge never wrote anything
+    const s = await (await req(p, TEST_TOKEN, "/api/voice/status?profile=prod")).json();
+    expect(s.agent).toEqual({ id: body.agent.id, name: "Cyberdeck" });
+    expect(s.configured).toBe(false); // the hosted server has no voice pipeline
+    expect(s.reason).toMatch(/no voice pipeline/);
+    const list = await (await req(p, TEST_TOKEN, "/api/voice/profiles")).json();
+    expect(list.profiles[1].agent).toEqual({ id: body.agent.id, name: "Cyberdeck" });
+    expect(list.profiles[0].agent).toBeUndefined();
+    // The call routes answer for the profile itself (no hub, no relay): not configured, not "hub unreachable".
+    const call = await req(p, TEST_TOKEN, "/api/voice/livekit?profile=prod", { method: "POST" });
+    expect(call.status).toBe(503);
+    expect((await call.json()).reason).toMatch(/no voice pipeline/);
+  });
+});

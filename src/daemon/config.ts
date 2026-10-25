@@ -53,8 +53,10 @@ export interface CyberdeckConfig {
   /** Backup replication (ROADMAP M2, not built yet). `targets` are fleet node names that
    *  should hold a copy of this node's novel data; the home dashboard reads it. */
   backup?: { targets: string[] };
-  /** Seed agents bridge (voice): which agents server to sign into and as whom. See docs/VOICE.md. */
-  seed?: Partial<SeedConfig>;
+  /** Seed agents bridge (voice): which agents server to sign into and as whom. See docs/VOICE.md.
+   *  `profiles` names further agents servers (a hosted one like https://agent.hm): each gets its own bridge and
+   *  state file (`seed-<name>.json`), reached with `cyberdeck seed --profile <name> …` / `?profile=<name>`. */
+  seed?: Partial<SeedConfig> & { profiles?: Record<string, SeedProfileConfig> };
   /** Voice is centralized: `hub` names the paired node that runs the voice system (LiveKit and the voice-capable
    *  agents server), and every `/api/voice/*` route of this node relays there. Naming this node means "answer
    *  here"; unset means this node's own bridge, else the first paired node that has one. Env CYBERDECK_VOICE_HUB
@@ -89,7 +91,16 @@ export interface SeedConfig {
    *  app-support files of the original experiments server. */
   companionFile?: string;
   runtimeFile?: string;
+  /** Where the agents server reaches this node's MCP server. Default the loopback URL, right for an agents server
+   *  on this machine; a hosted server needs the public route `cyberdeck serve mcp` prints (`cyberdeck mcp --json`,
+   *  `public`). Setup of a profile refuses a remote agents server without it. */
+  mcpUrl?: string;
 }
+
+/** One entry of `seed.profiles`: overrides on top of the file's `seed` settings (never the CYBERDECK_SEED_* env). */
+export type SeedProfileConfig = Partial<Omit<SeedConfig, "agentId" | "sessionId">>;
+/** Profile names are file-name safe: they become `seed-<name>.json`. */
+export const SEED_PROFILE_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
 export const SEED_DEFAULTS: SeedConfig = {
   agentsUrl: "http://127.0.0.1:3053", identity: "main", modelProvider: "OpenAI", model: "gpt-6-sol", reasoningLevel: "medium",
@@ -108,16 +119,39 @@ export function claudeMemoryDir(cwd: string): string {
   return join(homedir(), ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"), "memory");
 }
 
-export function seedConfig(cfg: Pick<CyberdeckConfig, "seed"> & { roots?: string[] }, env: NodeJS.ProcessEnv = process.env): SeedConfig {
-  // Empty strings are "unset" except reasoningLevel, where "" deliberately means the provider default.
-  const fromFile = Object.fromEntries(Object.entries(cfg.seed ?? {}).filter(([k, v]) => v !== undefined && v !== null && (v !== "" || k === "reasoningLevel")));
+/** The names in `seed.profiles` (validated: a bad name is reported, not used). */
+export function seedProfileNames(cfg: Pick<CyberdeckConfig, "seed">): string[] {
+  return Object.keys(cfg.seed?.profiles ?? {}).filter((n) => {
+    if (SEED_PROFILE_NAME.test(n)) return true;
+    console.error(`config: seed.profiles.${JSON.stringify(n)} ignored: a profile name is lowercase letters, digits and dashes`);
+    return false;
+  });
+}
+
+/** Settings as `seedConfig`, but with "unset" values (undefined, null, "") dropped; reasoningLevel keeps "" (the provider default). */
+const definedSeed = (o: object | undefined) => Object.fromEntries(Object.entries(o ?? {}).filter(([k, v]) => k !== "profiles" && v !== undefined && v !== null && (v !== "" || k === "reasoningLevel")));
+
+/**
+ * The default bridge's settings, or with `profile` the settings of that `seed.profiles` entry layered over the file's
+ * `seed` block. The CYBERDECK_SEED_* env overrides belong to the default bridge only. An unknown profile throws.
+ */
+export function seedConfig(cfg: Pick<CyberdeckConfig, "seed"> & { roots?: string[] }, env: NodeJS.ProcessEnv = process.env, profile?: string): SeedConfig {
   const root = cfg.roots?.[0] ?? join(homedir(), "Code");
-  const out: SeedConfig = { ...SEED_DEFAULTS, memoryDirs: [claudeMemoryDir(root)], ...fromFile };
-  if (env.CYBERDECK_SEED_AGENTS_URL) out.agentsUrl = env.CYBERDECK_SEED_AGENTS_URL;
-  if (env.CYBERDECK_SEED_IDENTITY) out.identity = env.CYBERDECK_SEED_IDENTITY;
-  if (env.CYBERDECK_SEED_MODEL) out.model = env.CYBERDECK_SEED_MODEL;
-  if (env.CYBERDECK_SEED_REASONING !== undefined) out.reasoningLevel = env.CYBERDECK_SEED_REASONING;
+  const out: SeedConfig = { ...SEED_DEFAULTS, memoryDirs: [claudeMemoryDir(root)], ...definedSeed(cfg.seed) };
+  if (profile !== undefined) {
+    const entry = SEED_PROFILE_NAME.test(profile) ? cfg.seed?.profiles?.[profile] : undefined;
+    if (!entry) throw new Error(`unknown seed profile "${profile}" (config seed.profiles: ${seedProfileNames(cfg).join(", ") || "none"})`);
+    // A profile is another server: the default's agent/session pointers never apply to it.
+    delete out.agentId; delete out.sessionId;
+    Object.assign(out, definedSeed(entry));
+  } else {
+    if (env.CYBERDECK_SEED_AGENTS_URL) out.agentsUrl = env.CYBERDECK_SEED_AGENTS_URL;
+    if (env.CYBERDECK_SEED_IDENTITY) out.identity = env.CYBERDECK_SEED_IDENTITY;
+    if (env.CYBERDECK_SEED_MODEL) out.model = env.CYBERDECK_SEED_MODEL;
+    if (env.CYBERDECK_SEED_REASONING !== undefined) out.reasoningLevel = env.CYBERDECK_SEED_REASONING;
+  }
   out.agentsUrl = out.agentsUrl.replace(/\/+$/, "");
+  if (out.mcpUrl) out.mcpUrl = out.mcpUrl.trim();
   return out;
 }
 

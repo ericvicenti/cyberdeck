@@ -144,12 +144,27 @@ switch (cmd) {
   }
   case "seed": {
     // Seed agents bridge (voice): all through the daemon's /api/voice/* routes (docs/VOICE.md).
-    const sub = process.argv[3] ?? "status";
-    const flags = process.argv.slice(4);
+    // `--profile <name>` (anywhere after `seed`) addresses a `seed.profiles` bridge, another agents server this node signs into.
+    const argv = process.argv.slice(3);
+    const pi = argv.findIndex((f) => f === "--profile" || f === "-p");
+    const profile = pi >= 0 ? argv[pi + 1] : undefined;
+    if (pi >= 0) { if (!profile) { console.log("usage: cyberdeck seed --profile <name> <command>"); process.exit(2); } argv.splice(pi, 2); }
+    const q = profile ? `?profile=${encodeURIComponent(profile)}` : "";
+    const sub = argv[0] ?? "status";
+    const flags = argv.slice(1);
     const fail = (e: unknown) => { console.log(`seed ${sub} failed: ${e instanceof Error ? e.message : String(e)}`); process.exit(1); };
-    if (sub === "status") {
-      const s = await api("/api/voice/status").catch(fail);
+    if (sub === "profiles") {
+      // Every bridge of this node: the default, then each seed.profiles entry.
+      const r = await api("/api/voice/profiles").catch(fail);
+      for (const p of r.profiles) {
+        console.log(`${p.name ?? "(default)"}: ${p.agentsUrl} (${p.health?.ok ? `up${p.health.voice ? ", voice" : ", no voice"}` : `down: ${p.health?.error ?? "?"}`}); mcp ${p.mcpUrl}; ${p.agent ? `agent ${p.agent.name ?? "?"} (${p.agent.id})` : "not set up"}${p.configured ? "; voice ready" : p.reason ? `; ${p.reason}` : ""}`);
+      }
+      if (r.profiles.length === 1) console.log("no seed.profiles in config.json (docs/VOICE.md, \"Profiles\")");
+    } else if (sub === "status") {
+      const s = await api(`/api/voice/status${q}`).catch(fail);
+      if (s.seedProfile) console.log(`profile:       ${s.seedProfile} (state ${s.seedProfile ? `seed-${s.seedProfile}.json` : "seed.json"})`);
       console.log(`agents server: ${s.agentsUrl}  (${s.health?.ok ? `up${s.health.voice ? ", voice" : ", NO voice"}${s.health.version ? `, ${s.health.version}` : ""}` : `down: ${s.health?.error ?? "?"}`})`);
+      if (s.mcpUrl && !/^http:\/\/127\.0\.0\.1:/.test(s.mcpUrl)) console.log(`mcp url:       ${s.mcpUrl}`);
       console.log(`identity:      ${s.identity.source === "file" ? "node key file" : s.identity.source === "env" ? "env key" : s.identity.name} ${s.identity.available ? `-> ${s.identity.principal}` : `(unavailable: ${s.identity.error ?? "?"})`}`);
       console.log(`agent:         ${s.agent ? `${s.agent.name ?? "?"} (${s.agent.id})` : "not set up"}`);
       console.log(`session:       ${s.sessionId ?? "none"}`);
@@ -160,7 +175,7 @@ switch (cmd) {
       if (s.digest) console.log(`digest:        ${s.digest.name} (${s.digest.triggerId}) ${s.digest.enabled ? "enabled" : "disabled"}, ${s.digest.nextSummary ?? ""}; last fired ${when(s.digest.lastFiredAt)}${s.digest.lastError ? `; last error: ${s.digest.lastError}` : ""}${s.digest.url ? `; documents at ${s.digest.url}` : ""}`);
       if (s.profile) console.log(`voice profile: ${s.profile.voice} x${s.profile.speed} (${s.profile.runtimeToken ? "runtime token on hand" : "NO runtime token: calls keep the worker's default voice"})`);
       console.log(s.configured ? "voice: ready (provider livekit)" : `voice: not configured — ${s.reason}`);
-      const h = await api("/api/voice/harness").catch(() => null);
+      const h = profile ? null : await api("/api/voice/harness").catch(() => null);
       if (h) {
         console.log(`harness:       ${h.queryAgent ? `${h.queryAgent.name ?? "?"} (${h.queryAgent.id}) ${h.queryAgent.model ?? "?"}${h.queryAgent.reasoningLevel ? `@${h.queryAgent.reasoningLevel}` : ""}, prompt ${h.queryAgent.promptCurrent ? "current" : "STALE (run cyberdeck seed sync)"}, ${h.queryAgent.memoryFiles} pack files` : "no harness agent yet (first prompt-bar query creates it, or cyberdeck seed sync)"}`);
         if (h.voiceAgent) console.log(`voice agent:   ${h.voiceAgent.name ?? "?"} prompt ${h.voiceAgent.managed ? (h.voiceAgent.promptCurrent ? "managed, current" : "managed, STALE") : "not managed (cyberdeck seed sync --voice adopts it)"}, ${h.voiceAgent.memoryFiles} pack files`);
@@ -169,7 +184,7 @@ switch (cmd) {
       if (!s.configured && !h?.queryAgent) process.exit(1);
     } else if (sub === "setup") {
       const name = flags.includes("--name") ? flags[flags.indexOf("--name") + 1] : undefined;
-      const r = await api("/api/voice/setup", { method: "POST", body: JSON.stringify({ new: flags.includes("--new"), adopt: !flags.includes("--no-adopt"), ...(name ? { name } : {}) }) }).catch(fail);
+      const r = await api(`/api/voice/setup${q}`, { method: "POST", body: JSON.stringify({ new: flags.includes("--new"), adopt: !flags.includes("--no-adopt"), ...(name ? { name } : {}) }) }).catch(fail);
       console.log(`agent:   ${r.agent.name ?? "?"} (${r.agent.id}) — ${r.agent.origin}`);
       console.log(`session: ${r.sessionId}`);
       console.log(`mcp:     ${r.mcp.name} -> ${r.mcp.url} (${r.mcp.state ?? "unknown"}${typeof r.mcp.tools === "number" ? `, ${r.mcp.tools} tools` : ""}${r.mcp.error ? `: ${r.mcp.error}` : ""})`);
@@ -188,33 +203,33 @@ switch (cmd) {
       console.log(`${r.created ? "created" : "kept existing"} ${r.keyFile}`);
       console.log(`identity: ${r.available ? `${r.principal} (${r.source === "file" ? "node key file" : r.source === "env" ? "CYBERDECK_SEED_KEY_SEED still wins over the file" : "the vault account still wins; the file is unused"})` : `unavailable: ${r.error}`}`);
     } else if (sub === "providers") {
-      const r = await api("/api/voice/providers").catch(fail);
+      const r = await api(`/api/voice/providers${q}`).catch(fail);
       for (const p of r.providers) console.log(`${p.name}: ${p.type}${p.authMode ? ` (${p.authMode})` : ""}${p.authStatus ? ` ${p.authStatus}` : ""}`);
       if (!r.providers.length) console.log("no model providers on this identity: run `cyberdeck seed login`");
     } else if (sub === "login") {
       // "Sign in with ChatGPT" for the agents server identity: open the URL, paste the redirect URL (or code) back.
       if (flags.includes("--code")) {
-        const r = await api("/api/voice/login", { method: "POST", body: JSON.stringify({ code: flags[flags.indexOf("--code") + 1] }) }).catch(fail);
+        const r = await api(`/api/voice/login${q}`, { method: "POST", body: JSON.stringify({ code: flags[flags.indexOf("--code") + 1] }) }).catch(fail);
         console.log(`login ${r.status}${r.provider ? `; provider ${r.provider} saved` : ""}${r.error ? `: ${r.error}` : ""}`);
       } else if (flags.includes("--status")) {
-        const r = await api("/api/voice/login", { method: "POST", body: JSON.stringify({ status: true }) }).catch(fail);
+        const r = await api(`/api/voice/login${q}`, { method: "POST", body: JSON.stringify({ status: true }) }).catch(fail);
         console.log(`login ${r.status}${r.provider ? `; provider ${r.provider} saved` : ""}${r.error ? `: ${r.error}` : ""}`);
       } else {
-        const r = await api("/api/voice/login", { method: "POST", body: JSON.stringify({}) }).catch(fail);
+        const r = await api(`/api/voice/login${q}`, { method: "POST", body: JSON.stringify({}) }).catch(fail);
         console.log(`Open this URL in a browser signed in to ChatGPT, approve, then paste the URL it redirects to (localhost:1455/...) here:\n\n${r.authUrl}\n`);
         process.stdout.write("redirect URL or code: ");
         const code = (await new Promise<string>((res) => { let buf = ""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (d) => { buf += d; if (buf.includes("\n")) res(buf); }); process.stdin.on("end", () => res(buf)); })).trim();
         if (!code) { console.log("no code entered; run `cyberdeck seed login --code <url>` later (the login stays pending a while)"); process.exit(1); }
-        const done = await api("/api/voice/login", { method: "POST", body: JSON.stringify({ code, loginId: r.loginId }) }).catch(fail);
+        const done = await api(`/api/voice/login${q}`, { method: "POST", body: JSON.stringify({ code, loginId: r.loginId }) }).catch(fail);
         console.log(`login ${done.status}${done.provider ? `; provider ${done.provider} saved` : ""}${done.error ? `: ${done.error}` : ""}`);
         process.exit(done.status === "completed" ? 0 : 1);
       }
     } else if (sub === "reset-session") {
-      const r = await api("/api/voice/session/reset", { method: "POST" }).catch(fail);
+      const r = await api(`/api/voice/session/reset${q}`, { method: "POST" }).catch(fail);
       console.log(`new session: ${r.sessionId}${r.previous ? ` (was ${r.previous})` : ""}`);
     } else if (sub === "call") {
       // Smoke test: mint a LiveKit room without joining it (the token is withheld; the room times out on the worker).
-      const r = await api("/api/voice/livekit", { method: "POST" }).catch(fail);
+      const r = await api(`/api/voice/livekit${q}`, { method: "POST" }).catch(fail);
       const { token: _t, ...rest } = r;
       console.log(JSON.stringify({ ...rest, token: "<withheld>", expiresIn: `${Math.max(0, Math.round((r.expiresAt - Date.now()) / 1000))}s` }, null, 2));
     } else if (sub === "dogfood") {
@@ -254,7 +269,7 @@ switch (cmd) {
       if (!r.messages?.length) console.log("(no messages)");
       for (const x of r.notices ?? []) console.log(`[${new Date(x.at).toLocaleTimeString()}] notice: ${x.text}`);
     } else {
-      console.log("usage: cyberdeck seed status | setup [--new] [--no-adopt] [--name <agent>] | sync [--voice] [--force] | prompt-text | keygen [--force] | login [--code <url>|--status] | providers | reset-session | call | transcript [n] | dogfood [--tz <zone>] [--at HH:MM] | digest [--tz <zone>] [--at HH:MM] [--day 0-6] | runwatch | prompt [--apply]");
+      console.log("usage: cyberdeck seed [--profile <name>] profiles | status | setup [--new] [--no-adopt] [--name <agent>] | sync [--voice] [--force] | prompt-text | keygen [--force] | login [--code <url>|--status] | providers | reset-session | call | transcript [n] | dogfood [--tz <zone>] [--at HH:MM] | digest [--tz <zone>] [--at HH:MM] [--day 0-6] | runwatch | prompt [--apply]");
       process.exit(1);
     }
     break;
@@ -279,6 +294,6 @@ usage: cyberdeck <command>
   serve      expose the UI as https://<node>.<tailnet> via tailscale serve (serve off: stop)
   serve mcp  publish only /api/mcp to the internet on :8443 via tailscale funnel, for agent.hm (serve mcp off: stop)
   mcp        connection details for MCP clients such as Seed Agents (--json)
-  seed       Seed agents bridge: status | setup | sync [--voice] | keygen | login | providers | reset-session | call | transcript | dogfood | runwatch | prompt [--apply]
+  seed       Seed agents bridge [--profile <name>]: profiles | status | setup | sync [--voice] | keygen | login | providers | reset-session | call | transcript | dogfood | runwatch | prompt [--apply]
   whoami     how the local daemon sees this caller`);
 }

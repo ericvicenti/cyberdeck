@@ -86,6 +86,8 @@ On the hub itself (the `seed` block is only read where the bridge answers locall
 | `voice.hub` | unset | Name (or node id) of the paired node that runs the voice system. Set, every voice route relays there, whatever this node's own bridge says; naming this node means "answer here". Unset: this node's bridge, else the first paired node that has one. Env `CYBERDECK_VOICE_HUB` overrides. |
 | `seed.companionFile` | `~/Library/Application Support/CaseworkSeed/companion.json` | Where the voice profile (and a Casework Companion to adopt) is read. |
 | `seed.runtimeFile` | `~/Library/Application Support/CaseworkSeed/runtime.json` | The agents server's env file; its `SEED_AGENTS_VOICE_INTERNAL_TOKEN` lets the bridge apply the profile per room. |
+| `seed.mcpUrl` | `http://127.0.0.1:<port>/api/mcp` | Where the agents server is told to reach this node's MCP server. Loopback is right for a server on this machine; a hosted server needs the public route `cyberdeck serve mcp` prints. |
+| `seed.profiles.<name>` | none | Further agents servers (see "Profiles" below): each entry is a `seed` block of its own, layered over this one. |
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -139,6 +141,31 @@ yacht's former experiments server (`com.casework.seed-experiments`) keeps runnin
 experiments but with voice off (`SEED_AGENTS_VOICE_ENABLED=0`, LiveKit unloaded, no `:7443`), so no
 node can discover it as a voice peer.
 
+## Profiles: a second agents server
+
+The default bridge signs into one agents server (`seed.agentsUrl`, the voice hub's). `seed.profiles` adds more, by name,
+each with its own bridge, its own state file (`~/.cyberdeck/seed-<name>.json`: agent, session, MCP registration) and its
+own agent on that server. The use is production Seed (`https://agentic.seed.hyper.media`, "agent.hm" in the Deck notes): an agent there that reaches this node through the
+public MCP route (`cyberdeck serve mcp`, docs/AGENTS.md), while the voice hub keeps its experiments server.
+
+```json
+"seed": {
+  "profiles": {
+    "prod": { "agentsUrl": "https://agentic.seed.hyper.media", "mcpUrl": "https://yacht.tail0bb35a.ts.net:8443/api/mcp" }
+  }
+}
+```
+
+Names are lowercase letters, digits and dashes (they become file names; a bad name is reported in the log and skipped). An
+entry inherits the file's `seed` block (identity, model, key file) and overrides what it sets; the `CYBERDECK_SEED_*` env
+only ever applies to the default bridge; the default's `agentId`/`sessionId` never apply to a profile. `cyberdeck seed
+--profile <name> status|setup|providers|login|reset-session|call` and `?profile=<name>` on
+`/api/voice/status|setup|providers|login|session/reset|livekit|transcript` address the entry; `cyberdeck seed profiles`
+(`GET /api/voice/profiles`) lists the default and every entry with its server, MCP url, agent and health. A profile is
+answered by this node itself: the hub relay and "hub offline" never apply to it. `setup` of a profile whose server is not
+on this machine refuses to run until `mcpUrl` is set, because the agents server could never call a loopback URL back. The
+dogfood/runwatch/digest triggers, the harness sync and the boot-time MCP refresh stay with the default bridge.
+
 ## Setup
 
 ```
@@ -177,7 +204,8 @@ the node token (`~/.cyberdeck/token`) requires a re-run so the secret on the age
 |---|---|---|
 | `GET /api/voice/config` | pairing | `{configured, provider: 'livekit' \| 'none', engine: 'seed', reason?, agentId?, sessionId?, via?}` |
 | `POST /api/voice/livekit` | pairing | `{sessionId, url, token, room, identity, expiresAt, profile?}` from `CreateVoiceSession`; `secureUrl?` is the `wss://` twin of a local plain `ws://` url when tailscale serve publishes it; `profile: {voice, speed, applied, error?}` says whether the voice profile below reached the room; `503 {error: 'voice not configured', reason}` when unconfigured; `502 {error}` on a server failure |
-| `GET /api/voice/status` | pairing | `{configured, reason?, agentsUrl, identity: {name, available, principal?, error?}, agent?: {id, name?}, sessionId?, health: {ok, voice, protocol, version, error?, checkedAt}, mcpRegisteredAt?, lastCallAt?, profile?: {voice, speed, runtimeToken, source}}` |
+| `GET /api/voice/status` | pairing | `{configured, reason?, agentsUrl, mcpUrl, seedProfile?, identity: {name, available, principal?, error?}, agent?: {id, name?}, sessionId?, health: {ok, voice, protocol, version, error?, checkedAt}, mcpRegisteredAt?, lastCallAt?, profile?: {voice, speed, runtimeToken, source}}`; `?profile=<name>` answers for that `seed.profiles` bridge (404 for an unknown name; also on `setup`, `providers`, `login`, `session/reset`, `livekit`, `transcript`) |
+| `GET /api/voice/profiles` | node | `{profiles: [{name: null \| string, agentsUrl, mcpUrl, configured, reason?, identity, agent?, sessionId?, health, stateFile}]}`: the default bridge (`name: null`) then every `seed.profiles` entry |
 | `POST /api/voice/session/reset` | pairing | `{sessionId, previous?, room?}`: a new session for the next call; body `{room?}` names a live call's LiveKit room, which the voice runtime is then switched to the new session (`room: {name, switched, error?}`), so the caller keeps talking |
 | `GET /api/voice/transcript?limit=` | pairing | `{supported: true, sessionId?, messages: [{seq, role, text, at}], hasMoreBefore, notices: [{id, at, text, run?}]}`: user/assistant text of the current session (`GetSession`'s tail, cheap) plus the lines left by the `announce` tool (below) |
 | `POST /api/voice/dogfood` | node token | `{triggerId, name, enabled, lastFiredAt?, lastError?, nextSummary?, created, updated}`: the daily fleet check-in trigger (below); body `{timezone?, timeOfDay?}` |
@@ -205,6 +233,8 @@ the room, and recreates the session if the server no longer has it.
 ```
 cyberdeck seed status          # server health, identity, agent, session, last call; exit 1 when not ready
 cyberdeck seed setup [--new]   # see above
+cyberdeck seed profiles        # the default bridge and every seed.profiles entry: server, MCP url, agent, health
+cyberdeck seed --profile prod status|setup|providers|login|reset-session|call   # the same, for a seed.profiles entry
 cyberdeck seed reset-session   # next call starts a fresh session
 cyberdeck seed call            # smoke test: mint a room and print it (token withheld, profile result included); nothing joins it
 cyberdeck seed transcript [n]  # last n user/assistant messages

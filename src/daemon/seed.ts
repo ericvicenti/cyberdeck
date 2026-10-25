@@ -34,6 +34,10 @@ export type SeedStatus = {
   configured: boolean;
   reason?: string;
   agentsUrl: string;
+  /** Where the agents server is told to reach this node's MCP server (loopback unless `seed.mcpUrl` says otherwise). */
+  mcpUrl: string;
+  /** The `seed.profiles` entry this bridge is (absent for the default bridge). */
+  seedProfile?: string;
   identity: { name: string; available: boolean; principal?: string; error?: string; /** Where the key came from: the Seed vault account `name`, the node key file, or the env seed. */ source?: "vault" | "file" | "env" };
   agent?: { id: string; name?: string };
   sessionId?: string;
@@ -190,6 +194,8 @@ export type SeedBridgeOptions = {
   token: string;
   /** Directory holding seed.json (default CYBERDECK_HOME). */
   home?: string;
+  /** A `seed.profiles` entry: the state lives in `seed-<profile>.json`, next to the default bridge's seed.json. */
+  profile?: string;
   /** Casework Companion state to adopt (default the CaseworkSeed app-support file). */
   companionFile?: string;
   /** Agents-server env file holding SEED_AGENTS_VOICE_INTERNAL_TOKEN (default the CaseworkSeed runtime.json). */
@@ -275,6 +281,8 @@ const metaOf = (definition: Record<string, unknown>): CyberdeckMeta => {
 export class SeedBridge {
   readonly config: SeedConfig;
   readonly stateFile: string;
+  /** The `seed.profiles` name, or undefined for the default bridge. */
+  readonly profile: string | undefined;
   readonly companionFile: string;
   readonly runtimeFile: string;
   #port: number;
@@ -304,7 +312,8 @@ export class SeedBridge {
     this.#token = opts.token;
     this.#fetch = opts.fetch ?? fetch;
     const home = opts.home ?? CYBERDECK_HOME;
-    this.stateFile = join(home, "seed.json");
+    this.profile = opts.profile || undefined;
+    this.stateFile = join(home, this.profile ? `seed-${this.profile}.json` : "seed.json");
     this.companionFile = opts.companionFile ?? COMPANION_FILE;
     this.runtimeFile = opts.runtimeFile ?? RUNTIME_FILE;
     this.#roots = opts.roots ?? [join(homedir(), "Code")];
@@ -317,7 +326,13 @@ export class SeedBridge {
   }
 
   get state(): Readonly<SeedState> { return this.#state; }
-  get mcpUrl(): string { return `http://127.0.0.1:${this.#port}/api/mcp`; }
+  /** Where the agents server reaches this node's MCP server: `seed.mcpUrl` (the `cyberdeck serve mcp` public route for a
+   *  hosted server), else loopback, which only an agents server on this machine can follow. */
+  get mcpUrl(): string { return this.config.mcpUrl || `http://127.0.0.1:${this.#port}/api/mcp`; }
+  /** Whether the agents server is on this machine (loopback), so the default loopback MCP URL reaches back. */
+  get agentsLocal(): boolean {
+    try { return /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/.test(new URL(this.config.agentsUrl).hostname); } catch { return false; }
+  }
 
   #load(): SeedState {
     try { return existsSync(this.stateFile) ? (JSON.parse(readFileSync(this.stateFile, "utf8")) as SeedState) : {}; }
@@ -438,6 +453,8 @@ export class SeedBridge {
     const s: SeedStatus = {
       configured: false,
       agentsUrl: this.config.agentsUrl,
+      mcpUrl: this.mcpUrl,
+      ...(this.profile ? { seedProfile: this.profile } : {}),
       identity: signer
         ? { name: this.config.identity, source: this.#signerSource, available: true, principal: blobs.principalToString(signer.principal) }
         : { name: this.config.identity, available: false, error: this.#signerError ?? undefined },
@@ -759,6 +776,10 @@ export class SeedBridge {
   async setup(opts: SetupOptions = {}): Promise<SetupResult> {
     const warnings: string[] = [];
     const name = opts.name?.trim() || "Cyberdeck";
+    // A hosted agents server (a profile such as agent.hm) cannot follow a loopback MCP URL: refuse before anything is written there.
+    if (this.profile && !this.config.mcpUrl && !this.agentsLocal) {
+      throw new SeedError(`seed profile "${this.profile}": ${this.config.agentsUrl} is not on this machine and seed.profiles.${this.profile}.mcpUrl is unset, so it could never reach this node's MCP server. Run \`cyberdeck serve mcp\` and put the public URL it prints (\`cyberdeck mcp --json\`, "public") in config.json as seed.profiles.${this.profile}.mcpUrl, then run setup again.`, 0);
+    }
     // 1. MCP server pointing back at this daemon; the bearer token lives on the server as a secret.
     await this.action({ _: "SetSecret", name: MCP_SECRET_NAME, value: new TextEncoder().encode(`Bearer ${this.#token}`), metadata: { purpose: "Authorization header for the cyberdeck MCP server" } });
     const mcpRes = await this.action<{ server?: { status?: { state?: string; error?: string }; tools?: unknown[] } }>({
