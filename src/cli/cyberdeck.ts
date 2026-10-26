@@ -239,7 +239,6 @@ switch (cmd) {
       const r = await api("/api/voice/dogfood", { method: "POST", body: JSON.stringify({ ...(tz ? { timezone: tz } : {}), ...(at ? { timeOfDay: at } : {}) }) }).catch(fail);
       console.log(`${r.created ? "created" : r.updated ? "prompt updated" : "already present"}: ${r.name} (${r.triggerId}) ${r.enabled ? "enabled" : "disabled"}, ${r.nextSummary ?? ""}`);
       if (r.via) console.log(`on the voice hub ${r.via.name} (${r.via.node}); this node's own agents server was not touched`);
-      if (r.via) console.log(`on the voice hub ${r.via.name} (${r.via.node}); this node's own agents server was not touched`);
       if (r.lastFiredAt) console.log(`last fired: ${when(r.lastFiredAt)}`);
       if (r.lastError) console.log(`last error: ${r.lastError}`);
     } else if (sub === "digest") {
@@ -249,6 +248,7 @@ switch (cmd) {
       const day = flags.includes("--day") ? Number(flags[flags.indexOf("--day") + 1]) : undefined;
       const r = await api("/api/voice/digest", { method: "POST", body: JSON.stringify({ ...(tz ? { timezone: tz } : {}), ...(at ? { timeOfDay: at } : {}), ...(day !== undefined ? { dayOfWeek: day } : {}) }) }).catch(fail);
       console.log(`${r.created ? "created" : r.updated ? "prompt updated" : "already present"}: ${r.name} (${r.triggerId}) ${r.enabled ? "enabled" : "disabled"}, ${r.nextSummary ?? ""}`);
+      if (r.via) console.log(`on the voice hub ${r.via.name} (${r.via.node}); this node's own agents server was not touched`);
       console.log(`publishes as: ${r.account ?? "?"} (${r.identityCreated ? "new signing identity" : "existing signing identity"} ${r.signer ?? "?"}, ${r.granted ? "granted to the agent now" : "already granted"}); documents at ${r.url ?? "?"}`);
       if (r.lastFiredAt) console.log(`last fired: ${when(r.lastFiredAt)}`);
       if (r.lastError) console.log(`last error: ${r.lastError}`);
