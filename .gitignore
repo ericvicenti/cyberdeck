@@ -6,3 +6,6 @@ dist/
 
 # Pinned emulator assets fetched/verified by prepare:emulator
 ui/public/emulatorjs/
+
+# scratch worktrees and one-off scripts of the routines
+.local/
