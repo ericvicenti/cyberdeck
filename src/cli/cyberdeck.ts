@@ -238,6 +238,8 @@ switch (cmd) {
       const at = flags.includes("--at") ? flags[flags.indexOf("--at") + 1] : undefined;
       const r = await api("/api/voice/dogfood", { method: "POST", body: JSON.stringify({ ...(tz ? { timezone: tz } : {}), ...(at ? { timeOfDay: at } : {}) }) }).catch(fail);
       console.log(`${r.created ? "created" : r.updated ? "prompt updated" : "already present"}: ${r.name} (${r.triggerId}) ${r.enabled ? "enabled" : "disabled"}, ${r.nextSummary ?? ""}`);
+      if (r.via) console.log(`on the voice hub ${r.via.name} (${r.via.node}); this node's own agents server was not touched`);
+      if (r.via) console.log(`on the voice hub ${r.via.name} (${r.via.node}); this node's own agents server was not touched`);
       if (r.lastFiredAt) console.log(`last fired: ${when(r.lastFiredAt)}`);
       if (r.lastError) console.log(`last error: ${r.lastError}`);
     } else if (sub === "digest") {
@@ -254,12 +256,14 @@ switch (cmd) {
       // Run-completed trigger: the voice agent announces finished harness runs on the Desk transcript.
       const r = await api("/api/voice/runwatch", { method: "POST" }).catch(fail);
       console.log(`${r.created ? "created" : r.updated ? "updated" : "already present"}: ${r.name} (${r.triggerId}) ${r.enabled ? "enabled" : "disabled"}, ${r.nextSummary ?? ""} (${r.headless ? "headless announce call" : "thread from the prompt"})`);
+      if (r.via) console.log(`on the voice hub ${r.via.name} (${r.via.node}); this node's own agents server was not touched`);
       if (r.lastFiredAt) console.log(`last fired: ${when(r.lastFiredAt)}`);
       if (r.lastError) console.log(`last error: ${r.lastError}`);
     } else if (sub === "prompt") {
       // The agent's system prompt vs the fleet persona Cyberdeck ships; --apply writes the persona.
       const r = await api("/api/voice/prompt", flags.includes("--apply") ? { method: "POST" } : {}).catch(fail);
       console.log(`agent: ${r.name ?? "?"} (${r.agentId})`);
+      if (r.via) console.log(`on the voice hub ${r.via.name} (${r.via.node})`);
       if (r.applied) console.log("prompt: fleet persona applied (the next session uses it; `cyberdeck seed reset-session` starts one)");
       else if (!r.changed) console.log("prompt: already the fleet persona");
       else { console.log("prompt: differs from the fleet persona; run `cyberdeck seed prompt --apply` to replace it. Current:"); console.log(r.current.trim() ? r.current : "(empty)"); }

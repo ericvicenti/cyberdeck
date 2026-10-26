@@ -768,6 +768,23 @@ describe("voice relay", () => {
     expect((await (await req(f, KEY, "/api/voice/config")).json()).sessionId).toBe(r.sessionId);
   }, 20000);
 
+  test("the companion's triggers and prompt through the relay act on the voice node's agent, never on a local one", async () => {
+    // 2026-10-26: `cyberdeck seed digest` on yacht (pinned to clipper) made a second trigger, grant and signing identity on
+    // yacht's own agents server while `status` showed clipper's. These node-token routes now go where status goes.
+    const r = await (await req(d, TEST_TOKEN, "/api/voice/dogfood", { method: "POST", body: "{}" })).json();
+    expect(r.via).toEqual({ node: "n-voice", name: "Yacht" });
+    expect(r.name).toBe(DOGFOOD_TRIGGER_NAME);
+    expect(r.triggerId).toBeTruthy();
+    const s = await (await req(f, TEST_TOKEN, "/api/voice/status")).json();
+    expect(s.dogfood?.triggerId).toBe(r.triggerId);
+    const p = await (await req(d, TEST_TOKEN, "/api/voice/prompt")).json();
+    expect(p.via).toEqual({ node: "n-voice", name: "Yacht" });
+    expect(p.agentId).toBe(s.agent.id);
+    const w = await (await req(d, TEST_TOKEN, "/api/voice/runwatch", { method: "POST" })).json();
+    expect(w.via).toEqual({ node: "n-voice", name: "Yacht" });
+    expect((await (await req(d, TEST_TOKEN, "/api/voice/status")).json()).local.dogfood).toBeUndefined();
+  }, 20000);
+
   test("paired only with nodes that have no voice, the node stays unconfigured", async () => {
     const cfg = await (await req(e, KEY, "/api/voice/config")).json();
     expect(cfg).toMatchObject({ configured: false, provider: "none" });
@@ -851,6 +868,12 @@ describe("voice hub", () => {
     expect(s.local).toMatchObject({ configured: true });
     expect((await req(h, KEY, "/api/voice/session/reset", { method: "POST", body: "{}" })).status).toBe(503);
     expect((await req(h, KEY, "/api/voice/transcript")).status).toBe(503);
+    // A node pinned to a hub that is not paired refuses instead of acting on its own agent: no trigger is made anywhere.
+    const count = [...voiced.triggers.values()].flat().length;
+    const refused = await req(h, TEST_TOKEN, "/api/voice/digest", { method: "POST", body: "{}" });
+    expect(refused.status).toBe(503);
+    expect((await refused.json()).reason).toContain("not paired");
+    expect([...voiced.triggers.values()].flat().length).toBe(count);
     const state = await (await req(h, KEY, "/api/state")).json();
     expect(state.voice).toMatchObject({ configured: false, provider: "none" });
     expect(state.voice.reason).toContain("not paired");

@@ -374,6 +374,15 @@ cannot bounce. When the hub is not paired with the node, voice is simply off the
 `welcome` frame and `cyberdeck seed status` (`voice hub: clipper (…) answers every voice route of this
 node`) say the same.
 
+The companion's triggers and prompt go the same way: `POST /api/voice/dogfood|runwatch|digest` and
+`GET|POST /api/voice/prompt` (node token; `cyberdeck seed dogfood|runwatch|digest|prompt`) on a node pinned to a
+hub act on the hub's companion and answer with `via`, so the fleet has one check-in, one digest identity and one
+persona wherever the command is typed (2026-10-26: before this, `cyberdeck seed digest` on yacht made a second
+trigger, grant and signing identity on yacht's own agents server while `status` showed clipper's). A pinned hub that
+is not paired refuses them (503, `not paired`) instead of acting locally. `?profile=<name>` stays local (a profile is
+this node's own bridge), and so do `setup`, `keygen`, `login`, `providers` and the harness routes: the identity and
+the prompt-bar harness are per node.
+
 A paired hub that does not answer (asleep, off the tailnet) is a different state, **hub offline**, not a
 setup problem: the relay remembers the failure for 10 s (`HUB_DOWN_TTL_MS`) so the Desk's and the iPad's
 polls answer at once instead of each waiting out a connect, and every voice route says

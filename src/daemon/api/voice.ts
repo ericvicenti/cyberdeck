@@ -370,12 +370,28 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
     return c.json({ now, controls: bridge.controls(since, now) });
   });
 
+  // The companion's triggers and prompt live with the voice hub, like the companion itself: on a node pinned to a
+  // hub these node-token routes go there (the answer carries `via`), so `cyberdeck seed digest` on any node acts on
+  // the one agent instead of making a second trigger, grant or signing identity on the node's own agents server.
+  // `?profile=` stays local: a profile is this node's own bridge. A pinned hub that is not paired refuses, like `livekit`.
+  const hubOrLocal = async (c: any, path: string, init: RequestInit): Promise<{ bridge: SeedBridge } | { response: Response }> => {
+    const p = pick(c);
+    if (!p.bridge) return { response: c.json({ error: p.error }, 404) };
+    const node = p.direct ? null : await relayFor(c);
+    if (node) return { response: await relayed(c, node, path, "action", init) };
+    const missing = p.direct ? null : hubMissing(c);
+    if (missing) return { response: c.json({ error: "voice not configured", reason: missing }, 503) };
+    return { bridge: p.bridge };
+  };
+
   // Daily fleet check-in schedule trigger on the agent (idempotent; a stale prompt is rewritten). Node token only.
   app.post("/api/voice/dogfood", async (c) => {
     if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);
     const body = await c.req.json().catch(() => ({}));
+    const t = await hubOrLocal(c, "/api/voice/dogfood", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}) });
+    if ("response" in t) return t.response;
     try {
-      return c.json(await bridge.dogfood({ timezone: typeof body?.timezone === "string" ? body.timezone : undefined, timeOfDay: typeof body?.timeOfDay === "string" ? body.timeOfDay : undefined }));
+      return c.json(await t.bridge.dogfood({ timezone: typeof body?.timezone === "string" ? body.timezone : undefined, timeOfDay: typeof body?.timeOfDay === "string" ? body.timeOfDay : undefined }));
     } catch (e) {
       console.error("voice: dogfood failed:", e instanceof Error ? e.message : e);
       return c.json(errorBody(e), errorStatus(e));
@@ -385,7 +401,9 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
   // Run-completed trigger on the voice agent announcing finished harness runs on the Desk (idempotent). Node token only.
   app.post("/api/voice/runwatch", async (c) => {
     if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);
-    try { return c.json(await bridge.runWatch()); }
+    const t = await hubOrLocal(c, "/api/voice/runwatch", { method: "POST" });
+    if ("response" in t) return t.response;
+    try { return c.json(await t.bridge.runWatch()); }
     catch (e) {
       console.error("voice: runwatch failed:", e instanceof Error ? e.message : e);
       return c.json(errorBody(e), errorStatus(e));
@@ -396,8 +414,10 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
   app.post("/api/voice/digest", async (c) => {
     if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);
     const body = await c.req.json().catch(() => ({}));
+    const t = await hubOrLocal(c, "/api/voice/digest", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}) });
+    if ("response" in t) return t.response;
     try {
-      return c.json(await bridge.digest({ timezone: typeof body?.timezone === "string" ? body.timezone : undefined, timeOfDay: typeof body?.timeOfDay === "string" ? body.timeOfDay : undefined, dayOfWeek: typeof body?.dayOfWeek === "number" ? body.dayOfWeek : undefined }));
+      return c.json(await t.bridge.digest({ timezone: typeof body?.timezone === "string" ? body.timezone : undefined, timeOfDay: typeof body?.timeOfDay === "string" ? body.timeOfDay : undefined, dayOfWeek: typeof body?.dayOfWeek === "number" ? body.dayOfWeek : undefined }));
     } catch (e) {
       console.error("voice: digest failed:", e instanceof Error ? e.message : e);
       return c.json(errorBody(e), errorStatus(e));
@@ -407,11 +427,15 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
   // The companion's system prompt against the fleet persona; POST writes it. Node token only.
   app.get("/api/voice/prompt", async (c) => {
     if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);
-    try { return c.json(await bridge.prompt(false)); } catch (e) { return c.json(errorBody(e), errorStatus(e)); }
+    const t = await hubOrLocal(c, "/api/voice/prompt", { method: "GET" });
+    if ("response" in t) return t.response;
+    try { return c.json(await t.bridge.prompt(false)); } catch (e) { return c.json(errorBody(e), errorStatus(e)); }
   });
   app.post("/api/voice/prompt", async (c) => {
     if (!deps.isFullAuth(c)) return c.json({ error: "forbidden" }, 403);
-    try { return c.json(await bridge.prompt(true)); } catch (e) {
+    const t = await hubOrLocal(c, "/api/voice/prompt", { method: "POST" });
+    if ("response" in t) return t.response;
+    try { return c.json(await t.bridge.prompt(true)); } catch (e) {
       console.error("voice: prompt failed:", e instanceof Error ? e.message : e);
       return c.json(errorBody(e), errorStatus(e));
     }
