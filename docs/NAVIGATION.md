@@ -1,8 +1,8 @@
 # Cyberdeck navigation coverage
 
-Updated 2026-10-25. This is an implementation inventory, not a completion claim.
+Updated 2026-10-26. This is an implementation inventory, not a completion claim.
 The nightly routine and fleet deployment status live in Deck's
-`handoff/routines/cyberdeck-navigation/2026-10-25.md`.
+`handoff/routines/cyberdeck-navigation/2026-10-26.md`.
 
 ## Source and rollout status
 
@@ -60,7 +60,7 @@ credentials should not be replayed from a link.
 | App / api / navigation | primary view, node, not-found, auth, titles | Covered, including legacy `service`→`svc`, Steam app→Vault tab. More parameter validation and every error title remain. |
 | `fleet` / Home | local/fleet overview, node links; pairing and account/reset dialogs; NetworkMap selected endpoints | Overview and node links covered. `networkFrom` / `networkTo` identify an inspected connection by host name, independent of the serving node. Selections push once; partial/whitespace links replace canonical defaults; Back/Forward, reload and fresh tabs restore both endpoints. Unknown/same-host links keep honest errors and titles; unavailable telemetry retains the requested pair. Pairing/reset/benchmark actions remain explicit and never replay from links. |
 | `controls` / Controls | control diagram, bindings/editor, reset notice | Static route/title covered where installed. Binding changes are settings, not navigation. Keyboard/gamepad mode preferences remain local. |
-| `applications` / Applications | application id, Casework example, pairing dialog, reload | Id, unknown-id and unavailable-listing errors/titles covered; failed lookups retain the requested link instead of showing an ordinary app list. Pairing is an explicit operation. Visited generic iframe documents now survive primary-view, application and node navigation. Opt-in generic SPA navigation now restores root-relative child routes/titles via an origin/source/request-bound bridge and keeps one history owner. Commander has a tested bridge integration (activation pending Starlight) for its main views, trainer tabs/inspectors/filters, workshop tabs/run inspection and community directory; its remaining nested states are listed below. Unsupported nested links in noncooperating apps report a restoration error. See `docs/EMBEDDED-NAVIGATION.md`. |
+| `applications` / Applications | application id, Casework example, pairing dialog, reload | Id, unknown-id and unavailable-listing errors/titles covered; failed lookups retain the requested link instead of showing an ordinary app list. Pairing is an explicit operation. Visited generic iframe documents now survive primary-view, application and node navigation. Opt-in generic SPA navigation now restores root-relative child routes/titles via an origin/source/request-bound bridge and keeps one history owner. Commander has a bridge integration (Starlight activation verified on October 26) for its main views, trainer tabs/inspectors/filters, workshop tabs/run inspection and community directory; its remaining nested states are listed below. Unsupported nested links in noncooperating apps report a restoration error. See `docs/EMBEDDED-NAVIGATION.md`. |
 | `applications?app=afterglow` / AfterglowFrame + BoticalMedia/public/navigation.js | child route, season/episode, search/filter, person dialog, music and YouTube state | Existing bridge retained: exact origin+source, parent-only history, route restoration, stable iframe, title cleanup. Browser regressions now prove document/timer continuity across primary views, other apps and node changes, plus hidden-message isolation and route/title restoration. A pending parent route rejects stale child acknowledgements. Missing, malformed and legacy child routes normalize with replace, preserving the iframe document and prior history. No production media is played by these checks. |
 | `applications?app=vimm` / Vault | tabs, system, query, letter, page; selected retro title modal | Covered. `game=<catalog-id>` restores a detail from its shelf/catalog/list context on fresh open, reload and history without starting playback. Invalid tab/system/query/letter/page/game values normalize; missing IDs retain an honest error/title. My list and ready-to-play metadata remain browser-local by design. |
 | VaultPlayer / vault download and storage | running emulator, ROM cache, save state, native N64 handoff, pause menu | Play retains the selected game detail URL, while fresh links and reloads show details without starting or downloading a game. The owner survives app, primary-view, node and screen-remote navigation. Hidden games leave the modal top layer, release keyboard/controller handlers and cannot steal focus or titles. Resume returns to the existing core; explicit Save & exit completes it. Real NES homebrew fixtures prove continuity and responsive save/exit. Native N64/gamepad hardware remains unverified. |
@@ -200,9 +200,9 @@ Errors have matching titles and retain requested identifiers. The live Commander
 seat/board and latest replay/recording owner survive internal view changes;
 hidden boards ignore game keys. Links never join, leave or issue game commands.
 
-Still open in Commander: selected workshop tactic/version and version-history
-panels, trainer decision/perspective, replay frame/perspective, remote generals.io
-invitation/session state, and the remaining nested error matrix. The adapter is
+The October 26 follow-up covers workshop tactic/version/history/editor selection,
+trainer match decisions/perspectives, replay frames/perspectives and remote
+invitations/session selection. Remaining Commander states are listed in that section. The adapter is
 implemented; this is not deployment confirmation, full child-view coverage or app-wide acceptance.
 
 `Commander/e2e/navigation.spec.ts` serves the actual built child and, when
@@ -243,3 +243,42 @@ using synthetic metadata and signatures. `CYBERDECK_TEST_UI` selects an exact ho
 build. `scripts/check-seed-titles-live.ts` verifies installed titles/history/reload
 with authenticated read-only metadata and a deliberately nonexistent file path;
 no agent, session, trigger or memory mutation is permitted.
+
+
+## 2026-10-26 Commander nested selections
+
+The shared Commander client now restores workshop tactic/version/history/editor,
+trainer match decision/seat, replay frame/player perspective and remote invitation
+server/room links through the existing origin/source/request-bound bridge. Browser
+Back/Forward creates one selection entry and preserves mounted boards, clocks and
+unsaved workshop drafts. Hidden trainer inspectors cannot handle Escape or rename
+another view. A fresh replay never starts playback; elapsed playback time remains
+runtime state, while Pause and Copy link capture the current position. A delayed
+saved-game response cannot take over Home after closing a directly opened replay.
+
+The configured private HTTPS parent origins and their existing private HTTP/alternate
+port variants are explicit build inputs. The adapter still rejects arbitrary parents;
+no wildcard/referrer trust or public endpoint was introduced. Afterglow is unchanged.
+
+Commander checks: `CYBERDECK_UI=<Cyberdeck>/dist/ui bun x playwright test --config navigation.config.ts`;
+`bun x vitest run tests/generals.test.ts tests/replays.test.ts tests/tactic-api.test.ts tests/tactics.test.ts tests/trainer.test.ts`;
+`CI=1 bun x playwright test e2e/tactics.spec.ts e2e/generals.spec.ts e2e/trainer.spec.ts e2e/community.spec.ts`.
+The navigation suite uses synthetic game/account data; the remote session test intercepts
+the WebSocket protocol and never contacts public matchmaking.
+
+`scripts/check-commander-navigation-live.ts` now grants private-network permission only
+in its fresh browser context, avoids logging authenticated request exceptions, and
+checks a real archived match's decision/perspective when available. It blocks all writes
+and game sockets. Missing archives are reported as unavailable; selected missing-match
+errors are always checked. The run report records exact deployment and host results.
+
+Recorded views and inspectors now restore decision timelines and input/source/lifecycle
+disclosures. Replay inspectors publish decision/frame/perspective in one transition;
+explicit frame links win during restoration, including frame zero. Hidden inspectors
+with the same recording ID cannot become navigation/title owners. Title cleanup checks
+the last writer so a completed parent load cannot erase a nested error title.
+
+Remaining Commander coverage: trainer Live-card perspective; in-game tactic/menu selections; remaining
+per-view failures. Remaining Cyberdeck coverage: Seed successful-metadata/content-read
+failures and external-server title limits, PDF preview/navigation, transcript/draft
+semantics and native/physical-device cases. App-wide acceptance remains incomplete.

@@ -20,8 +20,11 @@ if (!app) throw new Error("Commander is not configured on this host");
 const childOrigin = new URL(app.url).origin;
 const browser = await chromium.launch();
 const context = await browser.newContext();
+// Grant private-network access only in this isolated test profile.
+await context.grantPermissions(["local-network-access"], { origin });
 await context.addInitScript(({origin,token}) => { if (location.origin === origin) localStorage.setItem("cyberdeck-token",token); }, {origin,token});
-const errors:string[]=[],mutations:string[]=[],passed:string[]=[];
+const errors:string[]=[],mutations:string[]=[],passed:string[]=[],unavailable:string[]=[];
+const allowedMatches = new Set<string>();
 await context.routeWebSocket("**/*", socket => { if (new URL(socket.url()).host === new URL(childOrigin).host) mutations.push("unexpected child socket"); socket.close(); });
 await context.route("**/*",async route => {
   const req=route.request(),u=new URL(req.url());
@@ -30,15 +33,20 @@ await context.route("**/*",async route => {
   if(u.origin===childOrigin) {
     // Trainer navigation must not create an account, attach to a match or execute
     // any action. Read exactly the live observatory endpoints used by this check.
-    if(u.pathname.startsWith('/socket.io') || (u.pathname.startsWith('/api/') && !/^\/api\/trainer\/(overview|live|logs\/(coach|online))$/.test(u.pathname))) {
+    if(u.pathname.startsWith('/socket.io') || (u.pathname.startsWith('/api/') && !/^\/api\/trainer\/(overview|live|logs\/(coach|online))$/.test(u.pathname) && ![...allowedMatches].some(id=>u.pathname===`/api/trainer/matches/${encodeURIComponent(id)}` || u.pathname===`/api/trainer/matches/${encodeURIComponent(id)}/decisions`))) {
       mutations.push(`unexpected child request ${u.pathname}`); return route.abort();
     }
     return route.continue();
   }
   // Use a loopback SSH tunnel while retaining the real, explicitly trusted parent
   // origin in the browser. The token is never installed in the child origin.
-  const result=await route.fetch({url:transport+u.pathname+u.search,headers:{...req.headers(),Authorization:'Bearer '+token}});
-  return route.fulfill({response:result});
+  try {
+    const result=await route.fetch({url:transport+u.pathname+u.search,headers:{...req.headers(),Authorization:'Bearer '+token}});
+    return await route.fulfill({response:result});
+  } catch {
+    // Playwright fetch exceptions contain request headers; never log them.
+    await route.abort().catch(() => {});
+  }
 });
 const page=await context.newPage();page.setDefaultTimeout(20000);page.on('pageerror',e=>errors.push(e.message));
 const route = '/?tab=Logs&trainer=1&worker=coach';
@@ -73,6 +81,39 @@ try {
   await page.waitForFunction(()=>document.title==='How it works · Training · Commander · Cyberdeck');
   if(await page.evaluate(()=>history.length)!==beforeReload)throw new Error('Reload added history');
   passed.push('reload/new-tab/explicit Reload');
+  stage='nested match selection';
+  const overview:any=await reloadedFrame.evaluate(async()=>{const r=await fetch('/api/trainer/overview');return r.ok?r.json():null;});
+  const candidates=[...(overview?.humanMatches||[]),...(overview?.remoteMatches||[]),...(overview?.batches||[]).flatMap((b:any)=>b.matches||[])];
+  const selected=candidates.find((m:any)=>typeof m.id==='string');
+  if(selected){
+    allowedMatches.add(selected.id);
+    const detail:any=await reloadedFrame.evaluate(async id=>{const r=await fetch('/api/trainer/matches/'+encodeURIComponent(id));return r.ok?r.json():null;},selected.id);
+    const seat=detail?.counts?.findIndex((count:number)=>count>1)??-1;
+    if(seat>=0){
+      const decision=Math.min(51,detail.counts[seat]-1);
+      const nested='/?'+new URLSearchParams({trainer:'1',match:selected.id,seat:String(seat),decision:String(decision)});
+      await reloadedFrame.evaluate(path=>{const a=document.createElement('a');a.href=path;document.body.append(a);a.click();a.remove();},nested);
+      await reloadedFrame.waitForFunction(({seat,decision})=>{
+        return (document.querySelector('[aria-label="Match perspective"]') as HTMLSelectElement)?.value===String(seat)
+          && (document.querySelector('[aria-label="Decision timeline"]') as HTMLInputElement)?.value===String(decision)
+          && !!document.querySelector('.trainer-modal .trainer-board svg');
+      },{seat,decision});
+      const expected=[detail.name,`Decision ${decision+1}`,detail.policies[seat].name,'Commander','Cyberdeck'].join(' · ');
+      await page.waitForFunction(title=>document.title===title,expected);
+      const before=await page.evaluate(()=>history.length);
+      await reloadedFrame.getByRole('button',{name:'← Previous',exact:true}).click();
+      await page.waitForFunction(n=>history.length===n,before+1);
+      await page.goBack();
+      await reloadedFrame.waitForFunction(index=>(document.querySelector('[aria-label="Decision timeline"]') as HTMLInputElement)?.value===String(index),decision);
+      await page.reload();await page.waitForFunction(title=>document.title===title,expected);
+      passed.push('installed trainer decision/perspective/direct/reload/one-entry/Back');
+    }else unavailable.push('No readable match with multiple decisions');
+  }else unavailable.push('No live match archive');
+  stage='nested missing match';
+  const missing='navigation-readonly-missing-20261026';allowedMatches.add(missing);
+  await page.goto(origin+'/#/applications?'+new URLSearchParams({app:'commander',route:'/?'+new URLSearchParams({trainer:'1',match:missing,decision:'2'})}));
+  await page.waitForFunction(()=>document.title==='Match not found · Commander · Cyberdeck');
+  passed.push('installed nested missing-match title');
   if(errors.length||mutations.length)throw new Error(JSON.stringify({errors,mutations}));
-  console.log(JSON.stringify({origin,childOrigin,passed,pageErrors:0,apiMutations:0,gameConnections:0}));
-}catch(error){console.error(JSON.stringify({stage,passed,title:await page.title(),errors,mutations}));throw error;}finally{await browser.close();}
+  console.log(JSON.stringify({origin,childOrigin,passed,unavailable,pageErrors:0,apiMutations:0,gameConnections:0}));
+}catch(error){console.error(JSON.stringify({stage,passed,title:await page.title(),errors,mutations}));throw error;}finally{await context.unrouteAll({behavior:"ignoreErrors"});await browser.close();}
