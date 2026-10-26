@@ -489,6 +489,23 @@ describe("configured node", () => {
     expect(bridge.controls(0, n.at - 1)).toEqual([]);
     expect(bridge.notices(5).at(-1)?.control).toEqual({ action: "mute" });
   });
+  test("prompt reads a persona the server stored as blocks and does not re-apply it", async () => {
+    const stateFile = join(a.home, "seed.json");
+    const agentId = JSON.parse(readFileSync(stateFile, "utf8")).agentId as string;
+    const definition = voiced.agents.get(agentId)!;
+    const before = definition.systemPrompt;
+    const text = fleetPrompt(definition.name ?? "Cyberdeck");
+    definition.systemPrompt = { type: "seed-prompt-blocks", blocks: text.split("\n").map((t, i) => ({ block: { type: "Paragraph", id: `p${i}`, text: t } })) };
+    try {
+      const r = await (await req(a, TEST_TOKEN, "/api/voice/prompt", { method: "POST" })).json();
+      expect(r.changed).toBe(false);
+      expect(r.applied).toBe(false);
+      expect(r.current).toBe(text.split("\n").filter(Boolean).join("\n"));
+      expect(r.current).toContain("wait for a yes");
+      expect(definition.systemPrompt).not.toBe(text); // nothing was written
+    } finally { definition.systemPrompt = before; }
+  });
+
   test("samePrompt sees through the agents server's prompt blocks", () => {
     const blocks = { type: "seed-prompt-blocks", blocks: [{ block: { type: "Paragraph", id: "x", text: "Call cyberdeckfleetstatus, then  note." } }] };
     expect(promptText(blocks)).toBe("Call cyberdeckfleetstatus, then  note.");

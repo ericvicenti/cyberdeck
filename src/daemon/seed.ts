@@ -853,13 +853,15 @@ export class SeedBridge {
   async prompt(apply = false): Promise<PromptResult> {
     if (!this.#state.agentId) throw new SeedError("no agent set up yet: run `cyberdeck seed setup`", 409);
     const agentId = this.#state.agentId;
-    const res = await this.action<{ agent: { definition: Record<string, unknown> & { name?: string; systemPrompt?: string } } }>({ _: "GetAgent", agentId });
+    const res = await this.action<{ agent: { definition: Record<string, unknown> & { name?: string; systemPrompt?: unknown } } }>({ _: "GetAgent", agentId });
     const definition = res.agent.definition;
     const name = typeof definition.name === "string" ? definition.name : undefined;
     if (name) this.#agentName = name;
-    const current = typeof definition.systemPrompt === "string" ? definition.systemPrompt : "";
+    // The server hands a prompt back as blocks once it has stored one (the 2026-10-24 trigger lesson): read it as
+    // text and compare like samePrompt does, or an applied persona reads as "(empty)" and "differs" forever.
+    const current = promptText(definition.systemPrompt);
     const desired = fleetPrompt(name ?? "Cyberdeck");
-    const changed = current !== desired;
+    const changed = !samePrompt(definition.systemPrompt, desired);
     let applied = false;
     if (apply && changed) {
       await this.action({ _: "UpdateAgent", agentId, definition: { ...definition, systemPrompt: desired } });
