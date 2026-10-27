@@ -403,7 +403,8 @@ run tailscale up; hub last seen 10 h ago); calls resume once this node is back o
 the tailnet" and the strip `voice clipper out of reach`. The Tailscale login url is written to the daemon log
 only (`voice: relay to clipper failed: … log in at https://login.tailscale.com/a/…`), never into an HTTP
 answer: the pairing-key routes reach devices that must not be able to re-home the node (2026-10-27: yacht's
-node key had expired overnight and every answer said clipper was offline while clipper was fine).
+node key had expired overnight and every answer said clipper was offline while clipper was fine). On the
+machine itself, `cyberdeck status` prints a `tailnet:` line with the state and, when logged out, the login url.
 
 The web Desk talks only to the daemon in view and shows the hub in its bridge strip (`voice clipper`);
 the shell has no machine dropdown anywhere (nothing on the Desk picks a machine either). Without a

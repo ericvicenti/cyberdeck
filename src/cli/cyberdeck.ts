@@ -52,6 +52,12 @@ switch (cmd) {
       );
       console.log(`reclaimable junk: ${((s.junkBytes ?? 0) / 1e9).toFixed(1)} GB`);
       console.log(s.scanning ? "scan in progress…" : `last scan: ${s.lastScanAt ? new Date(s.lastScanAt).toLocaleString() : "never"}`);
+      // This machine's own tailnet connection: off it, peers, the voice hub and `cyberdeck serve` are out of reach,
+      // and the login url is only ever printed here, on the machine (never over HTTP).
+      const ts = new Tailscale();
+      const net = await ts.backend().catch(() => null);
+      if (net && !net.running) console.log(`tailnet: OFF — Tailscale is ${net.state === "NeedsLogin" ? "logged out" : net.state === "Stopped" ? "switched off" : net.state}${net.authUrl ? `; log in at ${net.authUrl}` : "; run: tailscale up"} (paired nodes and the voice hub are out of reach until then)`);
+      else if (net) { const self = await ts.self().catch(() => null); console.log(`tailnet: on${self?.dnsName ? ` (${self.dnsName})` : ""}`); }
     } catch {
       console.log("daemon not reachable — try: cyberdeck restart");
       process.exit(1);
