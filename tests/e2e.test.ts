@@ -221,6 +221,31 @@ test("desk view: a hub that is paired but not answering shows the offline card, 
   }
 }, 30000);
 
+test("desk view: a node that is itself off the tailnet says so instead of blaming the hub", async () => {
+  const via = { node: "n-hub", name: "Clipper" };
+  const hub = { name: "Clipper", node: "n-hub", reachable: false, since: Date.now() - 60_000, lastSeen: Date.now() - 10 * 3600_000, tailnet: { state: "NeedsLogin", running: false } };
+  const reason = "e2e is off the tailnet, so voice hub Clipper is out of reach (Tailscale on e2e is logged out: log in from the Tailscale menu there, or run tailscale up; hub last seen 10 h ago); calls resume once this node is back on the tailnet";
+  await page.route("**/api/voice/**", (r) => {
+    const path = new URL(r.request().url()).pathname.split("/api/")[1];
+    if (path === "voice/config") return r.fulfill({ json: { configured: false, provider: "none", engine: "seed", reason, via, hub } });
+    if (path === "voice/status") return r.fulfill({ json: { configured: false, reason, via, hub, local: { configured: false, reason: "no bridge" } } });
+    return r.fulfill({ status: 503, json: { supported: true, messages: [], error: reason, via, hub } });
+  });
+  try {
+    await page.goto(`${BASE}/#/desk`);
+    await page.waitForSelector('[data-testid="voice-hub-offline"]');
+    await waitFor(async () => (await page.textContent('[data-testid="voice-hub-offline-title"]'))?.includes("is off the tailnet") ?? false);
+    const card = await page.textContent('[data-testid="voice-hub-offline"]');
+    expect(card).not.toContain("voice hub Clipper is offline");
+    expect(card).toContain("Tailscale on e2e is logged out");
+    expect(card).toContain("Clipper is probably fine");
+    expect(await page.isVisible('[data-testid="voice-unconfigured"]')).toBe(false);
+    await waitFor(async () => (await page.textContent('[data-testid="voice-node"]'))?.includes("Clipper out of reach") ?? false);
+  } finally {
+    await page.unroute("**/api/voice/**");
+  }
+}, 30000);
+
 test("applications: the Casework kitchen sink is an example app with a live console", async () => {
   await page.click('[data-testid="nav-applications"]');
   await page.waitForSelector('[data-testid="app-kitchen-sink"]');
