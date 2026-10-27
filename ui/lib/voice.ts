@@ -18,7 +18,7 @@ export type TranscriptLine = { id: string; who: "me" | "agent" | "notice"; text:
 export type VoiceConfig = { configured: boolean; provider: "livekit" | "none"; reason?: string; agentId?: string; sessionId?: string; via?: { node: string; name: string }; hub?: VoiceHubInfo };
 /** With the hub paired but not answering (asleep, off the tailnet), `configured:false` comes with this: voice is
  *  off only until the hub is back, so the Desk shows an outage, not a setup problem. */
-export type VoiceHubInfo = { name: string; node: string; reachable: false; since: number; lastSeen: number | null };
+export type VoiceHubInfo = { name: string; node: string; reachable: false; since: number; lastSeen: number | null; /** Set when this node is the one off the tailnet (Tailscale stopped or logged out): the hub is probably fine. */ tailnet?: { state: string; running: false } };
 /** `secureUrl`: the wss:// twin of `url` an https page must use (see secureCallUrl in api/voice.ts). */
 type LivekitGrant = { url: string; secureUrl?: string; token: string; room: string; identity: string; expiresAt?: number };
 

@@ -12,6 +12,7 @@ import type { Hono } from "hono";
 import { networkInterfaces } from "os";
 import { SeedBridge, SeedError } from "../seed";
 import { peerFetch, type NodeRow } from "./fleet";
+import type { TailnetState } from "../tailscale";
 
 export type VoiceDeps = {
   /** Full (token or tailscale) authentication for the current request; setup requires it. */
@@ -23,6 +24,9 @@ export type VoiceDeps = {
   /** Further bridges from `seed.profiles` (a hosted agents server such as agent.hm), by name. A request with
    *  `?profile=<name>` is answered by that bridge, on this node, never relayed. */
   profiles?: Map<string, SeedBridge>;
+  /** This node's own tailnet connection (Tailscale.backend). Asked after the hub failed to answer: a node that is
+   *  itself off the tailnet blames itself, not the hub. */
+  tailnet?: () => Promise<TailnetState | null>;
 };
 
 /** Where a relayed answer came from. */
@@ -63,8 +67,9 @@ export const RELAY_ACTION_MS = 15_000;
  *  waiting on the network again: the Desk polls, the iPad polls, and each poll must not cost another timeout. */
 export const HUB_DOWN_TTL_MS = 10_000;
 
-/** A relay target that stopped answering: when it first failed and the last network error. */
-export type HubOutage = { since: number; error: string };
+/** A relay target that stopped answering: when it first failed and the last network error. `tailnet` is set when
+ *  this node was itself off the tailnet at the time (Tailscale stopped or logged out): then the hub is probably fine. */
+export type HubOutage = { since: number; error: string; tailnet?: TailnetState };
 
 export type VoiceRelay = {
   /** The paired node that answers for voice: the hub when one is pinned (null when it is not paired), else
@@ -77,17 +82,20 @@ export type VoiceRelay = {
   /** The relay target's current outage, while the last failure is fresher than HUB_DOWN_TTL_MS; null when it answered
    *  since (or was never asked). After the TTL the next route tries the network again; `since` survives repeat failures. */
   outage: () => HubOutage | null;
-  /** The relay target did not answer (network error, timeout). An HTTP error from it is not an outage: it answered. */
-  noteFailure: (error: string) => void;
+  /** The relay target did not answer (network error, timeout). An HTTP error from it is not an outage: it answered.
+   *  `tailnet`: this node's own connection when it is not running (the likely cause). */
+  noteFailure: (error: string, tailnet?: TailnetState | null) => void;
   /** The relay target answered. */
   noteSuccess: () => void;
+  /** This node's own name (for "this node is off the tailnet"). */
+  readonly self?: string;
 };
 
 function outageTracker(): Pick<VoiceRelay, "outage" | "noteFailure" | "noteSuccess"> {
-  let down: { at: number; since: number; error: string } | null = null;
+  let down: { at: number; since: number; error: string; tailnet?: TailnetState } | null = null;
   return {
-    outage() { return down && Date.now() - down.at < HUB_DOWN_TTL_MS ? { since: down.since, error: down.error } : null; },
-    noteFailure(error) { const now = Date.now(); down = { at: now, since: down?.since ?? now, error }; },
+    outage() { return down && Date.now() - down.at < HUB_DOWN_TTL_MS ? { since: down.since, error: down.error, ...(down.tailnet ? { tailnet: down.tailnet } : {}) } : null; },
+    noteFailure(error, tailnet) { const now = Date.now(); down = { at: now, since: down?.since ?? now, error, ...(tailnet && !tailnet.running ? { tailnet } : {}) }; },
     noteSuccess() { down = null; },
   };
 }
@@ -127,6 +135,7 @@ export function createVoiceRelay(peers: () => NodeRow[], probe: Probe = probeCon
   if (hub && !sameName(hub, opts.self)) {
     return {
       pinned: hub,
+      self: opts.self,
       async find() { return peers().find((r) => sameName(r.name, hub) || r.id === hub) ?? null; },
       reset() {},
       ...outageTracker(),
@@ -148,6 +157,7 @@ export function createVoiceRelay(peers: () => NodeRow[], probe: Probe = probeCon
       return inFlight;
     },
     reset() { cached = null; },
+    self: opts.self,
     ...outageTracker(),
   };
 }
@@ -167,14 +177,25 @@ export function agoText(at: number | null | undefined, now = Date.now()): string
   return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} d ago`;
 }
 
-/** Why a node whose paired hub does not answer has no voice right now (it is asleep or off the network). */
-export function hubUnreachable(node: NodeRow, outage: HubOutage): string {
+/** What a stopped or logged-out Tailscale needs, in the words of the machine it runs on. */
+export function tailnetText(t: TailnetState, self?: string): string {
+  const here = self || "this node";
+  if (t.state === "NeedsLogin") return `Tailscale on ${here} is logged out: log in from the Tailscale menu there, or run tailscale up`;
+  if (t.state === "Stopped") return `Tailscale on ${here} is switched off: turn it on from the Tailscale menu there, or run tailscale up`;
+  return `Tailscale on ${here} is ${t.state.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase()}`;
+}
+
+/** Why a node whose paired hub does not answer has no voice right now (it is asleep or off the network), or, when
+ *  this node is the one off the tailnet, what to do here. */
+export function hubUnreachable(node: NodeRow, outage: HubOutage, self?: string): string {
   const seen = agoText(node.last_seen);
+  if (outage.tailnet && !outage.tailnet.running) return `${self || "this node"} is off the tailnet, so voice hub ${node.name} is out of reach (${tailnetText(outage.tailnet, self)}${seen ? `; hub last seen ${seen}` : ""}); calls resume once this node is back on the tailnet`;
   return `voice hub ${node.name} is paired but not answering (${outage.error}${seen ? `; last seen ${seen}` : ""}); calls resume when it is back on the network`;
 }
 
-/** What every offline-hub answer carries next to `reason`, so a client can show the hub by name and when it was last seen. */
-export const hubInfo = (node: NodeRow, outage: HubOutage) => ({ name: node.name, node: node.id, reachable: false as const, since: outage.since, lastSeen: node.last_seen ?? null });
+/** What every offline-hub answer carries next to `reason`, so a client can show the hub by name and when it was last seen.
+ *  `tailnet` names this node's own Tailscale state when that is the cause (never its login url: that stays on the machine). */
+export const hubInfo = (node: NodeRow, outage: HubOutage) => ({ name: node.name, node: node.id, reachable: false as const, since: outage.since, lastSeen: node.last_seen ?? null, ...(outage.tailnet ? { tailnet: { state: outage.tailnet.state, running: false as const } } : {}) });
 
 /** A network error's one-line name: AbortSignal timeouts and refused connections read the same everywhere. */
 export const networkErrorText = (e: unknown): string => {
@@ -191,7 +212,7 @@ export async function voiceSummary(bridge: SeedBridge, relay?: VoiceRelay): Prom
     const node = await relay.find().catch(() => null);
     if (!node) return { configured: false, provider: "none", engine: "seed", reason: hubUnpaired(relay.pinned) };
     const outage = relay.outage();
-    if (outage) return { configured: false, provider: "none", engine: "seed", reason: hubUnreachable(node, outage), via: viaOf(node) };
+    if (outage) return { configured: false, provider: "none", engine: "seed", reason: hubUnreachable(node, outage, relay.self), via: viaOf(node) };
     return { configured: true, provider: "livekit", engine: "seed", via: viaOf(node) };
   }
   const own = await bridge.voiceSummary();
@@ -241,13 +262,18 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
   // since when, and that it comes back by itself. Shapes per route, so the Desk and the iPad read them like "not configured".
   type OfflineKind = "config" | "action" | "status" | "transcript" | "control";
   const offline = (c: any, node: NodeRow, outage: HubOutage, kind: OfflineKind, local?: unknown) => {
-    const reason = hubUnreachable(node, outage);
+    const reason = hubUnreachable(node, outage, deps.relay?.self);
     const tail = { via: viaOf(node), hub: hubInfo(node, outage) };
     if (kind === "config") return c.json({ configured: false, provider: "none", engine: "seed", reason, ...tail });
     if (kind === "action") return c.json({ error: "voice hub unreachable", reason, ...tail }, 503);
     if (kind === "transcript") return c.json({ supported: true, messages: [], error: reason, ...tail }, 503);
     if (kind === "control") return c.json({ now: Date.now(), controls: [], error: reason, ...tail }, 503);
     return c.json({ ...(local as object), configured: false, reason, ...tail, local });
+  };
+  // After the hub failed to answer: this node's own Tailscale when it is not running (the likely cause), else null.
+  const offTailnet = async (): Promise<TailnetState | null> => {
+    const t = await deps.tailnet?.().catch(() => null);
+    return t && !t.running ? t : null;
   };
   // Forwards the request to the peer and returns its answer with `via` (and the peer's status code). A peer that does
   // not answer is remembered as down (HUB_DOWN_TTL_MS) so the next polls answer at once instead of waiting again.
@@ -262,9 +288,10 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
       return c.json({ ...body, via: viaOf(node) }, res.status as any);
     } catch (e) {
       const error = networkErrorText(e);
-      console.error(`voice: relay to ${node.name} failed:`, error);
-      deps.relay?.noteFailure(error);
-      return offline(c, node, deps.relay?.outage() ?? { since: Date.now(), error }, kind);
+      const tailnet = await offTailnet();
+      console.error(`voice: relay to ${node.name} failed:`, error, tailnet ? `(${tailnetText(tailnet, deps.relay?.self)}${tailnet.authUrl ? `; log in at ${tailnet.authUrl}` : ""})` : "");
+      deps.relay?.noteFailure(error, tailnet);
+      return offline(c, node, deps.relay?.outage() ?? { since: Date.now(), error, ...(tailnet ? { tailnet } : {}) }, kind);
     }
   };
 
@@ -320,9 +347,10 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
         if (body && typeof body === "object") return c.json({ ...body, via: viaOf(node), local: s }, res.status as any);
       } catch (e) {
         const error = networkErrorText(e);
-        console.error(`voice: status relay to ${node.name} failed:`, error);
-        deps.relay?.noteFailure(error);
-        return offline(c, node, deps.relay?.outage() ?? { since: Date.now(), error }, "status", s);
+        const tailnet = await offTailnet();
+        console.error(`voice: status relay to ${node.name} failed:`, error, tailnet ? `(${tailnetText(tailnet, deps.relay?.self)})` : "");
+        deps.relay?.noteFailure(error, tailnet);
+        return offline(c, node, deps.relay?.outage() ?? { since: Date.now(), error, ...(tailnet ? { tailnet } : {}) }, "status", s);
       }
     }
     const missing = hubMissing(c);

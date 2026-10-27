@@ -16,6 +16,7 @@ import { createServer } from "../src/daemon/server";
 import { seedConfig, seedProfileNames } from "../src/daemon/config";
 import { caseworkAllows } from "../src/daemon/api/casework";
 import { createVoiceRelay, secureCallUrl, agoText, hubUnreachable, HUB_DOWN_TTL_MS } from "../src/daemon/api/voice";
+import { parseBackend } from "../src/daemon/tailscale";
 import { Tailscale } from "../src/daemon/tailscale";
 import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME, checkinNoteStatus, fleetPrompt, promptText, samePrompt, RUNWATCH_TRIGGER_NAME, RUNWATCH_PROMPT, DIGEST_TRIGGER_NAME, DIGEST_SIGNER_LABEL, digestPrompt } from "../src/daemon/seed";
 import { testConfig, TEST_TOKEN, tmpHomeDir } from "./helpers";
@@ -222,7 +223,7 @@ function fakeAgents(opts: { voice: boolean }) {
 }
 
 type Node = { base: string; wsBase: string; home: string; db: Database; stop: () => void; cleanup: () => void };
-function startNode(agentsUrl: string, prefix: string, companion?: object, runtimeToken?: string, extra: Partial<import("../src/daemon/config").CyberdeckConfig> = {}): Node {
+function startNode(agentsUrl: string, prefix: string, companion?: object, runtimeToken?: string, extra: Partial<import("../src/daemon/config").CyberdeckConfig> = {}, tailscale: Tailscale = new Tailscale(async () => null)): Node {
   const { dir, cleanup } = tmpHomeDir(prefix);
   const companionFile = join(dir, "companion.json");
   if (companion) writeFileSync(companionFile, JSON.stringify(companion));
@@ -231,7 +232,7 @@ function startNode(agentsUrl: string, prefix: string, companion?: object, runtim
   if (runtimeToken) writeFileSync(runtimeFile, JSON.stringify({ SEED_AGENTS_VOICE_INTERNAL_TOKEN: runtimeToken, SEED_AGENTS_HTTP_PORT: "3053" }));
   const db = new Database(":memory:");
   initSchema(db);
-  const s = createServer(db, testConfig({ port: 4777, ...extra, seed: { agentsUrl, ...(extra.seed ?? {}) } }), TEST_TOKEN, "stw-test", { caseworkKey: KEY, caseworkExperiencesDir: FIXTURES, persistOwner: false, cloudSync: false, tailscale: new Tailscale(async () => null), seed: { home: dir, companionFile, runtimeFile } });
+  const s = createServer(db, testConfig({ port: 4777, ...extra, seed: { agentsUrl, ...(extra.seed ?? {}) } }), TEST_TOKEN, "stw-test", { caseworkKey: KEY, caseworkExperiencesDir: FIXTURES, persistOwner: false, cloudSync: false, tailscale, seed: { home: dir, companionFile, runtimeFile } });
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: s.fetch, websocket: s.websocket });
   return { base: `http://127.0.0.1:${server.port}`, wsBase: `ws://127.0.0.1:${server.port}`, home: dir, db, stop: () => { s.sessions.close(); void server.stop(true); }, cleanup };
 }
@@ -927,6 +928,60 @@ describe("voice hub", () => {
     expect(agoText(Date.now() - 3 * 86_400_000)).toBe("3 d ago");
     expect(agoText(null)).toBeNull();
   });
+
+  test("a node that is itself off the tailnet blames itself, not the hub, and keeps the login url off the wire", () => {
+    // `tailscale status --json` of a logged-out node (key expired, or `tailscale logout`): 2026-10-27 on yacht.
+    const loggedOut = JSON.stringify({ BackendState: "NeedsLogin", AuthURL: "https://login.tailscale.com/a/abc", Self: { DNSName: "" } });
+    expect(parseBackend(loggedOut)).toEqual({ running: false, state: "NeedsLogin", authUrl: "https://login.tailscale.com/a/abc" });
+    expect(parseBackend(JSON.stringify({ BackendState: "Running", AuthURL: "", Self: { DNSName: "yacht.tail.ts.net." } }))).toEqual({ running: true, state: "Running", authUrl: null });
+    expect(parseBackend(JSON.stringify({ BackendState: "Stopped" }))).toMatchObject({ running: false, state: "Stopped" });
+    expect(parseBackend(null)).toBeNull();
+    expect(parseBackend("not json")).toBeNull();
+    expect(parseBackend("{}")).toBeNull();
+
+    const relay = createVoiceRelay(() => [], undefined, { hub: "clipper", self: "Yacht" });
+    const node = { id: "n-hub", name: "clipper", url: "http://127.0.0.1:1", token: "t", added_at: 0, last_seen: Date.now() - 10 * 3600_000 };
+    // A running tailnet is not recorded: the hub really is the one not answering.
+    relay.noteFailure("no route to the hub", { running: true, state: "Running", authUrl: null });
+    expect(relay.outage()!.tailnet).toBeUndefined();
+    expect(hubUnreachable(node, relay.outage()!, relay.self)).toContain("voice hub clipper is paired but not answering");
+    relay.noteFailure("no route to the hub", parseBackend(loggedOut));
+    const outage = relay.outage()!;
+    expect(outage.tailnet).toMatchObject({ state: "NeedsLogin", running: false });
+    expect(hubUnreachable(node, outage, relay.self)).toBe(
+      "Yacht is off the tailnet, so voice hub clipper is out of reach (Tailscale on Yacht is logged out: log in from the Tailscale menu there, or run tailscale up; hub last seen 10 h ago); calls resume once this node is back on the tailnet"
+    );
+    expect(hubUnreachable(node, { since: 1, error: "x", tailnet: { running: false, state: "Stopped", authUrl: null } })).toContain("Tailscale on this node is switched off");
+    expect(hubUnreachable(node, { since: 1, error: "x", tailnet: { running: false, state: "NoState", authUrl: null } }, "iris")).toContain("Tailscale on iris is no state");
+    // The hub answering again clears it.
+    relay.noteSuccess();
+    expect(relay.outage()).toBeNull();
+  });
+
+  test("every voice route of a node that is off the tailnet says so, names this node, and never leaks the login url", async () => {
+    const ts = new Tailscale(async (args) => (args[0] === "status" ? JSON.stringify({ BackendState: "NeedsLogin", AuthURL: "https://login.tailscale.com/a/secret-login", Self: { DNSName: "" } }) : null));
+    const j = startNode(voiced.url, "voice-offnet", { agentId: COMPANION_ID }, RUNTIME_TOKEN, { nodeName: "yacht", voice: { hub: "clipper" } }, ts);
+    j.db.query("INSERT INTO nodes (id,name,url,token,added_at,last_seen) VALUES (?,?,?,?,?,?)").run("n-hub", "clipper", "http://127.0.0.1:1", TEST_TOKEN, Date.now(), Date.now() - 10 * 3600_000);
+    try {
+      const cfg = await (await req(j, KEY, "/api/voice/config")).json();
+      expect(cfg).toMatchObject({ configured: false, provider: "none", via: { name: "clipper" }, hub: { name: "clipper", reachable: false, tailnet: { state: "NeedsLogin", running: false } } });
+      expect(cfg.reason).toBe("yacht is off the tailnet, so voice hub clipper is out of reach (Tailscale on yacht is logged out: log in from the Tailscale menu there, or run tailscale up; hub last seen 10 h ago); calls resume once this node is back on the tailnet");
+      expect(JSON.stringify(cfg)).not.toContain("secret-login");
+      // Remembered like any outage: the next answers carry it without asking tailscale or the network again.
+      const call = await req(j, KEY, "/api/voice/livekit", { method: "POST" });
+      expect(call.status).toBe(503);
+      const callBody = await call.json();
+      expect(callBody.reason).toContain("yacht is off the tailnet");
+      expect(callBody.hub.tailnet).toEqual({ state: "NeedsLogin", running: false });
+      expect(JSON.stringify(callBody)).not.toContain("secret-login");
+      const s = await (await req(j, TEST_TOKEN, "/api/voice/status")).json();
+      expect(s.configured).toBe(false);
+      expect(s.reason).toContain("yacht is off the tailnet");
+      expect(JSON.stringify(s)).not.toContain("secret-login");
+      const state = await (await req(j, KEY, "/api/state")).json();
+      expect(state.voice.reason).toContain("yacht is off the tailnet");
+    } finally { j.stop(); j.cleanup(); }
+  }, 20000);
 
   test("a paired hub that does not answer leaves the node without voice, says which hub and that it comes back", async () => {
     // j is pinned to "Dead", paired at a port nobody listens on: the connect fails at once.

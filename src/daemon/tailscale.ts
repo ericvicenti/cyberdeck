@@ -8,6 +8,15 @@ import { existsSync } from "fs";
 
 export type Identity = { login: string; node: string };
 export type SelfInfo = { dnsName: string; login: string | null; ip4: string | null };
+/** This node's own tailnet connection, from `tailscale status --json` `BackendState`: `Running` means on the tailnet;
+ *  `Stopped` (`tailscale down`, or the menu switch off) and `NeedsLogin` (logged out, key expired) mean off it. */
+export type TailnetState = {
+  running: boolean;
+  /** `Running` | `Stopped` | `NeedsLogin` | `NoState` | `Starting` | … (tailscale's own words). */
+  state: string;
+  /** Where a `NeedsLogin` node gets back on: shown only on the machine itself (the CLI), never over HTTP. */
+  authUrl: string | null;
+};
 /** What `tailscale funnel` publishes to the public internet for 127.0.0.1:`port` (see `Tailscale.funnel`). */
 export type FunnelInfo = {
   /** The public `https://<node>.<tailnet>:8443/api/mcp` url when only the MCP path is funneled, else null. */
@@ -64,13 +73,36 @@ export const defaultRunner: Runner = async (args) => {
 const WHOIS_TTL = 5 * 60 * 1000;
 const WHOIS_NEGATIVE_TTL = 30 * 1000;
 const SELF_TTL = 60 * 1000;
+/** The backend state is asked only after a peer failed to answer, and then at most this often. */
+const BACKEND_TTL = 10 * 1000;
+
+/** Pure half of `Tailscale.backend`: `out` is the stdout of `tailscale status --json` (null when tailscale is absent). */
+export function parseBackend(out: string | null): TailnetState | null {
+  if (!out) return null;
+  let j: any;
+  try { j = JSON.parse(out); } catch { return null; }
+  const state = String(j?.BackendState ?? "");
+  if (!state) return null;
+  const authUrl = typeof j?.AuthURL === "string" && j.AuthURL ? j.AuthURL : null;
+  return { running: state === "Running", state, authUrl };
+}
 
 export class Tailscale {
   private whoisCache = new Map<string, { at: number; id: Identity | null }>();
   private selfCache: { at: number; info: SelfInfo | null } | null = null;
   private serveCache = new Map<number, { at: number; origin: string | null }>();
   private funnelCache = new Map<number, { at: number; info: FunnelInfo }>();
+  private backendCache: { at: number; state: TailnetState | null } | null = null;
   constructor(private run: Runner = defaultRunner) {}
+
+  /** Whether this node is on the tailnet right now (null when tailscale is absent). Cheap to ask repeatedly. */
+  async backend(): Promise<TailnetState | null> {
+    if (this.backendCache && Date.now() - this.backendCache.at < BACKEND_TTL) return this.backendCache.state;
+    let state: TailnetState | null = null;
+    try { state = parseBackend(await this.run(["status", "--json"])); } catch {}
+    this.backendCache = { at: Date.now(), state };
+    return state;
+  }
 
   /** Identity of the tailnet peer at `ip`, or null if unknown / not a tailnet address. */
   async whois(ip: string): Promise<Identity | null> {

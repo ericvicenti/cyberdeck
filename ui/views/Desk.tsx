@@ -103,6 +103,8 @@ export function Desk({ params, onLocked, visible = true }: { params: URLSearchPa
   }, [v.config?.configured, v.config?.via?.node]);
   // While the hub is down (or voice is off for any reason) the page keeps asking, so it comes back on its own.
   const hubDown = v.config?.hub?.reachable === false;
+  // The hub did not answer because this machine is off the tailnet: the fix is here, not on the hub.
+  const offTailnet = hubDown && !!v.config?.hub?.tailnet;
   useEffect(() => {
     if (!v.config || v.config.configured) return;
     const t = setInterval(() => { if (document.visibilityState === "visible") { void v.refreshConfig(); void loadStatus(); } }, hubDown ? 15_000 : 60_000);
@@ -236,10 +238,12 @@ export function Desk({ params, onLocked, visible = true }: { params: URLSearchPa
             <div className="hud-card p-3" data-testid="voice-hub-offline">
               <div className="flex items-center gap-2">
                 <span className="led led-warn" />
-                <span className="hud-label neon-amber">voice hub {v.config.hub.name} is offline</span>
+                <span className="hud-label neon-amber" data-testid="voice-hub-offline-title">{offTailnet ? `${nodeName || "this node"} is off the tailnet` : `voice hub ${v.config.hub.name} is offline`}</span>
               </div>
               <p className="mt-2 text-[12px] text-zinc-300">{v.config.reason}</p>
-              <p className="mt-1 text-[11px] text-zinc-500">Nothing to set up here: the calls go through {v.config.hub.name}. This page rechecks every 15 s and TALK comes back when it answers{v.config.hub.lastSeen ? ` (last seen ${isoAgo(new Date(v.config.hub.lastSeen).toISOString())})` : ""}.</p>
+              <p className="mt-1 text-[11px] text-zinc-500">{offTailnet
+                ? `${v.config.hub.name} is probably fine: Tailscale on ${nodeName || "this node"} is ${v.config.hub.tailnet!.state === "NeedsLogin" ? "logged out" : v.config.hub.tailnet!.state === "Stopped" ? "switched off" : v.config.hub.tailnet!.state.toLowerCase()}. Once it is back on, this page notices within 15 s and TALK comes back.`
+                : `Nothing to set up here: the calls go through ${v.config.hub.name}. This page rechecks every 15 s and TALK comes back when it answers${v.config.hub.lastSeen ? ` (last seen ${isoAgo(new Date(v.config.hub.lastSeen).toISOString())})` : ""}.`}</p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button onClick={() => { void v.refreshConfig(); void loadStatus(); }} className="hud-chip text-zinc-300 hover:text-zinc-100">recheck now</button>
               </div>
@@ -330,7 +334,7 @@ export function Desk({ params, onLocked, visible = true }: { params: URLSearchPa
               <span className="hud-chip text-zinc-300" title={sessionId ?? ""}><span className={`led ${sessionId ? "led-run" : "led-off"}`} />session {sessionId ? sessionId.slice(0, 8) : "—"}</span>
               {configured && <button onClick={resetSession} disabled={busy !== ""} data-testid="voice-new-session" className="hud-chip text-zinc-300 hover:text-zinc-100 disabled:opacity-40">{busy === "reset" ? "resetting…" : "new session"}</button>}
               {status?.profile && <span className="hud-chip text-zinc-300" data-testid="voice-profile" title={status.profile.runtimeToken ? `Cartesia voice ${status.profile.voice} at ${status.profile.speed}x, applied to every call` : `Cartesia voice ${status.profile.voice}: no runtime token on this node, calls keep the worker's default voice`}><span className={`led ${status.profile.runtimeToken ? "led-on" : "led-warn"}`} />voice {status.profile.voice.slice(0, 8)} ×{status.profile.speed}</span>}
-              <span className="hud-chip text-zinc-300" data-testid="voice-node" title={v.config?.via ? `Voice is centralized: ${nodeName || "this node"} relays every call to the voice hub, ${v.config.via.name}${hubDown ? " (offline)" : ""}` : "This node runs the voice system itself"}><span className={`led ${hubDown ? "led-warn" : "led-on"}`} />voice {v.config?.via ? v.config.via.name : nodeName || "—"}{hubDown ? " offline" : ""}</span>
+              <span className="hud-chip text-zinc-300" data-testid="voice-node" title={v.config?.via ? `Voice is centralized: ${nodeName || "this node"} relays every call to the voice hub, ${v.config.via.name}${offTailnet ? " (this node is off the tailnet)" : hubDown ? " (offline)" : ""}` : "This node runs the voice system itself"}><span className={`led ${hubDown ? "led-warn" : "led-on"}`} />voice {v.config?.via ? v.config.via.name : nodeName || "—"}{offTailnet ? " out of reach" : hubDown ? " offline" : ""}</span>
               {status?.digest?.url && <a href={status.digest.url} target="_blank" rel="noreferrer" className="hud-chip text-zinc-300 hover:text-zinc-100" data-testid="voice-digest" title={`Weekly fleet digest the agent publishes ${status.digest.nextSummary ?? "on schedule"}${status.digest.lastFiredAt ? `; last written ${new Date(status.digest.lastFiredAt).toLocaleString()}` : "; not written yet"}${status.digest.lastError ? `; last error: ${status.digest.lastError}` : ""}. Opens the documents on hyper.media.`}><span className={`led ${!status.digest.enabled ? "led-off" : status.digest.lastError ? "led-warn" : "led-on"}`} />digest {status.digest.nextSummary ?? (status.digest.enabled ? "weekly" : "off")}</a>}
               {status?.identity && <span className="hud-chip text-zinc-300" title={status.identity.principal ?? ""}><span className={`led ${status.identity.available ? "led-on" : "led-warn"}`} />identity {status.identity.available ? (status.identity.principal ?? "ok").slice(0, 12) : "missing"}</span>}
             </div>

@@ -246,7 +246,7 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   const voiceRelay = createVoiceRelay(() => db.query("SELECT id, name, url, token, added_at, last_seen FROM nodes ORDER BY last_seen DESC").all() as NodeRow[], undefined, { hub: voiceHub(cfg), self: cfg.nodeName });
   casework = registerCaseworkRoutes(app, { token, nodeName: cfg.nodeName, kiosk: cfg.kiosk?.enabled, upgradeWebSocket, isFullAuth, experiencesDir: opts.caseworkExperiencesDir, key: opts.caseworkKey, voice: () => voiceSummary(seed, voiceRelay), secureOrigin: () => ts.serveOrigin(cfg.port), seedBridge: cfg.casework });
   registerDesktopRoutes(app, cfg, upgradeWebSocket, isFullAuth);
-  registerVoiceRoutes(app, seed, { isFullAuth, serveOrigin: (port) => ts.serveOrigin(port), relay: voiceRelay, profiles: seedProfiles });
+  registerVoiceRoutes(app, seed, { isFullAuth, serveOrigin: (port) => ts.serveOrigin(port), relay: voiceRelay, profiles: seedProfiles, tailnet: () => ts.backend() });
   // Seed's own agents UI in the browser: signing stays here, requests reach the agents server through us.
   registerSeedAgentsRoutes(app, seed, { token, upgradeWebSocket, isFullAuth, getNode: (id) => db.query("SELECT * FROM nodes WHERE id = ?").get(id) as import("./api/fleet").NodeRow | null });
   registerDashboardRoutes(app, db, cfg);

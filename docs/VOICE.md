@@ -394,6 +394,17 @@ and `welcome` carry the same reason. The web Desk shows an amber "voice hub clip
 (`voice-hub-offline`, no setup button), the bridge strip reads `voice clipper offline`, and the page
 rechecks every 15 s so TALK comes back by itself when the hub does.
 
+When the hub does not answer because **this node** is the one off the tailnet (its Tailscale is stopped or
+logged out: `tailscale status --json` `BackendState` other than `Running`, read by `Tailscale.backend()` after
+a relay failure and never otherwise), the same routes blame this node instead: `yacht is off the tailnet, so
+voice hub clipper is out of reach (Tailscale on yacht is logged out: log in from the Tailscale menu there, or
+run tailscale up; hub last seen 10 h ago); calls resume once this node is back on the tailnet`, with
+`hub.tailnet: {state: "NeedsLogin" | "Stopped" | …, running: false}`. The Desk card then reads "yacht is off
+the tailnet" and the strip `voice clipper out of reach`. The Tailscale login url is written to the daemon log
+only (`voice: relay to clipper failed: … log in at https://login.tailscale.com/a/…`), never into an HTTP
+answer: the pairing-key routes reach devices that must not be able to re-home the node (2026-10-27: yacht's
+node key had expired overnight and every answer said clipper was offline while clipper was fine).
+
 The web Desk talks only to the daemon in view and shows the hub in its bridge strip (`voice clipper`);
 the shell has no machine dropdown anywhere (nothing on the Desk picks a machine either). Without a
 hub configured (not the fleet's setup), a node with no bridge of its own still finds the first paired
