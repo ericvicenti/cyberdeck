@@ -264,9 +264,10 @@ switch (cmd) {
       const r = await api("/api/voice/prompt", flags.includes("--apply") ? { method: "POST" } : {}).catch(fail);
       console.log(`agent: ${r.name ?? "?"} (${r.agentId})`);
       if (r.via) console.log(`on the voice hub ${r.via.name} (${r.via.node})`);
-      if (r.applied) console.log("prompt: fleet persona applied (the next session uses it; `cyberdeck seed reset-session` starts one)");
-      else if (!r.changed) console.log("prompt: already the fleet persona");
-      else { console.log("prompt: differs from the fleet persona; run `cyberdeck seed prompt --apply` to replace it. Current:"); console.log(r.current.trim() ? r.current : "(empty)"); }
+      const what = r.managed ? "fleet persona + knowledge pack (managed by `cyberdeck seed sync --voice`)" : "fleet persona";
+      if (r.applied) console.log(`prompt: ${what} applied (the next session uses it; \`cyberdeck seed reset-session\` starts one)`);
+      else if (!r.changed) console.log(`prompt: already the ${what}`);
+      else { console.log(`prompt: differs from the ${what}; run \`cyberdeck seed prompt --apply\` to replace it${r.managed ? " (the pack is kept)" : ""}. Current:`); console.log(r.current.trim() ? r.current : "(empty)"); }
     } else if (sub === "transcript") {
       const r = await api(`/api/voice/transcript?limit=${encodeURIComponent(flags[0] ?? "20")}`).catch(fail);
       for (const m of r.messages ?? []) console.log(`[${new Date(m.at).toLocaleTimeString()}] ${m.role}: ${m.text}`);

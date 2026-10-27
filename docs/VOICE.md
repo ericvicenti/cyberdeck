@@ -514,6 +514,14 @@ one or two sentences, no markdown), work from the cyberdeck tools with `brief: t
 say what it checked, ask before restarts and collab runs, and leave a trace with `handoff_note`, `note`
 and `todo_add`. Apply, then `cyberdeck seed reset-session` so the next call starts on the new prompt.
 
+Once `cyberdeck seed sync --voice` has adopted the companion, its prompt is **managed**: persona + the
+knowledge section (fleet rules, Deck protocol, the memory pack's index), with the sync's hash in the agent's
+`metadata.cyberdeck.promptHash`. `cyberdeck seed prompt` then compares by that hash (`managed: true`,
+`desired` is the whole managed text) and `--apply` rewrites persona + pack together with a fresh hash, the
+same write the sync does, so it is safe from any node, including through the hub relay (2026-10-27: before
+this, the hub's companion read as "differs" forever and an `--apply` from yacht would have stripped clipper's
+three pack sections).
+
 ## The screen: Afterglow by voice
 
 "What is on the TV", "pause", "skip back thirty seconds", "search for Blade Runner", "play Heat": the `media` MCP

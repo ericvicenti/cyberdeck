@@ -239,7 +239,9 @@ Eric controls the call by voice too: "stop listening", "mute", "hold on" means c
 
 When a tool fails, say which one and what it said, retry at most once, and offer the next step. When you do not know, say so plainly.`;
 
-export type PromptResult = { agentId: string; name?: string; current: string; desired: string; changed: boolean; applied: boolean };
+/** `managed`: `cyberdeck seed sync --voice` owns this prompt (persona + knowledge pack, hash in the agent's metadata); then
+ *  `desired` is the whole managed text and `--apply` rewrites it the way the sync does instead of stripping the pack. */
+export type PromptResult = { agentId: string; name?: string; current: string; desired: string; changed: boolean; applied: boolean; managed: boolean };
 
 /** What `syncHarness` did to one agent. */
 export type AgentSync = {
@@ -849,7 +851,10 @@ export class SeedBridge {
 
   /** The agents server keeps the tool list it discovered at registration, so a deploy that adds or
    *  changes tools re-registers the MCP server (same config, fresh discovery) once the list differs. */
-  /** The companion's system prompt next to the fleet persona; with `apply`, the persona is written to the agent. */
+  /** The companion's system prompt next to the fleet persona; with `apply`, the persona is written to the agent.
+   *  A prompt the sync manages (persona + knowledge pack) is compared by the hash the sync left in the agent's
+   *  metadata, like `voiceAgent.promptCurrent`, and applied with the pack (2026-10-26: the hub's companion read
+   *  as "differs" forever, and `--apply` from another node would have dropped its three pack sections). */
   async prompt(apply = false): Promise<PromptResult> {
     if (!this.#state.agentId) throw new SeedError("no agent set up yet: run `cyberdeck seed setup`", 409);
     const agentId = this.#state.agentId;
@@ -860,14 +865,18 @@ export class SeedBridge {
     // The server hands a prompt back as blocks once it has stored one (the 2026-10-24 trigger lesson): read it as
     // text and compare like samePrompt does, or an applied persona reads as "(empty)" and "differs" forever.
     const current = promptText(definition.systemPrompt);
-    const desired = fleetPrompt(name ?? "Cyberdeck");
-    const changed = !samePrompt(definition.systemPrompt, desired);
+    const meta = metaOf(definition);
+    const managed = meta.role === "voice" && !!meta.promptHash;
+    const persona = fleetPrompt(name ?? "Cyberdeck");
+    const desired = managed ? `${persona}\n\n${knowledgeSection(this.#sources(), this.#ctx())}` : persona;
+    const changed = managed ? meta.promptHash !== sha256(desired) : !samePrompt(definition.systemPrompt, desired);
     let applied = false;
     if (apply && changed) {
-      await this.action({ _: "UpdateAgent", agentId, definition: { ...definition, systemPrompt: desired } });
+      const patch = managed ? { systemPrompt: desired, metadata: this.#meta(definition, { promptHash: sha256(desired), role: "voice" }) } : { systemPrompt: desired };
+      await this.action({ _: "UpdateAgent", agentId, definition: omitUndefined({ ...definition, ...patch }) });
       applied = true;
     }
-    return { agentId, name, current, desired, changed, applied };
+    return { agentId, name, current, desired, changed, applied, managed };
   }
 
   async refreshMcp(names?: string[]): Promise<"skipped" | "unchanged" | "refreshed"> {

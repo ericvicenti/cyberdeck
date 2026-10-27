@@ -1108,6 +1108,23 @@ describe("Seed text queries", () => {
       expect(st.queryAgent).toMatchObject({ id: harness.agentId, name: "Cyberdeck", reasoningLevel: "high", promptCurrent: true, memoryFiles: 4 });
       expect(st.voiceAgent).toMatchObject({ managed: true, promptCurrent: true, memoryFiles: 4 });
       expect(st.nodeTools).toBe(true);
+      // `cyberdeck seed prompt` on a managed companion compares persona + pack by the sync's hash: current, not "differs".
+      const p1 = await (await req(h, TEST_TOKEN, "/api/voice/prompt")).json();
+      expect(p1).toMatchObject({ agentId: v4.agentId, managed: true, changed: false, applied: false });
+      expect(p1.desired).toBe(vdef.systemPrompt);
+      expect(p1.desired).toContain("Always run deck sync.");
+      // An older persona wording (a stale hash): --apply rewrites persona + pack together, never the bare persona.
+      (vdef.metadata as any).cyberdeck.promptHash = "stale";
+      vdef.systemPrompt = "old persona\n\nold pack";
+      expect((await (await req(h, TEST_TOKEN, "/api/voice/prompt")).json()).changed).toBe(true);
+      const p2 = await (await req(h, TEST_TOKEN, "/api/voice/prompt", { method: "POST" })).json();
+      expect(p2).toMatchObject({ managed: true, changed: true, applied: true });
+      const vdef2 = voiced.agents.get(v4.agentId)!; // UpdateAgent stores a fresh definition
+      expect(vdef2.systemPrompt).toBe(p1.desired);
+      expect(vdef2.systemPrompt).toContain("Always run deck sync.");
+      expect((vdef2.metadata as any).cyberdeck.promptHash).not.toBe("stale");
+      expect((await (await req(h, TEST_TOKEN, "/api/voice/prompt")).json()).changed).toBe(false);
+      expect((await sync()).agents.find((x: any) => x.role === "voice").definition).toEqual([]);
       expect(await (await req(h, TEST_TOKEN, "/api/voice/harness/prompt")).text()).toContain("Always run deck sync.");
       // The prompt bar's first query uses that agent instead of creating another.
       const creates = voiced.actions.filter((x) => x._ === "CreateAgent").length;
