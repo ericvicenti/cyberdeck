@@ -1,8 +1,8 @@
 # Cyberdeck navigation coverage
 
-Updated 2026-10-26. This is an implementation inventory, not a completion claim.
+Updated 2026-10-27. This is an implementation inventory, not a completion claim.
 The nightly routine and fleet deployment status live in Deck's
-`handoff/routines/cyberdeck-navigation/2026-10-26.md`.
+`handoff/routines/cyberdeck-navigation/2026-10-27.md`.
 
 ## Source and rollout status
 
@@ -76,7 +76,7 @@ credentials should not be replayed from a link.
 | `services` / Services | host and service focus | Existing URL parameters retained; legacy Home `service` links fixed centrally. Missing host/service selections and unavailable backend now have matching titles and visible errors. Start/restart/log commands remain explicit. |
 | `data` / Data | root filter, repo query | Covered. Scans are actions; table has a fixed 100-item cap, not a pageable UI. |
 | `files` / Files, TreeNode, dialogs | path, hidden files, sort/order, query, deep search, File Info modal | Covered, including stale listing/deep-search protection. Multi-selection, expanded tree folders, clipboard, rename/chmod/delete/import drafts stay transient; assess any desired navigable selection separately. Failed directory/info has a matching title. |
-| `edit` / Editor | file path, text/media/markdown, playlist; video transport mode, loop/shuffle | Path/title reconstruct content; empty paths and missing text have accurate views/titles. Documents are retained per node/path across files, primary views and history, preserving unsaved buffers, undo and media. Saves capture a revision and cannot clear later edits; duplicate saves are serialized. Requests and delayed media events stay bound to the original node. Hidden ended/error events cannot navigate or retitle another view. Explicit playlist selection pauses the old track; ordinary navigation leaves playback intact. Drafts remain in memory until tab close, refresh or lock. PDF-viewer errors and persisted playback position/preferences remain outside this slice. |
+| `edit` / Editor | file path, text/media/markdown, playlist; video transport mode, loop/shuffle | Path/title reconstruct content; empty paths and missing text have accurate views/titles. Documents are retained per node/path across files, primary views and history, preserving unsaved buffers, undo and media. Saves capture a revision and cannot clear later edits; duplicate saves are serialized. Requests and delayed media events stay bound to the original node. Hidden ended/error events cannot navigate or retitle another view. Explicit playlist selection pauses the old track; ordinary navigation leaves playback intact. Drafts remain in memory until tab close, refresh or lock. PDF previews now restore page/zoom/rotation, typed failures and passwords through the parent route (see October 27). Persisted media playback position/preferences remain outside this slice. |
 | `term` / Term, TermPane, SeedPane, PromptBar | node/session, new-session form, cwd prefill; transcript pagination | `filter` selects the tab-strip machine (`self` = serving node, absent = every machine); `target` selects the New form destination independently of the underlying session node. Both restore on reload/new-tab/Back/Forward, and selecting a session retains its filter. Default selection waits for its owner and replaces once; offline/unknown nodes have distinct errors, delayed peers do not become false missing sessions. Seed session links use authenticated entity titles. Links never create a process. Daemon persistence covered in existing E2E. Transcript pagination/drafts and remaining backend errors remain. |
 | `cmux` / Cmux | surface, scrollback, creation form | Surface/scrollback URL/default/title covered. Polling screen response guarded. Workspace creation, input and desktop focus are explicit actions. Missing surfaces have a not-found state/title and never poll a nonexistent terminal. Backend unavailable has its own title. |
 | `cloud` / Cloud + RemoteBrowser | profile, target URL, archive query, provider+conversation | Covered. Remote URL/title state mirrors into the parent route after a request acknowledgement; initial profile state cannot overwrite direct links, redirects replace the requested URL, page/user navigation pushes once, and Back/Forward restores without remounting the persistent browser. The UI settles unacknowledged state for older daemons during rolling updates. Missing profiles, invalid target URLs and unavailable browsers show matching errors/titles before any browser socket is opened. |
@@ -142,7 +142,7 @@ fleet availability is recorded in the latest Deck run report.
 
 Remaining: the nested Commander states listed below; Seed titles for URL-supplied
 external servers and nested-file errors; the rest of the error/lifecycle matrix;
-native/physical-device cases; and offline Starlight. This inventory is not an
+native/physical-device cases. Current pending hosts are recorded in the run report. This inventory is not an
 app-wide acceptance claim. Network URLs describe an inspection, never a test command.
 
 
@@ -280,5 +280,59 @@ the last writer so a completed parent load cannot erase a nested error title.
 
 Remaining Commander coverage: trainer Live-card perspective; in-game tactic/menu selections; remaining
 per-view failures. Remaining Cyberdeck coverage: Seed successful-metadata/content-read
-failures and external-server title limits, PDF preview/navigation, transcript/draft
+failures and external-server title limits, PDF native-original/annotation cases, transcript/draft
 semantics and native/physical-device cases. App-wide acceptance remains incomplete.
+
+
+## 2026-10-27 PDF previews
+
+The Editor's PDF preview now owns `page` (one-based), `zoom` (`fit`, `width`, or
+25–400 percent) and `rotate` (0/90/180/270) in its existing node/path URL. Page one,
+fit width and zero rotation have no query parameter. Malformed/default values
+replace once; valid pages beyond the document length retain a shareable missing-page
+view. Controls push one entry and no-op changes push none. Reload/new tabs and
+Back/Forward restore the same page, zoom, rotation and node with matching titles.
+
+A lazy, pinned PDF.js renderer replaces the nested browser plug-in history owner.
+Documents remain loaded per node/path across primary views, other files and peers;
+page/zoom changes do not refetch the file. Render cancellation and separate canvases
+prevent old work from painting another selection. The preview supports selectable
+page text. Passwords remain transient, survive ordinary retained-view navigation,
+and are required again after refresh/lock; they never appear in links. Original
+file controls (printing, forms, full-document search, annotations/bookmarks) remain
+available through **Open original** in a separate browser tab. Those native-viewer
+controls are not synchronized into Cyberdeck's parent route; this is not a claim
+of complete native PDF viewer coverage.
+
+File metadata distinguishes missing files, directories and unknown machines before
+loading. Content failure after successful metadata, denied access, corrupt PDFs,
+offline machines, retries and stale replies have explicit view/title coverage. The
+serving node's 401 locks only its active view; a hidden failure cannot lock another
+view, and a peer's denial does not discard the serving identity. The selected node
+owns every request. File bytes use authorization headers rather than tokens in the
+PDF renderer URL. Worker, fonts, CMaps and decoder assets are versioned and served
+locally; no external PDF service or document script is used. [PDF.js rendering API](https://mozilla.github.io/pdf.js/examples/).
+
+Repeatable tests: `bun run typecheck && bun run build`, then
+`bun test tests/pdf-navigation.test.ts --timeout 30000`. The suite generates original
+three-page content and includes an original password-protected copy (password
+`fixture-password`; generated with pypdf's RC4-128 solely to exercise the reader).
+Use `CYBERDECK_TEST_UI` for an exact captured host build, and optionally
+`CYBERDECK_TEST_ARTIFACTS` to save the fit-width/rotated screenshots. No user's PDF
+is used by the fixtures. Existing editor/media/bridge regression suites still apply.
+
+Installed check:
+`CYBERDECK_TEST_ORIGIN=<private-loopback-tunnel> CYBERDECK_TEST_PDF=<run-dir>/navigation.pdf CYBERDECK_TEST_TOKEN_HOST=<ssh-alias> bun scripts/check-pdf-navigation-live.ts`.
+Create only the original fixture from `tests/fixtures/navigation-pdf.ts` in this run's
+artifact directory; omit token host on Yacht. This check uses real installed assets,
+worker and authenticated filesystem reads. It rejects writes, external requests,
+non-fixture PDF reads and all WebSocket connections, and checks a deliberately
+nonexistent path for the missing-file title. It never attaches to a kiosk or terminal.
+
+Deployment adds the pinned `pdfjs-dist` dependency and Vite asset packaging, plus
+only the PDF viewer, its scoped styles/types and the Editor integration. Exact
+captured source groups are built separately, fingerprinted, backed up and activated
+by atomic index replacement. Old hashed assets remain available to existing tabs.
+No daemon or active session restart is necessary. See the current run report for
+actual hosts, rollback paths and pending rollout status. App-wide acceptance remains
+incomplete; retain the routine until the complete checklist is satisfied.

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouteTitle, nodeName } from "../lib/navigation";
 import { EditorView, keymap, lineNumbers, highlightActiveLine } from "@codemirror/view";
 import { EditorState, Compartment } from "@codemirror/state";
@@ -11,6 +11,8 @@ import { api, post as postToNode, rawUrl as rawNodeUrl, nodePath, navigate, fmtB
 import { SkipBackIcon, SkipFwdIcon, RepeatIcon, ShuffleIcon } from "../lib/icons";
 import videojs from "video.js";
 import "video.js/dist/video-js.css";
+
+const PdfPreview = lazy(() => import("./PdfPreview"));
 
 // Each retained document owns its original node, including delayed media events.
 // Never resolve a background save, stream, or playlist against the current URL.
@@ -426,7 +428,9 @@ export function Editor({ params, onLocked, visible = true }: { params: URLSearch
         </div>
       )}
       {(media === "video" || media === "audio") && <MediaPlayer key={retry} path={path} kind={media} node={node} visible={visible} client={client} onError={mediaError} />}
-      {media === "pdf" && <iframe key={retry} src={rawUrl("/api/fs/read", { path })} className="flex-1" title={name} />}
+      {media === "pdf" && <Suspense fallback={<div role="status" className="p-4">Loading PDF preview…</div>}>
+        <PdfPreview params={params} visible={visible} onLocked={onLocked} />
+      </Suspense>}
 
       {!media && state === "binary" && (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 text-zinc-500">

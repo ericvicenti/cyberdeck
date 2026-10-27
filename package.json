@@ -26,6 +26,7 @@
     "bun-pty": "^0.4.10",
     "guacamole-common-js": "1.5.0",
     "hono": "^4.6.0",
+    "pdfjs-dist": "6.4.299",
     "playwright": "^1.62.1",
     "video.js": "^8.24.0",
     "zod": "3.25.76"
