@@ -243,7 +243,7 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   }
   // Voice is centralized on the hub (config voice.hub): every voice route relays to that paired node. Without
   // a hub, a node without a bridge relays to the first paired node that has one.
-  const voiceRelay = createVoiceRelay(() => db.query("SELECT id, name, url, token, added_at, last_seen FROM nodes ORDER BY last_seen DESC").all() as NodeRow[], undefined, { hub: voiceHub(cfg), self: cfg.nodeName });
+  const voiceRelay = createVoiceRelay(() => db.query("SELECT id, name, url, token, added_at, last_seen, probe_device FROM nodes ORDER BY last_seen DESC").all() as NodeRow[], undefined, { hub: voiceHub(cfg), self: cfg.nodeName });
   casework = registerCaseworkRoutes(app, { token, nodeName: cfg.nodeName, kiosk: cfg.kiosk?.enabled, upgradeWebSocket, isFullAuth, experiencesDir: opts.caseworkExperiencesDir, key: opts.caseworkKey, voice: () => voiceSummary(seed, voiceRelay), secureOrigin: () => ts.serveOrigin(cfg.port), seedBridge: cfg.casework });
   registerDesktopRoutes(app, cfg, upgradeWebSocket, isFullAuth);
   registerVoiceRoutes(app, seed, { isFullAuth, serveOrigin: (port) => ts.serveOrigin(port), relay: voiceRelay, profiles: seedProfiles, tailnet: () => ts.backend() });

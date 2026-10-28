@@ -6,6 +6,8 @@ import { randomBytes } from "crypto";
 export const CYBERDECK_HOME = process.env.CYBERDECK_HOME ?? join(homedir(), ".cyberdeck");
 
 export interface CyberdeckConfig {
+  /** Prefer the enrolled Probe fleet for all peer HTTP, WebSocket and SSH traffic. */
+  probe?: { enabled: boolean; stateDir?: string };
   /** Physical host desktop, accessed only by the owner through authenticated WebSockets. */
   desktop?: { enabled: boolean; backend: "rdp" | "vnc"; port?: number; gatewayPort?: number; credentialsFile?: string };
   /** Optional applications and physical fullscreen browser on this machine. */

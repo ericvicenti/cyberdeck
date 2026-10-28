@@ -77,7 +77,8 @@ export function initSchema(db: Database): void {
       url TEXT NOT NULL,
       token TEXT NOT NULL,
       added_at INTEGER NOT NULL,
-      last_seen INTEGER
+      last_seen INTEGER,
+      probe_device TEXT
     );
 
     CREATE TABLE IF NOT EXISTS events (
@@ -87,4 +88,7 @@ export function initSchema(db: Database): void {
       payload TEXT NOT NULL DEFAULT '{}'
     );
   `);
+  const nodeColumns = db.query("PRAGMA table_info(nodes)").all() as { name: string }[];
+  if (!nodeColumns.some(c => c.name === "probe_device")) db.run("ALTER TABLE nodes ADD COLUMN probe_device TEXT");
+
 }

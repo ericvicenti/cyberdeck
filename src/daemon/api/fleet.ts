@@ -1,3 +1,4 @@
+import { bindProbeNodes, probeSnapshot, probeConsoleTicket, peerBaseUrl, transportFetch } from "../probe";
 // Fleet v1: pragmatic node pairing + request proxying.
 //
 // Pairing exchanges each node's API token over a direct HTTP call, gated by a
@@ -19,6 +20,7 @@ export type NodeRow = {
   token: string;
   added_at: number;
   last_seen: number | null;
+  probe_device?: string | null;
 };
 
 const PAIRING_TTL_MS = 5 * 60 * 1000;
@@ -41,13 +43,7 @@ export function lanUrls(port: number): string[] {
   return urls;
 }
 
-export async function peerFetch(node: NodeRow, path: string, init?: RequestInit): Promise<Response> {
-  return fetch(`${node.url}${path}`, {
-    ...init,
-    headers: { ...(init?.headers as Record<string, string>), authorization: `Bearer ${node.token}` },
-    signal: init?.signal ?? AbortSignal.timeout(15_000),
-  });
-}
+export const peerFetch = transportFetch;
 
 export function registerFleetRoutes(
   app: Hono,
@@ -58,6 +54,12 @@ export function registerFleetRoutes(
   upgradeWebSocket: any,
   extras: { tailscale?: Tailscale; authedViaTailscale?: (c: { req: { raw: Request } }) => boolean } = {}
 ) {
+  bindProbeNodes(db);
+  app.get("/api/fleet/probe", (c) => c.json(probeSnapshot()));
+  app.post("/api/fleet/probe/console", async c => {
+    try { return c.json(await probeConsoleTicket()); }
+    catch (error) { return c.json({ error: error instanceof Error ? error.message : "Probe unavailable" }, 502); }
+  });
   const getNode = (id: string): NodeRow | null =>
     (db.query("SELECT * FROM nodes WHERE id = ?").get(id) as NodeRow) ?? null;
   const tailnetInfo = async () => (extras.tailscale ? await extras.tailscale.self() : null);
@@ -144,7 +146,8 @@ export function registerFleetRoutes(
   });
 
   app.get("/api/fleet/nodes", async (c) => {
-    const rows = db.query("SELECT id, name, url, added_at, last_seen FROM nodes ORDER BY name").all() as Omit<NodeRow, "token">[];
+    bindProbeNodes(db);
+    const rows = db.query("SELECT id, name, url, added_at, last_seen, probe_device FROM nodes ORDER BY name").all() as Omit<NodeRow, "token">[];
     // Probe reachability + pull summary stats concurrently. The race timer is
     // a HARD bound: AbortSignal cannot cancel a stuck DNS/mDNS lookup (e.g. an
     // offline peer.local hostname), which would otherwise hang this request.
@@ -154,11 +157,11 @@ export function registerFleetRoutes(
           const node = getNode(r.id)!;
           const status = await Promise.race([
             (async () => {
-              const res = await peerFetch(node, "/api/status", { signal: AbortSignal.timeout(3000) });
+              const res = await peerFetch(node, "/api/status", { signal: AbortSignal.timeout(r.probe_device ? 12_000 : 3000) });
               if (!res.ok) throw new Error(String(res.status));
               return res.json();
             })(),
-            new Promise<never>((_, reject) => setTimeout(() => reject(new Error("probe timeout")), 3500)),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error("probe timeout")), r.probe_device ? 12_500 : 3500)),
           ]);
           db.query("UPDATE nodes SET last_seen = ? WHERE id = ?").run(Date.now(), r.id);
           // Fleet convergence: a peer on a different commit gets nudged to
@@ -168,9 +171,9 @@ export function registerFleetRoutes(
             nudgePeer(getNode(r.id)!);
             maybeSelfUpdate(`peer ${r.name} is on ${status.commit}`);
           }
-          return { ...r, online: true, status };
-        } catch {
-          return { ...r, online: false, status: null };
+          return { ...r, online: true, status, transport: r.probe_device ? "probe" : "direct" };
+        } catch (error) {
+          return { ...r, online: false, status: null, transport: r.probe_device ? "probe" : "direct", error: error instanceof Error ? error.message : "Unreachable" };
         }
       })
     );
@@ -221,14 +224,18 @@ export function registerFleetRoutes(
       const node = getNode(c.req.param("id"));
       let peer: WebSocket | null = null;
       const pending: (string | ArrayBuffer)[] = [];
+      let closed = false;
       return {
-        onOpen(_ev: unknown, ws: { send: (s: string | ArrayBuffer) => void; close: () => void }) {
+        async onOpen(_ev: unknown, ws: { send: (s: string | ArrayBuffer) => void; close: () => void }) {
           if (!node) {
             ws.send(JSON.stringify({ t: "data", data: "\r\nunknown node\r\n" }));
             ws.close();
             return;
           }
-          peer = new WebSocket(node.url.replace(/^http/, "ws") + peerPath(c, node));
+          let base: string;
+          try { base = await peerBaseUrl(node); } catch { ws.close(); return; }
+          if (closed) return;
+          peer = new WebSocket(base.replace(/^http/, "ws") + peerPath(c, node));
           peer.binaryType = "arraybuffer";
           peer.onopen = () => {
             for (const msg of pending.splice(0)) peer!.send(msg);
@@ -246,6 +253,7 @@ export function registerFleetRoutes(
           else pending.push(msg);
         },
         onClose() {
+          closed = true;
           try {
             peer?.close();
           } catch {}

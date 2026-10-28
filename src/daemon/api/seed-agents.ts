@@ -1,3 +1,4 @@
+import { peerBaseUrl } from "../probe";
 // Seed agents UI host: everything the browser needs to run Seed's own agents UI
 // (@seed-hypermedia/agents-ui) against this node's agents server, without ever holding a key.
 //
@@ -137,11 +138,15 @@ export function registerSeedAgentsRoutes(app: Hono, seed: SeedBridge, deps: Deps
       const node = remote ? deps.getNode(c.req.param("node")) : null;
       let upstream: WebSocket | null = null;
       const pending: (string | ArrayBuffer | Uint8Array)[] = [];
+      let closed = false;
       return {
-        onOpen(_ev: unknown, ws: { send: (d: string | ArrayBuffer | Uint8Array) => void; close: (code?: number, reason?: string) => void }) {
+        async onOpen(_ev: unknown, ws: { send: (d: string | ArrayBuffer | Uint8Array) => void; close: (code?: number, reason?: string) => void }) {
           if (remote && !node) { ws.close(1008, "unknown node"); return; }
+          let base = "";
+          try { if (node) base = await peerBaseUrl(node); } catch { ws.close(1011, "Probe connection unavailable"); return; }
+          if (closed) return;
           upstream = node
-            ? new WebSocket(`${node.url.replace(/^http/, "ws")}${PROXY}/agents/ws`, { headers: { authorization: `Bearer ${node.token}` } } as any)
+            ? new WebSocket(`${base.replace(/^http/, "ws")}${PROXY}/agents/ws`, { headers: { authorization: `Bearer ${node.token}` } } as any)
             : new WebSocket(`${agentsUrl().replace(/^http/, "ws")}/agents/ws`);
           upstream.binaryType = "arraybuffer";
           upstream.onopen = () => {
@@ -157,6 +162,7 @@ export function registerSeedAgentsRoutes(app: Hono, seed: SeedBridge, deps: Deps
           else pending.push(frame);
         },
         onClose() {
+          closed = true;
           try {
             upstream?.close();
           } catch {}

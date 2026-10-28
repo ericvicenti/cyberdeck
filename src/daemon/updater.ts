@@ -1,3 +1,4 @@
+import { transportFetch } from "./probe";
 // Self-update + fleet convergence. Every node tracks its own git commit,
 // periodically checks origin, and applies updates by pulling/rebuilding and
 // then exiting - launchd/systemd (KeepAlive/Restart=always) brings it back on
@@ -76,11 +77,11 @@ export async function applyUpdate(): Promise<{ ok: boolean; detail: string }> {
 const lastNudge = new Map<string, number>();
 const NUDGE_INTERVAL_MS = 10 * 60 * 1000;
 
-export function nudgePeer(node: { id: string; url: string; token: string }): void {
+export function nudgePeer(node: { id: string; url: string; token: string; probe_device?: string | null }): void {
   const last = lastNudge.get(node.id) ?? 0;
   if (Date.now() - last < NUDGE_INTERVAL_MS) return;
   lastNudge.set(node.id, Date.now());
-  fetch(`${node.url}/api/system/update`, {
+  transportFetch(node, "/api/system/update", {
     method: "POST",
     headers: { authorization: `Bearer ${node.token}` },
     signal: AbortSignal.timeout(5000),
@@ -112,13 +113,13 @@ export function startAutoUpdater(db: Database): () => void {
   const tick = () => maybeSelfUpdate("periodic");
   const sweep = async () => {
     const mine = await currentCommit();
-    const rows = db.query("SELECT id, name, url, token FROM nodes").all() as {
+    const rows = db.query("SELECT id, name, url, token, probe_device FROM nodes").all() as {
       id: string; name: string; url: string; token: string;
     }[];
     for (const node of rows) {
       try {
         const res = await Promise.race([
-          fetch(`${node.url}/api/status`, {
+          transportFetch(node, "/api/status", {
             headers: { authorization: `Bearer ${node.token}` },
             signal: AbortSignal.timeout(4000),
           }),

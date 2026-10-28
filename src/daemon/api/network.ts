@@ -5,7 +5,7 @@ import { join } from "path";
 import { randomBytes } from "crypto";
 import type { CyberdeckConfig } from "../config";
 import { NETWORK_BYTES, NETWORK_INTERVAL, networkName, type NetworkNode, type NetworkSample, type NetworkSnapshot } from "../../shared/network";
-import type { NodeRow } from "./fleet";
+import { peerFetch, type NodeRow } from "./fleet";
 
 const TIMEOUT = 15_000;
 const COOLDOWN = 60_000;
@@ -62,7 +62,7 @@ export function registerNetworkRoutes(app: Hono, db: Database, cfg: CyberdeckCon
     running = target;
     const sample: NetworkSample = { source, target, at: Date.now(), latencyMs: null, downloadMbps: null, uploadMbps: null, bytes: 0 };
     const request = async (path: string, init: RequestInit = {}) => {
-      const res = await fetch(`${peer.url}/api/network/${path}`, { ...init, redirect: "error", signal: AbortSignal.timeout(TIMEOUT), headers: { ...init.headers, authorization: `Bearer ${peer.token}`, "cache-control": "no-store" } });
+      const res = await peerFetch(peer, `/api/network/${path}`, { ...init, redirect: "error", signal: AbortSignal.timeout(TIMEOUT), headers: { ...init.headers, authorization: `Bearer ${peer.token}`, "cache-control": "no-store" } });
       if (!res.ok) throw new Error(res.status === 404 ? "Network tests need a Cyberdeck update on this peer" : `Peer returned HTTP ${res.status}`);
       return res;
     };

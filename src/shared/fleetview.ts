@@ -83,11 +83,12 @@ export const isSessionRef = (row: { id: string; node: string }, session: string,
 export type HostRoute = { kind: "local" } | { kind: "node"; id: string; name: string } | { kind: "ssh"; alias: string } | { kind: "none"; reason: string };
 
 /** `me` is the fleet.json name of the machine serving the page (see `servingHost`), never the Deck source's. */
-export function resolveHost(t: { host: string; me: string; hosts: { name: string; ssh?: string | null }[]; nodes: { id: string; name: string; online: boolean }[] }): HostRoute {
+export function resolveHost(t: { host: string; me: string; hosts: { name: string; ssh?: string | null }[]; nodes: { id: string; name: string; online: boolean; probe_device?: string | null }[] }): HostRoute {
   const h = t.host.toLowerCase();
   if (t.me && h === t.me.toLowerCase()) return { kind: "local" };
   const n = t.nodes.find((x) => x.name.toLowerCase() === h);
   if (n?.online) return { kind: "node", id: n.id, name: n.name };
+  if (n?.probe_device) return { kind: "none", reason: `${t.host} is unreachable through Probe` };
   const alias = t.hosts.find((x) => x.name.toLowerCase() === h)?.ssh;
   if (alias) return { kind: "ssh", alias };
   return { kind: "none", reason: n ? `${t.host} is offline` : `${t.host} has no ssh alias and is not a paired node` };

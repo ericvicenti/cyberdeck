@@ -1,3 +1,4 @@
+import { probeSshArgs } from "../probe";
 // Node tools of the MCP server: the reach a terminal agent (cc, cx) has on this machine, offered
 // to a Seed agent through the same server as the deck tools. A shell (login shell, so the owner's
 // PATH and tools are there; `host` runs it on another fleet machine over ssh), file read / write /
@@ -87,9 +88,10 @@ export async function runShell(t: ShellTarget, command: string, cwd: string, tim
   // Locally the command runs in its own process group (perl's setpgid; every macOS and Linux box has
   // perl) so a timeout kills the whole tree, not just the shell, and the output pipes close.
   const perl = t.local ? Bun.which("perl", { PATH: `${env.PATH ?? ""}:/usr/bin:/bin` }) : null;
+  const route = !t.local && !env.CYBERDECK_SSH ? probeSshArgs(t.host) : null;
   const argv = t.local
     ? perl ? [perl, "-e", "use POSIX; POSIX::setpgid(0, 0); exec @ARGV or die $!", "--", "/bin/sh", "-s"] : ["/bin/sh", "-s"]
-    : [sshBin(), "-o", "ConnectTimeout=8", "-o", "BatchMode=yes", t.ssh!, "sh", "-s"];
+    : [sshBin(), ...(route ?? ["-o", "ConnectTimeout=8", "-o", "BatchMode=yes", t.ssh!]), "sh", "-s"];
   const started = Date.now();
   const p = Bun.spawn(argv, { stdin: new Blob([script]), stdout: "pipe", stderr: "pipe", env: { ...env, CYBERDECK_MCP: "1" }, cwd: t.local && existsSync(cwd) ? cwd : undefined });
   let timedOut = false;

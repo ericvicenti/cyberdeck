@@ -1,3 +1,4 @@
+import { ProbeFleet } from "../components/ProbeFleet";
 // Home: the dashboard. Usage limits for Claude Code and Codex, backup and
 // redundancy status, storage across the fleet, agent activity, the Deck control
 // summary, services, handoff, and the machine cards with pairing at the bottom.
@@ -25,7 +26,7 @@ type NodeStatus = {
   junkBytes: number | null;
   lastScanAt: number | null;
 };
-type FleetNode = { id: string; name: string; url: string; added_at: number; last_seen: number | null; online: boolean; status: NodeStatus | null };
+type FleetNode = { id: string; name: string; url: string; added_at: number; last_seen: number | null; online: boolean; status: NodeStatus | null; probe_device?: string | null; transport?: "probe" | "direct"; error?: string };
 type FleetInfo = { self: { nodeId: string; name: string; urls: string[] }; nodes: FleetNode[] };
 type PairingCode = { code: string; expiresAt: number; urls: string[] };
 
@@ -444,6 +445,7 @@ export function Home({ params, onLocked }: { params: URLSearchParams; onLocked: 
           {dash && <span className="text-[10px] text-zinc-600">updated {fmtAgo(dash.at)}</span>}
         </div>
 
+        <ProbeFleet peers={info?.nodes ?? []} />
         <NetworkMap params={params} />
 
         <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="dashboard">
@@ -629,7 +631,7 @@ export function Home({ params, onLocked }: { params: URLSearchParams; onLocked: 
               key={n.id}
               testId={`node-card-${n.name.toLowerCase()}`}
               name={n.name}
-              subtitle={`${n.url} · paired ${fmtAgo(n.added_at)}${n.last_seen ? ` · seen ${fmtAgo(n.last_seen)}` : ""}`}
+              subtitle={`${n.transport === "probe" ? "Via Probe · " + (n.online ? "reachable" : n.error ?? "unreachable") : n.url} · paired ${fmtAgo(n.added_at)}${n.last_seen ? ` · seen ${fmtAgo(n.last_seen)}` : ""}`}
               online={n.online}
               status={n.status}
               onRepos={() => goto(n.id, n.name, "data")}

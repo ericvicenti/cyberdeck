@@ -1,3 +1,4 @@
+import { configureProbeTransport, closeProbeTransport } from "./probe";
 import { loadConfig, loadToken, loadNodeId, CYBERDECK_HOME } from "./config";
 import { openDb } from "./db";
 import { createServer, VERSION } from "./server";
@@ -7,6 +8,10 @@ import { startWatcher } from "./indexer/watch";
 import { startAutoUpdater } from "./updater";
 
 const cfg = loadConfig();
+configureProbeTransport(cfg.probe);
+process.on("exit", closeProbeTransport);
+process.on("SIGTERM", () => { closeProbeTransport(); process.exit(0); });
+process.on("SIGINT", () => { closeProbeTransport(); process.exit(0); });
 const token = loadToken();
 const nodeId = loadNodeId();
 const db = openDb();

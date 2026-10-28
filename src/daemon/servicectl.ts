@@ -1,3 +1,4 @@
+import { probeSshArgs } from "./probe";
 // Service control for the MCP tools `service_logs` and `services_restart`: read a fleet service's
 // recent logs or restart it, on whichever host runs it. Only services the fleet manifest lists for
 // that host (`deck hosts --json` → `services`) are reachable, with the fixed commands from
@@ -36,8 +37,9 @@ export function resolveService(hosts: ManifestHost[], me: string, host: string, 
 }
 
 /** Run a script on the target's host (stdin to `bash -s`), output capped from the end. */
-export async function execOn(t: Pick<ServiceTarget, "local" | "ssh">, script: string, timeoutMs = 30_000): Promise<ExecResult> {
-  const argv = t.local ? ["bash", "-s"] : [sshBin(), "-o", "ConnectTimeout=6", "-o", "BatchMode=yes", t.ssh!, "bash", "-s"];
+export async function execOn(t: Pick<ServiceTarget, "local" | "ssh"> & { host?: string }, script: string, timeoutMs = 30_000): Promise<ExecResult> {
+  const route = !t.local && !process.env.CYBERDECK_SSH ? probeSshArgs(t.host ?? t.ssh!) : null;
+  const argv = t.local ? ["bash", "-s"] : [sshBin(), ...(route ?? ["-o", "ConnectTimeout=6", "-o", "BatchMode=yes", t.ssh!]), "bash", "-s"];
   const p = Bun.spawn(argv, { stdin: new Blob([script]), stdout: "pipe", stderr: "pipe", env: process.env });
   const timer = setTimeout(() => p.kill(), timeoutMs);
   const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);

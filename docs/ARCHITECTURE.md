@@ -896,3 +896,7 @@ artifact for machine convergence ("facets" will later template this file).
 Mac authentication for each connection. `ui/views/Desktop.tsx` uses noVNC/Guacamole and
 releases the connection on host switch or unmount. `/api/nodes/:id/desktop/stream` relays
 binary or text frames to the selected paired host. See README for host setup.
+
+## Probe connectivity
+
+Enrolled peers use persistent `nodes.probe_device` identities and a shared pinned SSH transport for HTTP/WebSockets. `/api/fleet/probe` reports membership freshness; `/api/fleet/nodes` reports actual Cyberdeck reachability and the selected transport. `/api/fleet/probe/console` approves browser sign-in. See [PROBE.md](PROBE.md) for the gateway, authentication and deployment.

@@ -10,7 +10,7 @@ import { rememberNodeNames } from "./navigation";
 import type { Overview } from "./control";
 import type { NodeAnswer, NodeRef } from "../../src/shared/fleetview";
 
-export type FleetNode = { id: string; name: string; online: boolean };
+export type FleetNode = { id: string; name: string; online: boolean; probe_device?: string | null };
 export type FleetNodes = { self: { nodeId: string; name: string; commit?: string; urls?: string[] }; nodes: FleetNode[] };
 /** A machine requests can go to: this one (id "") first, then every paired node. */
 export type Target = NodeRef & { online: boolean; self: boolean };
