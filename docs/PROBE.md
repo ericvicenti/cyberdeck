@@ -56,3 +56,17 @@ account isolation, origin enforcement, large streamed requests, protected tokens
 and live WebSocket revocation. Verify deployed peers with actual `/api/status`,
 file/session operations and desktop readiness; do not infer physical desktop
 control solely from network presence.
+
+Live rollout2026-10-28: all seven computers (Clipper, Yacht, Starlight, Botical,
+Enuc, Iris, Sentinel) are enrolled and each reaches its six peers through Probe.
+With Clipper's Tailscale actually stopped, pinned SSH to all seven and the public
+gateway's real terminal input/output/reconnect and file write/read/range checks
+passed. VNC streams reached the three Macs and RDP reached Enuc. Desktop sharing
+is not enabled on Botical, Iris or Sentinel; physical desktop login/input remains
+a separate acceptance check. Clipper's Tailscale was restored afterward because
+other services still use it; this is not a completed fleet-wide VPN migration.
+
+Validation: typecheck/build pass; the full suite had597passes,1skip and one video
+status timeout which passed on an isolated rerun. Focused transport, fleet,
+control, desktop and Seed proxy tests pass. Probe's12 network/gateway tests and
+19 iOS behavioral tests pass. iOS0.4.0 adds direct browser approval/Open Cyberdeck.
