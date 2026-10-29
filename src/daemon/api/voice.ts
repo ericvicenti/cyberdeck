@@ -30,7 +30,9 @@ export type VoiceDeps = {
 };
 
 /** Where a relayed answer came from. */
-export type VoiceVia = { node: string; name: string };
+/** `transport: "probe"` when this node reaches the hub over the Probe SSH relay (docs/PROBE.md) rather than its url
+ *  (tailnet or LAN); absent for a direct peer, so the answer shape of a direct hub is unchanged. */
+export type VoiceVia = { node: string; name: string; transport?: "probe" };
 
 /** Addresses that mean "this machine" in a call server URL. */
 export function localHosts(): Set<string> {
@@ -162,7 +164,7 @@ export function createVoiceRelay(peers: () => NodeRow[], probe: Probe = probeCon
   };
 }
 
-export const viaOf = (node: NodeRow): VoiceVia => ({ node: node.id, name: node.name });
+export const viaOf = (node: NodeRow): VoiceVia => ({ node: node.id, name: node.name, ...(node.probe_device ? { transport: "probe" as const } : {}) });
 
 /** Why a node whose hub is not paired has no voice. */
 export const hubUnpaired = (hub: string) => `voice hub ${hub} is not paired with this node (pair it from Home, or change voice.hub)`;
@@ -189,17 +191,22 @@ export function tailnetText(t: TailnetState, self?: string): string {
  *  this node is the one off the tailnet, what to do here. */
 export function hubUnreachable(node: NodeRow, outage: HubOutage, self?: string): string {
   const seen = agoText(node.last_seen);
+  // A hub bound to a Probe device is reached over the Probe SSH relay, not the tailnet: this node's Tailscale state
+  // says nothing about it, and the fix (the Probe agent here, the relay, the hub's sshd) is named by the error itself.
+  if (node.probe_device) return `voice hub ${node.name} is paired but not answering over Probe (${outage.error}${seen ? `; last seen ${seen}` : ""}); calls resume when the Probe tunnel to it is back`;
   if (outage.tailnet && !outage.tailnet.running) return `${self || "this node"} is off the tailnet, so voice hub ${node.name} is out of reach (${tailnetText(outage.tailnet, self)}${seen ? `; hub last seen ${seen}` : ""}); calls resume once this node is back on the tailnet`;
   return `voice hub ${node.name} is paired but not answering (${outage.error}${seen ? `; last seen ${seen}` : ""}); calls resume when it is back on the network`;
 }
 
 /** What every offline-hub answer carries next to `reason`, so a client can show the hub by name and when it was last seen.
  *  `tailnet` names this node's own Tailscale state when that is the cause (never its login url: that stays on the machine). */
-export const hubInfo = (node: NodeRow, outage: HubOutage) => ({ name: node.name, node: node.id, reachable: false as const, since: outage.since, lastSeen: node.last_seen ?? null, ...(outage.tailnet ? { tailnet: { state: outage.tailnet.state, running: false as const } } : {}) });
+export const hubInfo = (node: NodeRow, outage: HubOutage) => ({ name: node.name, node: node.id, reachable: false as const, since: outage.since, lastSeen: node.last_seen ?? null, transport: node.probe_device ? ("probe" as const) : ("direct" as const), ...(outage.tailnet && !node.probe_device ? { tailnet: { state: outage.tailnet.state, running: false as const } } : {}) });
 
 /** A network error's one-line name: AbortSignal timeouts and refused connections read the same everywhere. */
 export const networkErrorText = (e: unknown): string => {
   const msg = e instanceof Error ? e.message : String(e);
+  // Probe transport errors name the failing piece (tunnel, directory, enrolment) and keep ssh's first line only.
+  if (/^Probe /.test(msg) || /in Probe$/.test(msg)) return msg.split(/\r?\n/)[0].trim().slice(0, 120);
   if (e instanceof Error && (e.name === "TimeoutError" || /timed out|timeout/i.test(msg))) return "no answer in time";
   if (/unable to connect|ECONNREFUSED|ConnectionRefused/i.test(msg)) return "connection refused";
   if (/ENOTFOUND|getaddrinfo|FailedToOpenSocket|ECONNRESET|EHOSTUNREACH|ENETUNREACH/i.test(msg)) return "no route to the hub";
@@ -271,6 +278,7 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
     return c.json({ ...(local as object), configured: false, reason, ...tail, local });
   };
   // After the hub failed to answer: this node's own Tailscale when it is not running (the likely cause), else null.
+  // Not asked for a hub bound to a Probe device: that relay does not ride the tailnet.
   const offTailnet = async (): Promise<TailnetState | null> => {
     const t = await deps.tailnet?.().catch(() => null);
     return t && !t.running ? t : null;
@@ -288,8 +296,8 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
       return c.json({ ...body, via: viaOf(node) }, res.status as any);
     } catch (e) {
       const error = networkErrorText(e);
-      const tailnet = await offTailnet();
-      console.error(`voice: relay to ${node.name} failed:`, error, tailnet ? `(${tailnetText(tailnet, deps.relay?.self)}${tailnet.authUrl ? `; log in at ${tailnet.authUrl}` : ""})` : "");
+      const tailnet = node.probe_device ? null : await offTailnet();
+      console.error(`voice: relay to ${node.name} failed${node.probe_device ? " (over Probe)" : ""}:`, error, tailnet ? `(${tailnetText(tailnet, deps.relay?.self)}${tailnet.authUrl ? `; log in at ${tailnet.authUrl}` : ""})` : "");
       deps.relay?.noteFailure(error, tailnet);
       return offline(c, node, deps.relay?.outage() ?? { since: Date.now(), error, ...(tailnet ? { tailnet } : {}) }, kind);
     }
@@ -347,8 +355,8 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
         if (body && typeof body === "object") return c.json({ ...body, via: viaOf(node), local: s }, res.status as any);
       } catch (e) {
         const error = networkErrorText(e);
-        const tailnet = await offTailnet();
-        console.error(`voice: status relay to ${node.name} failed:`, error, tailnet ? `(${tailnetText(tailnet, deps.relay?.self)})` : "");
+        const tailnet = node.probe_device ? null : await offTailnet();
+        console.error(`voice: status relay to ${node.name} failed${node.probe_device ? " (over Probe)" : ""}:`, error, tailnet ? `(${tailnetText(tailnet, deps.relay?.self)})` : "");
         deps.relay?.noteFailure(error, tailnet);
         return offline(c, node, deps.relay?.outage() ?? { since: Date.now(), error, ...(tailnet ? { tailnet } : {}) }, "status", s);
       }

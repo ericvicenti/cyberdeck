@@ -406,6 +406,16 @@ answer: the pairing-key routes reach devices that must not be able to re-home th
 node key had expired overnight and every answer said clipper was offline while clipper was fine). On the
 machine itself, `cyberdeck status` prints a `tailnet:` line with the state and, when logged out, the login url.
 
+Since 2026-10-28 the fleet's peer transport is the **Probe** SSH relay (`docs/PROBE.md`, `probe.enabled`): a
+hub whose node row carries `probe_device` is reached through a loopback SSH forward via Botical, not over the
+tailnet or the LAN, so the voice relay from such a node works with its Tailscale stopped. Its outage is then a
+Probe outage: the routes say `voice hub clipper is paired but not answering over Probe (Probe SSH tunnel failed:
+channel 0: open failed: …; last seen 10 h ago); calls resume when the Probe tunnel to it is back`, `via` and `hub`
+carry `transport: "probe"` (`"direct"` on `hub` for a url peer; a direct `via` is unchanged), `hub.tailnet` is never
+set and this node's Tailscale is not consulted. The Desk strip and offline card say "over Probe". The LiveKit `url`
+/ `secureUrl` the hub hands out are still clipper's tailnet addresses (media is WebRTC to the browser, not relayed):
+a caller off the tailnet gets its grant but no media until the droplet's LiveKit is the public default (ROADMAP).
+
 The web Desk talks only to the daemon in view and shows the hub in its bridge strip (`voice clipper`);
 the shell has no machine dropdown anywhere (nothing on the Desk picks a machine either). Without a
 hub configured (not the fleet's setup), a node with no bridge of its own still finds the first paired

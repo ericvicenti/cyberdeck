@@ -15,7 +15,7 @@ import { initSchema } from "../src/daemon/db";
 import { createServer } from "../src/daemon/server";
 import { seedConfig, seedProfileNames } from "../src/daemon/config";
 import { caseworkAllows } from "../src/daemon/api/casework";
-import { createVoiceRelay, secureCallUrl, agoText, hubUnreachable, HUB_DOWN_TTL_MS } from "../src/daemon/api/voice";
+import { createVoiceRelay, secureCallUrl, agoText, hubUnreachable, hubInfo, networkErrorText, viaOf, HUB_DOWN_TTL_MS } from "../src/daemon/api/voice";
 import { parseBackend } from "../src/daemon/tailscale";
 import { Tailscale } from "../src/daemon/tailscale";
 import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME, checkinNoteStatus, fleetPrompt, promptText, samePrompt, RUNWATCH_TRIGGER_NAME, RUNWATCH_PROMPT, DIGEST_TRIGGER_NAME, DIGEST_SIGNER_LABEL, digestPrompt } from "../src/daemon/seed";
@@ -956,6 +956,54 @@ describe("voice hub", () => {
     // The hub answering again clears it.
     relay.noteSuccess();
     expect(relay.outage()).toBeNull();
+  });
+
+  test("a hub bound to a Probe device is reached over the Probe relay: its outage names Probe and never blames the tailnet", () => {
+    // 2026-10-28: the fleet's peer transport became the Probe SSH relay (docs/PROBE.md); yacht's Tailscale state says nothing
+    // about whether clipper answers. The ssh error keeps its first line; a Probe timeout is not folded into "no answer in time".
+    expect(networkErrorText(new Error("Probe SSH tunnel failed: channel 0: open failed: connect failed: [Errno 111] Connect call failed ('127.0.0.1', 22002)\r\nstdio forwarding failed\r\nConnection closed by UNKNOWN port 65535")))
+      .toBe("Probe SSH tunnel failed: channel 0: open failed: connect failed: [Errno 111] Connect call failed ('127.0.0.1', 22002)");
+    expect(networkErrorText(new Error("Probe SSH tunnel timed out"))).toBe("Probe SSH tunnel timed out");
+    expect(networkErrorText(new Error("Device is no longer enrolled in Probe"))).toBe("Device is no longer enrolled in Probe");
+    expect(networkErrorText(Object.assign(new Error("The operation timed out"), { name: "TimeoutError" }))).toBe("no answer in time");
+    const direct = { id: "n-hub", name: "clipper", url: "http://127.0.0.1:1", token: "t", added_at: 0, last_seen: Date.now() - 10 * 3600_000 };
+    const probed = { ...direct, probe_device: "1d9c1832-0000-4000-8000-000000000000" };
+    const loggedOut = { running: false as const, state: "NeedsLogin", authUrl: "https://login.tailscale.com/a/abc" };
+    expect(hubUnreachable(probed, { since: 1, error: "Probe SSH tunnel failed: channel 0: open failed", tailnet: loggedOut }, "Yacht"))
+      .toBe("voice hub clipper is paired but not answering over Probe (Probe SSH tunnel failed: channel 0: open failed; last seen 10 h ago); calls resume when the Probe tunnel to it is back");
+    expect(hubUnreachable(probed, { since: 1, error: "x" })).not.toContain("tailnet");
+    expect(hubUnreachable(direct, { since: 1, error: "x", tailnet: loggedOut }, "Yacht")).toContain("Yacht is off the tailnet");
+    expect(hubInfo(probed, { since: 1, error: "x", tailnet: loggedOut })).toEqual({ name: "clipper", node: "n-hub", reachable: false, since: 1, lastSeen: probed.last_seen, transport: "probe" });
+    expect(hubInfo(direct, { since: 1, error: "x", tailnet: loggedOut })).toMatchObject({ transport: "direct", tailnet: { state: "NeedsLogin", running: false } });
+    expect(viaOf(probed)).toEqual({ node: "n-hub", name: "clipper", transport: "probe" });
+    expect(viaOf(direct)).toEqual({ node: "n-hub", name: "clipper" });
+  });
+
+  test("every voice route of a node whose Probe tunnel to the hub is down says so, over Probe, without asking tailscale", async () => {
+    // The node's Tailscale is logged out, which would be the headline for a direct hub; the Probe-bound hub does not care.
+    let asked = 0;
+    const ts = new Tailscale(async (args) => { asked++; return args[0] === "status" ? JSON.stringify({ BackendState: "NeedsLogin", AuthURL: "https://login.tailscale.com/a/secret-login", Self: { DNSName: "" } }) : null; });
+    const j = startNode(voiced.url, "voice-probe-down", { agentId: COMPANION_ID }, RUNTIME_TOKEN, { nodeName: "yacht", voice: { hub: "clipper" } }, ts);
+    // Probe networking is not configured in tests, so the transport refuses the bound peer: the same path as a dead tunnel.
+    j.db.query("INSERT INTO nodes (id,name,url,token,added_at,last_seen,probe_device) VALUES (?,?,?,?,?,?,?)").run("n-hub", "clipper", "http://127.0.0.1:1", TEST_TOKEN, Date.now(), Date.now() - 10 * 3600_000, "1d9c1832-0000-4000-8000-000000000000");
+    try {
+      const cfg = await (await req(j, KEY, "/api/voice/config")).json();
+      expect(cfg).toMatchObject({ configured: false, provider: "none", via: { name: "clipper", transport: "probe" }, hub: { name: "clipper", reachable: false, transport: "probe" } });
+      expect(cfg.hub.tailnet).toBeUndefined();
+      expect(cfg.reason).toBe("voice hub clipper is paired but not answering over Probe (Probe networking is not enabled on this node; last seen 10 h ago); calls resume when the Probe tunnel to it is back");
+      expect(asked).toBe(0);
+      const call = await req(j, KEY, "/api/voice/livekit", { method: "POST" });
+      expect(call.status).toBe(503);
+      const callBody = await call.json();
+      expect(callBody.reason).toContain("over Probe");
+      expect(callBody.hub.transport).toBe("probe");
+      const status = await (await req(j, TEST_TOKEN, "/api/voice/status")).json();
+      expect(status.configured).toBe(false);
+      expect(status.reason).toContain("over Probe");
+      expect(asked).toBe(0);
+    } finally {
+      j.stop();
+    }
   });
 
   test("every voice route of a node that is off the tailnet says so, names this node, and never leaks the login url", async () => {
