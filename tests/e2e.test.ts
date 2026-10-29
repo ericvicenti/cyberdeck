@@ -263,7 +263,8 @@ test("desk view: a hub reached over Probe that stops answering reads as a Probe 
     const card = await page.textContent('[data-testid="voice-hub-offline"]');
     expect(card).toContain("not answering over Probe");
     expect(card).toContain("through Clipper over Probe");
-    expect(card).not.toContain("tailnet");
+    expect(card).not.toContain("off the tailnet");
+    expect(card).not.toContain("probably fine");
     await waitFor(async () => (await page.textContent('[data-testid="voice-node"]'))?.includes("Clipper offline") ?? false);
     expect(await page.getAttribute('[data-testid="voice-node"]', "title")).toContain("over the Probe SSH relay");
   } finally {
