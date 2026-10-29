@@ -2,7 +2,7 @@
 // talks to ("" = the daemon serving this page); the Sessions view and the prompt bar show
 // every machine's sessions at once, each tagged with where it runs.
 import { useEffect, useRef, useState } from "react";
-import { token, apiOn, navigate, wsUrl } from "./api";
+import { token, apiOn, navigate, wsUrl, ApiError } from "./api";
 import { fetchNodes, subscribeNodes, type FleetNodes } from "./fleet";
 import type { Caps, Runner, Tool } from "../../src/shared/harness";
 
@@ -73,55 +73,80 @@ export async function startSession(opts: { node?: string; nodeName?: string; cwd
 }
 
 /** What each machine said the last time it was asked for its sessions. */
-export type NodeSessionsState = { node: string; nodeName: string; online: boolean; answered: boolean; error: string | null; seedError: string | null };
+export type NodeSessionsState = { node: string; nodeName: string; online: boolean; answered: boolean; error: string | null; errorStatus?: number; seedError: string | null };
 
 /** All live sessions across this node and every online peer, refreshed every few seconds and on session events.
  *  A machine that stops answering keeps its last known sessions on screen and reports its error in `states`. */
-export function useLiveSessions(intervalMs = 4000): { sessions: LiveSession[]; nodes: FleetNodes | null; states: NodeSessionsState[]; refresh: () => void; replace: (node: string, sessions: LiveSession[]) => void } {
+export function useLiveSessions(intervalMs = 4000): { sessions: LiveSession[]; nodes: FleetNodes | null; states: NodeSessionsState[]; fleetError: { message: string; status?: number } | null; refresh: () => void; replace: (node: string, sessions: LiveSession[]) => void } {
   const [byNode, setByNode] = useState<Record<string, LiveSession[]>>({});
   const [states, setStates] = useState<Record<string, NodeSessionsState>>({});
   const [nodes, setNodes] = useState<FleetNodes | null>(null);
   const nodesRef = useRef<FleetNodes | null>(null);
+  const revisions = useRef(new Map<string, number>());
+  const [fleetError, setFleetError] = useState<{ message: string; status?: number } | null>(null);
   const [gen, setGen] = useState(0);
   useEffect(() => {
     let alive = true;
     let lastNodes = 0;
-    const tick = async () => {
-      if (document.visibilityState !== "visible") return;
+    const pending = new Map<string, number>();
+    const tick = async (supersede = false) => {
+      if (!alive || document.visibilityState !== "visible") return;
       if (!nodesRef.current || Date.now() - lastNodes > 30_000) {
-        try { nodesRef.current = await fetchNodes(); lastNodes = Date.now(); if (alive) setNodes(nodesRef.current); } catch {}
+        try {
+          const next = await fetchNodes();
+          if (!alive) return;
+          nodesRef.current = next; lastNodes = Date.now(); setNodes(next); setFleetError(null);
+        } catch (e) {
+          if (!alive) return;
+          setFleetError({ message: e instanceof Error ? e.message : String(e), status: e instanceof ApiError ? e.status : undefined });
+        }
       }
       const f = nodesRef.current;
       const targets = [{ id: "", name: f?.self.name ?? "local", online: true }, ...(f?.nodes ?? [])];
       await Promise.all(targets.map(async (t) => {
+        if (t.online && pending.has(t.id) && !supersede) return;
+        const revision = (revisions.current.get(t.id) ?? 0) + 1;
+        revisions.current.set(t.id, revision);
+        // Polls and event-triggered reads may overlap. Only the latest request
+        // for a still-paired machine can publish data, errors or auth failures.
+        const current = () => alive && revisions.current.get(t.id) === revision
+          && (!t.id || !!nodesRef.current?.nodes.some(n => n.id === t.id && n.online));
         if (!t.online) { if (alive) setStates((m) => ({ ...m, [t.id]: { node: t.id, nodeName: t.name, online: false, answered: m[t.id]?.answered ?? false, error: `${t.name} is offline`, seedError: null } })); return; }
+        pending.set(t.id, revision);
         try {
           const r = await apiOn<SessionsAnswer>(t.id, "/api/sessions", { signal: AbortSignal.timeout(10_000) });
-          if (!alive) return;
+          if (!current()) return;
           setByNode((m) => ({ ...m, [t.id]: r.sessions.map((s) => ({ ...s, node: t.id, nodeName: t.name })) }));
           setStates((m) => ({ ...m, [t.id]: { node: t.id, nodeName: t.name, online: true, answered: true, error: null, seedError: r.seedError ?? null } }));
         } catch (e) {
-          if (!alive) return;
-          setStates((m) => ({ ...m, [t.id]: { node: t.id, nodeName: t.name, online: true, answered: true, error: e instanceof Error ? e.message : String(e), seedError: null } }));
+          if (!current()) return;
+          setStates((m) => ({ ...m, [t.id]: { node: t.id, nodeName: t.name, online: true, answered: true, error: e instanceof Error ? e.message : String(e), errorStatus: e instanceof ApiError ? e.status : undefined, seedError: null } }));
+        } finally {
+          if (pending.get(t.id) === revision) pending.delete(t.id);
         }
       }));
     };
     tick();
-    const iv = setInterval(tick, intervalMs);
+    const iv = setInterval(() => tick(), intervalMs);
     const ws = new WebSocket(wsUrl("/api/events"));
-    ws.onmessage = (m) => { try { if (JSON.parse(m.data).kind === "sessions") tick(); } catch {} };
-    const onVis = () => { if (document.visibilityState === "visible") tick(); };
+    ws.onmessage = (m) => { try { if (JSON.parse(m.data).kind === "sessions") tick(true); } catch {} };
+    const onVis = () => { if (document.visibilityState === "visible") tick(true); };
     document.addEventListener("visibilitychange", onVis);
     // a machine paired (or lost) elsewhere on the page shows up here at once, not after the next node refresh
-    const unsubscribe = subscribeNodes((f) => { nodesRef.current = f; lastNodes = Date.now(); if (alive) { setNodes(f); tick(); } });
+    const unsubscribe = subscribeNodes((f) => { nodesRef.current = f; lastNodes = Date.now(); if (alive) { setNodes(f); setFleetError(null); tick(true); } });
     return () => { alive = false; clearInterval(iv); ws.close(); document.removeEventListener("visibilitychange", onVis); unsubscribe(); };
   }, [gen, intervalMs]);
-  const sessions = Object.values(byNode).flat();
+  const paired = (node: string) => !node || !!nodes?.nodes.some(n => n.id === node);
+  const sessions = Object.entries(byNode).filter(([node]) => paired(node)).flatMap(([, rows]) => rows);
   return {
     sessions,
     nodes,
-    states: Object.values(states),
+    states: Object.values(states).filter(s => paired(s.node)),
+    fleetError,
     refresh: () => setGen((g) => g + 1),
-    replace: (node, next) => setByNode((m) => ({ ...m, [node]: next })),
+    replace: (node, next) => {
+      revisions.current.set(node, (revisions.current.get(node) ?? 0) + 1);
+      setByNode((m) => ({ ...m, [node]: next }));
+    },
   };
 }

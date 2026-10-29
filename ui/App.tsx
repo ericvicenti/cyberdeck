@@ -17,7 +17,7 @@ import { Services } from "./views/Services";
 import { Data } from "./views/Data";
 import { Files } from "./views/Files";
 import { EditorWorkspace } from "./views/Editor";
-import { Term } from "./views/Term";
+import { Term, type SessionDraftStore } from "./views/Term";
 import { Cmux } from "./views/Cmux";
 import { TokenGate } from "./views/TokenGate";
 import { PromptBar } from "./components/PromptBar";
@@ -51,6 +51,7 @@ const NAV = [
 export function App() {
   const [route, setRoute] = useState<Route>(parseHash());
   const [locked, setLocked] = useState(false);
+  const [sessionDrafts] = useState<SessionDraftStore>(() => ({ values: new Map(), pending: new Set(), generation: 0 }));
   const { fleet } = useFleet();
   const knownRoute = NAV.some(item => item.view === route.view) || ["edit", "remote"].includes(route.view);
   // a machine-bound view remounts when its machine changes, so nothing of the old machine lingers
@@ -90,7 +91,11 @@ export function App() {
   }, [locked]);
 
   if (locked) return <TokenGate />;
-  const lock = () => { if (location.hash === routeHash(route.view, route.params)) setLocked(true); };
+  const lock = () => {
+    if (location.hash !== routeHash(route.view, route.params)) return;
+    sessionDrafts.values.clear(); sessionDrafts.pending.clear(); sessionDrafts.generation++;
+    setLocked(true);
+  };
   const isActive = (v: string) => route.view === v || (v === "files" && route.view === "edit");
   const onlineCount = fleet ? fleet.nodes.filter((n) => n.online).length : 0;
   const selfName = fleet?.self.name ?? "local";
@@ -107,7 +112,7 @@ export function App() {
       {route.view === "services" && <Services params={route.params} onLocked={lock} />}
       {route.view === "data" && <Data params={route.params} onLocked={lock} />}
       {route.view === "files" && <Files params={route.params} onLocked={lock} key={`files-${nodeId}`} />}
-      {route.view === "term" && <Term params={route.params} onLocked={lock} />}
+      {route.view === "term" && <Term params={route.params} onLocked={lock} drafts={sessionDrafts} />}
       {route.view === "cmux" && <Cmux params={route.params} onLocked={lock} />}
       {route.view === "cloud" && <Cloud params={route.params} onLocked={lock} key={`cloud-${nodeId}`} />}
     </>

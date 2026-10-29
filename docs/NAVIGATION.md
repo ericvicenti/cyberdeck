@@ -1,8 +1,8 @@
 # Cyberdeck navigation coverage
 
-Updated 2026-10-27. This is an implementation inventory, not a completion claim.
+Updated 2026-10-29. This is an implementation inventory, not a completion claim.
 The nightly routine and fleet deployment status live in Deck's
-`handoff/routines/cyberdeck-navigation/2026-10-27.md`.
+`handoff/routines/cyberdeck-navigation/2026-10-29.md`.
 
 ## Source and rollout status
 
@@ -61,6 +61,7 @@ credentials should not be replayed from a link.
 | `fleet` / Home | local/fleet overview, node links; pairing and account/reset dialogs; NetworkMap selected endpoints | Overview and node links covered. `networkFrom` / `networkTo` identify an inspected connection by host name, independent of the serving node. Selections push once; partial/whitespace links replace canonical defaults; Back/Forward, reload and fresh tabs restore both endpoints. Unknown/same-host links keep honest errors and titles; unavailable telemetry retains the requested pair. Pairing/reset/benchmark actions remain explicit and never replay from links. |
 | `controls` / Controls | control diagram, bindings/editor, reset notice | Static route/title covered where installed. Binding changes are settings, not navigation. Keyboard/gamepad mode preferences remain local. |
 | `applications` / Applications | application id, Casework example, pairing dialog, reload | Id, unknown-id and unavailable-listing errors/titles covered; failed lookups retain the requested link instead of showing an ordinary app list. Pairing is an explicit operation. Visited generic iframe documents now survive primary-view, application and node navigation. Opt-in generic SPA navigation now restores root-relative child routes/titles via an origin/source/request-bound bridge and keeps one history owner. Commander has a bridge integration (Starlight activation verified on October 26) for its main views, trainer tabs/inspectors/filters, workshop tabs/run inspection and community directory; its remaining nested states are listed below. Unsupported nested links in noncooperating apps report a restoration error. See `docs/EMBEDDED-NAVIGATION.md`. |
+| `applications?app=soniq` / Soniq | studio track/scene/bar/step, steps/piano editor, library query/category/source/offset, project and export dialogs | Newly registered on October 28. Parent application links use the generic retained frame. The current Clipper source keeps these selections in React state; no cooperative history/title adapter was found. The registered Starlight runtime could not be reached on October 29, so its internal navigation remains unverified. Reconcile the distinct Starlight prototype and richer Clipper studio before adoption; preserve audio and project data. |
 | `applications?app=afterglow` / AfterglowFrame + BoticalMedia/public/navigation.js | child route, season/episode, search/filter, person dialog, music and YouTube state | Existing bridge retained: exact origin+source, parent-only history, route restoration, stable iframe, title cleanup. Browser regressions now prove document/timer continuity across primary views, other apps and node changes, plus hidden-message isolation and route/title restoration. A pending parent route rejects stale child acknowledgements. Missing, malformed and legacy child routes normalize with replace, preserving the iframe document and prior history. No production media is played by these checks. |
 | `applications?app=vimm` / Vault | tabs, system, query, letter, page; selected retro title modal | Covered. `game=<catalog-id>` restores a detail from its shelf/catalog/list context on fresh open, reload and history without starting playback. Invalid tab/system/query/letter/page/game values normalize; missing IDs retain an honest error/title. My list and ready-to-play metadata remain browser-local by design. |
 | VaultPlayer / vault download and storage | running emulator, ROM cache, save state, native N64 handoff, pause menu | Play retains the selected game detail URL, while fresh links and reloads show details without starting or downloading a game. The owner survives app, primary-view, node and screen-remote navigation. Hidden games leave the modal top layer, release keyboard/controller handlers and cannot steal focus or titles. Resume returns to the existing core; explicit Save & exit completes it. Real NES homebrew fixtures prove continuity and responsive save/exit. Native N64/gamepad hardware remains unverified. |
@@ -77,7 +78,7 @@ credentials should not be replayed from a link.
 | `data` / Data | root filter, repo query | Covered. Scans are actions; table has a fixed 100-item cap, not a pageable UI. |
 | `files` / Files, TreeNode, dialogs | path, hidden files, sort/order, query, deep search, File Info modal | Covered, including stale listing/deep-search protection. Multi-selection, expanded tree folders, clipboard, rename/chmod/delete/import drafts stay transient; assess any desired navigable selection separately. Failed directory/info has a matching title. |
 | `edit` / Editor | file path, text/media/markdown, playlist; video transport mode, loop/shuffle | Path/title reconstruct content; empty paths and missing text have accurate views/titles. Documents are retained per node/path across files, primary views and history, preserving unsaved buffers, undo and media. Saves capture a revision and cannot clear later edits; duplicate saves are serialized. Requests and delayed media events stay bound to the original node. Hidden ended/error events cannot navigate or retitle another view. Explicit playlist selection pauses the old track; ordinary navigation leaves playback intact. Drafts remain in memory until tab close, refresh or lock. PDF previews now restore page/zoom/rotation, typed failures and passwords through the parent route (see October 27). Persisted media playback position/preferences remain outside this slice. |
-| `term` / Term, TermPane, SeedPane, PromptBar | node/session, new-session form, cwd prefill; transcript pagination | `filter` selects the tab-strip machine (`self` = serving node, absent = every machine); `target` selects the New form destination independently of the underlying session node. Both restore on reload/new-tab/Back/Forward, and selecting a session retains its filter. Default selection waits for its owner and replaces once; offline/unknown nodes have distinct errors, delayed peers do not become false missing sessions. Seed session links use authenticated entity titles. Links never create a process. Daemon persistence covered in existing E2E. Transcript pagination/drafts and remaining backend errors remain. |
+| `term` / Term, TermPane, SeedPane, PromptBar | node/session, new-session form, cwd prefill; transcript pagination | `filter` selects the tab-strip machine (`self` = serving node, absent = every machine); `target` selects the New form destination independently of the underlying session node. Both restore on reload/new-tab/Back/Forward, and selecting a session retains its filter. Default selection waits for its owner and replaces once; offline/unknown nodes have distinct errors, delayed peers do not become false missing sessions. Seed session links use authenticated entity titles. Links never create a process. Daemon persistence covered in existing E2E. Filtered links now default within their selected machine; unknown filters, fleet lookup errors and failed/denied lists preserve honest URLs and titles. Older overlapping polls cannot replace newer content or trigger stale locks. New-session drafts survive view/history changes in memory per machine and cwd prefill; refresh/lock clears them. Explicit Open preserves newer drafts and never redirects a different view when it finishes. Seed transcript controls and attachment/exit failure titles remain. |
 | `cmux` / Cmux | surface, scrollback, creation form | Surface/scrollback URL/default/title covered. Polling screen response guarded. Workspace creation, input and desktop focus are explicit actions. Missing surfaces have a not-found state/title and never poll a nonexistent terminal. Backend unavailable has its own title. |
 | `cloud` / Cloud + RemoteBrowser | profile, target URL, archive query, provider+conversation | Covered. Remote URL/title state mirrors into the parent route after a request acknowledgement; initial profile state cannot overwrite direct links, redirects replace the requested URL, page/user navigation pushes once, and Back/Forward restores without remounting the persistent browser. The UI settles unacknowledged state for older daemons during rolling updates. Missing profiles, invalid target URLs and unavailable browsers show matching errors/titles before any browser socket is opened. |
 | `remote` / ScreenRemote | physical screen connection, text/scroll mode, remote buttons | Static route/title; captures server kiosk, which has its own navigation. Do not attach normal Playwright to active kiosk (it changes emulated focus); only noDefaults/raw CDP for future physical verification. |
@@ -336,3 +337,47 @@ by atomic index replacement. Old hashed assets remain available to existing tabs
 No daemon or active session restart is necessary. See the current run report for
 actual hosts, rollback paths and pending rollout status. App-wide acceptance remains
 incomplete; retain the routine until the complete checklist is satisfied.
+
+
+## 2026-10-29 Sessions filters, failures and drafts
+
+A `#/term?filter=<node>` link with no session defaults only within that machine;
+`filter=self` means the serving machine. An explicit `node` still takes priority
+for default selection, and an explicit session keeps its own owner independently
+of the tab filter. Defaults replace once. An empty selected machine opens its own
+New form; unknown machines, failed reads and failed Seed listings do not silently
+select another machine or imply there are no sessions. Valid local sessions stay
+usable when fleet metadata is unavailable. Errors have matching titles and Retry.
+
+Session reads keep per-machine request revisions: an explicit session event can
+supersede a pending read, while ordinary polling lets slow reads finish. Late
+content, errors and 401s cannot replace a newer result. Unpaired peers cannot
+reappear from delayed reads. Local 401s lock based on HTTP status, including
+messages other than “Unauthorized”; peer denials leave the local identity intact.
+Existing selected terminals stay attached during filter-only navigation and polling.
+
+The New form's command and working-directory drafts are held only in the authenticated
+shell's memory, keyed by destination machine and URL cwd prefill. They survive
+Back/Forward and primary-view navigation; they do not cross machines or appear in
+URLs, history state or browser storage. Refresh, fresh tabs and lock start from the
+link's prefill. Only explicit **Open** creates a process. A pending Open cannot be
+submitted twice, erase a newer draft, or navigate away from a different view/target
+when it finishes. Successful selection preserves the tab filter.
+
+Repeatable checks: `bun run typecheck && bun run build`, then
+`bun test tests/term-navigation.test.ts --timeout 30000` and the existing navigation,
+embedded bridge, Seed and sessions regressions. The new suite uses synthetic lists,
+inert sockets and explicit fake creation responses, never actual shells or messages.
+`scripts/check-term-navigation-live.ts` checks installed assets and real fleet reads;
+its failed-session response exists only in the fresh test browser. All WebSockets,
+external requests and API writes are blocked. It verifies form destinations, history,
+reload/new tabs, draft disposal, missing filters/machines and error-title cleanup.
+
+The Seed UI package 0.1.11 has no host callback for its memory-content read outcomes
+or transcript paging state. Its exported host/client/provider interfaces were audited
+on this run. Accurate content-read failure titles and external-server titles need a
+cooperative package API; do not infer success solely from parent-directory metadata,
+monkey-patch global fetch, or replace the package's editor with a reduced viewer.
+Commander Live/in-game/errors, Soniq internal navigation, these Seed states, remaining attachment/native-device
+cases and original-PDF controls remain outside completed acceptance. See the run
+report for deployed hosts and exact verification; keep the routine enabled.

@@ -25,6 +25,7 @@ await context.route("**/*", route => {
   if (url.pathname.startsWith("/api/") && req.method() !== "GET") { mutations.push(`${req.method()} ${url.pathname}`); return route.abort(); }
   return route.continue();
 });
+await context.routeWebSocket("**/*", socket => socket.close());
 const page = await context.newPage();
 page.setDefaultTimeout(25000);
 page.on("pageerror", error => errors.push(error.message));
@@ -53,6 +54,35 @@ try {
     passed.push("machine filter history");
   }else passed.push("no online peer; local form restoration only");
   await page.reload();await page.getByTestId("term-new-form").waitFor();
+  stage="Private draft retention";
+  const cmd = page.getByPlaceholder("startup command (optional), e.g. claude --dangerously-skip-permissions");
+  await cmd.fill("navigation fixture — never executed");
+  const draftUrl = page.url();
+  await page.getByTestId("nav-data").click();
+  await page.goBack(); await page.getByTestId("term-new-form").waitFor();
+  if(await cmd.inputValue()!=="navigation fixture — never executed")throw new Error("Leaving Sessions lost draft");
+  if(page.url()!==draftUrl)throw new Error("Draft changed the shareable URL");
+  await page.reload();await page.getByTestId("term-new-form").waitFor();
+  if(await cmd.inputValue()!=="")throw new Error("Draft persisted through refresh");
+  passed.push("draft navigation retention / refresh disposal / no URL leak");
+  stage="Unknown filter";
+  await page.evaluate(()=>location.hash="#/term?filter=__navigation_missing_machine");
+  await page.waitForFunction(()=>document.title==="Machine not found · Sessions · Cyberdeck");
+  await page.getByTestId("term-filter-error").waitFor();
+  await page.reload(); await page.waitForFunction(()=>document.title==="Machine not found · Sessions · Cyberdeck");
+  if(new URL(page.url()).hash.includes("session="))throw new Error("Unknown filter selected a session");
+  passed.push("unknown filter/direct/reload/no fallback");
+  stage="Read failure";
+  // Only this fresh browser sees the synthetic failed list; the installed daemon
+  // and real sessions are unchanged. Every fleet metadata request remains real.
+  await page.route("**/api/sessions", route=>route.fulfill({status:503,json:{error:"Navigation fixture read failure"}}));
+  await page.goto(`${origin}/?navigation-check=read-failure#/term?filter=self`);
+  await page.getByTestId("term-unavailable").waitFor();
+  await page.waitForFunction(()=>document.title.startsWith("Sessions unavailable · "));
+  if(new URLSearchParams(new URL(page.url()).hash.split("?")[1]).has("new"))throw new Error("Read failure became a New form");
+  await page.reload();await page.getByTestId("term-unavailable").waitFor();
+  await page.unroute("**/api/sessions");
+  passed.push("synthetic list failure/title/reload/no false empty state");
   stage="Unknown machine";
   await page.evaluate(()=>location.hash="#/term?node=__navigation_missing_machine&session=__navigation_missing_session");
   await page.waitForFunction(()=>document.title==="Machine not found · Sessions · Cyberdeck");await page.getByTestId("term-unavailable").waitFor();
