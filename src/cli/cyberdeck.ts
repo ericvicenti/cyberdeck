@@ -4,7 +4,7 @@ import { join } from "path";
 import { readFileSync, existsSync } from "fs";
 import { homedir } from "os";
 import { CYBERDECK_HOME, loadConfig } from "../daemon/config";
-import { tailscaleBin, Tailscale, MCP_FUNNEL_PORT, MCP_PATH } from "../daemon/tailscale";
+import { tailscaleBin, Tailscale, MCP_FUNNEL_PORT, MCP_PATH, LIVEKIT_TLS_PORT, livekitServeTarget } from "../daemon/tailscale";
 
 const cfg = loadConfig();
 const BASE = `http://127.0.0.1:${cfg.port}`;
@@ -104,7 +104,11 @@ switch (cmd) {
     // HTTPS on the tailnet via `tailscale serve`: valid certs for <node>.<tailnet>, reachable only from the tailnet.
     const bin = tailscaleBin();
     if (!bin) { console.log("tailscale CLI not found"); process.exit(1); }
+    // The voice hub also publishes its LiveKit signalling port over TLS (wss://<hub>:7443) so an https Desk
+    // anywhere on the tailnet can place calls; asked of this node's own voice status, never a relayed one.
+    const livekit = livekitServeTarget(await api("/api/voice/status").catch(() => null), cfg.voice?.livekitPort);
     if (process.argv[3] === "off") {
+      if (livekit) await sh([bin, "serve", `--https=${livekit.https}`, "off"]);
       process.exit(await sh([bin, "serve", "--https=443", "off"]));
     }
     if (process.argv[3] === "mcp") {
@@ -128,6 +132,10 @@ switch (cmd) {
     if (code !== 0) process.exit(code);
     const self = await new Tailscale().self();
     console.log(self ? `serving https://${self.dnsName}` : "serving (run `tailscale status` for the hostname)");
+    if (livekit) {
+      const lk = await sh([bin, "serve", "--bg", `--https=${livekit.https}`, livekit.target]);
+      console.log(lk === 0 ? `LiveKit signalling: wss://${self?.dnsName ?? "<node>.<tailnet>"}:${LIVEKIT_TLS_PORT} -> ${livekit.target} (this node is the voice hub)` : `LiveKit signalling: tailscale serve --https=${LIVEKIT_TLS_PORT} failed (exit ${lk}); https Desks cannot place calls until it is set`);
+    }
     const f = await new Tailscale().funnel(cfg.port);
     if (f.rootPublic) console.log(`WARNING: ${f.rootPublic} is funneled to the public internet (the whole UI); run: tailscale funnel --https=${new URL(f.rootPublic).port || 443} off`);
     break;
@@ -302,7 +310,7 @@ usage: cyberdeck <command>
   stop/start manage the daemon service
   logs       tail daemon logs
   update     pull own source, rebuild, restart
-  serve      expose the UI as https://<node>.<tailnet> via tailscale serve (serve off: stop)
+  serve      expose the UI as https://<node>.<tailnet> via tailscale serve; on the voice hub also LiveKit on :7443 (serve off: stop)
   serve mcp  publish only /api/mcp to the internet on :8443 via tailscale funnel, for agent.hm (serve mcp off: stop)
   mcp        connection details for MCP clients such as Seed Agents (--json)
   seed       Seed agents bridge [--profile <name>]: profiles | status | setup | sync [--voice] | keygen | login | providers | reset-session | call | transcript | dogfood | runwatch | prompt [--apply]

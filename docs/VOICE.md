@@ -434,6 +434,8 @@ computed on the hub and relayed as is), which an https Desk uses; without it the
 message naming the fix. On clipper:
 
     tailscale serve --bg --https=7443 http://127.0.0.1:7880   # LiveKit signaling -> wss://clipper.<tailnet>:7443
+    # `cyberdeck serve` on the hub does this itself (2026-10-29): when this node's own /api/voice/status says
+    # configured without `via`, it maps :7443 -> `voice.livekitPort` (default 7880); `cyberdeck serve off` unmaps it.
 
 Media flows over WebRTC to the address LiveKit advertises (`rtc.node_ip`, clipper's tailnet IP), so
 any tailnet device works, on the LAN or not; a device that is not on the tailnet (the buoy iPad until

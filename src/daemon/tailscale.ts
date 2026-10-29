@@ -25,6 +25,17 @@ export type FunnelInfo = {
   rootPublic: string | null;
 };
 /** The port `cyberdeck serve mcp` publishes on: 443 stays the tailnet-only UI, funnel ports are limited to 443/8443/10000. */
+/** The voice hub's LiveKit signalling port and its TLS twin: `cyberdeck serve` on the hub maps
+ *  `https://<hub>.<tailnet>:7443` -> `http://127.0.0.1:7880` so an https Desk can open `wss://` (docs/VOICE.md). */
+export const LIVEKIT_PORT = 7880;
+export const LIVEKIT_TLS_PORT = 7443;
+/** The `tailscale serve` mapping the voice hub needs for its call server, from this node's own `/api/voice/status`:
+ *  null when voice is relayed to another node (`via`), not configured here, or unknown (daemon down). */
+export function livekitServeTarget(status: { configured?: boolean; via?: unknown } | null | undefined, port = LIVEKIT_PORT): { https: number; target: string } | null {
+  if (!status?.configured || status.via) return null;
+  const p = Number.isInteger(port) && port! > 0 && port! < 65536 ? port! : LIVEKIT_PORT;
+  return { https: LIVEKIT_TLS_PORT, target: `http://127.0.0.1:${p}` };
+}
 export const MCP_FUNNEL_PORT = 8443;
 export const MCP_PATH = "/api/mcp";
 /** Runs the tailscale CLI; resolves to stdout, or null when the binary is missing or the command fails. */

@@ -16,7 +16,7 @@ import { createServer } from "../src/daemon/server";
 import { seedConfig, seedProfileNames } from "../src/daemon/config";
 import { caseworkAllows } from "../src/daemon/api/casework";
 import { createVoiceRelay, secureCallUrl, agoText, hubUnreachable, hubInfo, networkErrorText, viaOf, HUB_DOWN_TTL_MS } from "../src/daemon/api/voice";
-import { parseBackend } from "../src/daemon/tailscale";
+import { parseBackend, livekitServeTarget, LIVEKIT_TLS_PORT } from "../src/daemon/tailscale";
 import { Tailscale } from "../src/daemon/tailscale";
 import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME, checkinNoteStatus, fleetPrompt, promptText, samePrompt, RUNWATCH_TRIGGER_NAME, RUNWATCH_PROMPT, DIGEST_TRIGGER_NAME, DIGEST_SIGNER_LABEL, digestPrompt } from "../src/daemon/seed";
 import { testConfig, TEST_TOKEN, tmpHomeDir } from "./helpers";
@@ -956,6 +956,16 @@ describe("voice hub", () => {
     // The hub answering again clears it.
     relay.noteSuccess();
     expect(relay.outage()).toBeNull();
+  });
+
+  test("cyberdeck serve publishes the LiveKit port only on the node that is the voice hub itself", () => {
+    expect(livekitServeTarget({ configured: true })).toEqual({ https: LIVEKIT_TLS_PORT, target: "http://127.0.0.1:7880" });
+    expect(livekitServeTarget({ configured: true }, 7890)).toEqual({ https: 7443, target: "http://127.0.0.1:7890" });
+    expect(livekitServeTarget({ configured: true }, 0)).toEqual({ https: 7443, target: "http://127.0.0.1:7880" });
+    // A node that relays to the hub, one without voice, and a daemon that did not answer: nothing to publish here.
+    expect(livekitServeTarget({ configured: true, via: { node: "n-hub", name: "clipper" } })).toBeNull();
+    expect(livekitServeTarget({ configured: false, reason: "no bridge" } as any)).toBeNull();
+    expect(livekitServeTarget(null)).toBeNull();
   });
 
   test("a hub bound to a Probe device is reached over the Probe relay: its outage names Probe and never blames the tailnet", () => {

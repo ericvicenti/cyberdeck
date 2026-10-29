@@ -63,7 +63,9 @@ export interface CyberdeckConfig {
    *  agents server), and every `/api/voice/*` route of this node relays there. Naming this node means "answer
    *  here"; unset means this node's own bridge, else the first paired node that has one. Env CYBERDECK_VOICE_HUB
    *  overrides. See docs/VOICE.md, "The voice hub". */
-  voice?: { hub?: string };
+  /** `hub`: the paired node that runs the voice system (docs/VOICE.md). `livekitPort`: the hub's LiveKit signalling
+   *  port that `cyberdeck serve` publishes over TLS on :7443 (default 7880). */
+  voice?: { hub?: string; livekitPort?: number };
   /** The MCP server (docs/AGENTS.md). `nodeTools: false` withholds the shell / file / deck_context tools
    *  that give a Seed agent the same reach on this machine as cc and cx have (default on). */
   mcp?: { nodeTools?: boolean };
