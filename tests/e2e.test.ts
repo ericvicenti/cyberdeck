@@ -246,6 +246,31 @@ test("desk view: a node that is itself off the tailnet says so instead of blamin
   }
 }, 30000);
 
+test("desk view: a hub reached over Probe that stops answering reads as a Probe outage, not a tailnet one", async () => {
+  const via = { node: "n-hub", name: "Clipper", transport: "probe" };
+  const hub = { name: "Clipper", node: "n-hub", reachable: false, since: Date.now() - 60_000, lastSeen: Date.now() - 10 * 3600_000, transport: "probe" };
+  const reason = "voice hub Clipper is paired but not answering over Probe (Probe SSH tunnel failed: channel 0: open failed; last seen 10 h ago); calls resume when the Probe tunnel to it is back";
+  await page.route("**/api/voice/**", (r) => {
+    const path = new URL(r.request().url()).pathname.split("/api/")[1];
+    if (path === "voice/config") return r.fulfill({ json: { configured: false, provider: "none", engine: "seed", reason, via, hub } });
+    if (path === "voice/status") return r.fulfill({ json: { configured: false, reason, via, hub, local: { configured: false, reason: "no bridge" } } });
+    return r.fulfill({ status: 503, json: { supported: true, messages: [], error: reason, via, hub } });
+  });
+  try {
+    await page.goto(`${BASE}/#/desk`);
+    await page.waitForSelector('[data-testid="voice-hub-offline"]');
+    await waitFor(async () => (await page.textContent('[data-testid="voice-hub-offline-title"]'))?.includes("voice hub Clipper is offline") ?? false);
+    const card = await page.textContent('[data-testid="voice-hub-offline"]');
+    expect(card).toContain("not answering over Probe");
+    expect(card).toContain("through Clipper over Probe");
+    expect(card).not.toContain("tailnet");
+    await waitFor(async () => (await page.textContent('[data-testid="voice-node"]'))?.includes("Clipper offline") ?? false);
+    expect(await page.getAttribute('[data-testid="voice-node"]', "title")).toContain("over the Probe SSH relay");
+  } finally {
+    await page.unroute("**/api/voice/**");
+  }
+}, 30000);
+
 test("applications: the Casework kitchen sink is an example app with a live console", async () => {
   await page.click('[data-testid="nav-applications"]');
   await page.waitForSelector('[data-testid="app-kitchen-sink"]');
