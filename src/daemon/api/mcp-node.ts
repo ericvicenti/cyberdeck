@@ -128,8 +128,10 @@ export function checkOpenUrl(raw: string): OpenTarget | { error: string } {
   }
   if (u.protocol !== "http:" && u.protocol !== "https:") return { error: `${u.protocol.replace(/:$/, "")} links are not opened; only http(s) pages and hm:// documents.` };
   if (!u.hostname) return { error: "The URL has no host." };
-  const path = u.pathname !== "/" ? u.pathname : "";
-  return { url, label: `${u.hostname}${path}`.length > 70 ? `${u.hostname}${path}`.slice(0, 67) + "..." : `${u.hostname}${path}`, scheme: u.protocol === "https:" ? "https" : "http" };
+  // Said aloud: the page's last path segment and its host ("yacht-sync on hyper.media"), never a whole URL.
+  const last = decodeURIComponent(u.pathname.split("/").filter(Boolean).at(-1) ?? "").replace(/\.html?$/, "");
+  const page = last.length > 60 ? `${last.slice(0, 57)}...` : last;
+  return { url, label: page ? `${page} on ${u.hostname}` : u.hostname, scheme: u.protocol === "https:" ? "https" : "http" };
 }
 
 /** The shell line that opens `url` on the target: `open` on macOS, `xdg-open` elsewhere (detached), or a test/headless override. */

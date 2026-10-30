@@ -546,7 +546,7 @@ describe("node tools", () => {
     const client = await connect(srv.base);
     const here = parsed(await call(client, "open_url", { url: "https://hyper.media/hm/z6MkOwner/notes/yacht-sync" }));
     expect(here).toMatchObject({ host: "test-node", ok: true, code: 0, url: "https://hyper.media/hm/z6MkOwner/notes/yacht-sync" });
-    expect(here.brief).toBe("Opened hyper.media/hm/z6MkOwner/notes/yacht-sync in the browser on test-node.");
+    expect(here.brief).toBe("Opened yacht-sync on hyper.media in the browser on test-node.");
     const remote = parsed(await call(client, "open_url", { url: "https://example.com/", host: "other" }));
     expect(remote).toMatchObject({ host: "other", ok: true });
     expect(remote.brief).toBe("Opened example.com in the browser on other.");
