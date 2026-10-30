@@ -13,7 +13,7 @@ const creations: { node: string; cwd?: string; cmd?: string }[] = [];
 const createWaiters = new Set<() => void>();
 let heldNode: string | null = null;
 const held = new Set<() => void>();
-const sockets = new Set<any>();
+const sockets = new Set<any>(), attachments = new Set<any>();
 const writes: string[] = [], errors: string[] = [], inputs: string[] = [];
 let attaches = 0;
 const peers = [{ id: "peer-a", name: "Peer A", online: true }, { id: "peer-b", name: "Peer B", online: true }];
@@ -51,18 +51,19 @@ const server = Bun.serve<{ events: boolean }>({ hostname: "127.0.0.1", port: 0, 
   const file = Bun.file(join(process.env.CYBERDECK_TEST_UI || join(import.meta.dir, "../dist/ui"), path === "/" ? "index.html" : path));
   return await file.exists() ? new Response(file) : new Response("Not found", { status: 404 });
 }, websocket: {
-  open(ws) { if (ws.data.events) sockets.add(ws); },
+  open(ws) { if (ws.data.events) sockets.add(ws); else attachments.add(ws); },
   message(_ws, raw) { const data = JSON.parse(String(raw)); if (data.t === "input") inputs.push(data.data); },
-  close(ws) { sockets.delete(ws); },
+  close(ws) { sockets.delete(ws); attachments.delete(ws); },
 }});
 let browser: Browser;
 beforeAll(async () => { browser = await chromium.launch(); });
 afterAll(async () => { release(); await browser.close(); server.stop(true); expect(writes).toEqual([]); expect(inputs).toEqual([]); expect(errors).toEqual([]); });
 function release() { for (const resolve of createWaiters) resolve(); createWaiters.clear(); heldNode = null; for (const resolve of held) resolve(); held.clear(); }
 function event() { for (const ws of sockets) ws.send(JSON.stringify({ kind: "sessions" })); }
+async function waitAttachment(page: Page) { for (let i = 0; i < 200 && !attachments.size; i++) await page.waitForTimeout(10); expect(attachments.size).toBeGreaterThan(0); }
 async function fresh(fn: (page: Page) => Promise<void>) {
   answers = { "": { sessions: [shell("local", "Local shell")] }, "peer-a": { sessions: [shell("a", "A shell")] }, "peer-b": { sessions: [shell("b", "B shell")] } };
-  fleetStatus = 200; attaches = 0; allowCreate = false; holdCreate = false; creations.length = 0;
+  fleetStatus = 200; attaches = 0; attachments.clear(); allowCreate = false; holdCreate = false; creations.length = 0;
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } }); page.setDefaultTimeout(10000);
   page.on("pageerror", e => errors.push(e.message));
   await page.route("**/*", r => new URL(r.request().url()).origin === server.url.origin ? r.continue() : r.abort());
@@ -119,6 +120,43 @@ test("an explicit session owner remains independent of its filter, including an 
   await page.getByTestId("term-filter-node").selectOption("peer-b");
   await page.goBack(); await title(page, "A shell · Peer A · Sessions");
   expect(await page.getByTestId("terminal-host").getAttribute("data-retained")).toBe("yes"); expect(attaches).toBe(count);
+}), 30000);
+
+test("a disconnected terminal has an honest title, then reconnects without a URL or history change", () => fresh(async page => {
+  await page.goto(href("session=local")); await title(page, "Local shell · Local · Sessions");
+  await waitAttachment(page);
+  const url = page.url(), historyLength = await page.evaluate(() => history.length), count = attaches;
+  for (const ws of attachments) ws.close();
+  await title(page, "Disconnected · Local shell · Local · Sessions");
+  expect(await page.getByText("disconnected (the session is still running on Local)").isVisible()).toBe(true);
+  await page.getByRole("button", { name: "Reconnect" }).click();
+  await title(page, "Local shell · Local · Sessions");
+  expect(attaches).toBe(count + 1);
+  expect(page.url()).toBe(url); expect(await page.evaluate(() => history.length)).toBe(historyLength);
+  await page.getByTestId("nav-data").click(); await title(page, "Data");
+  await page.goBack(); await title(page, "Local shell · Local · Sessions");
+  expect(page.url()).toBe(url);
+}), 30000);
+
+test("a terminal exit retitles its exact session and cannot retitle another view", () => fresh(async page => {
+  await page.goto(href("session=local")); await title(page, "Local shell · Local · Sessions");
+  await waitAttachment(page);
+  const url = page.url(), historyLength = await page.evaluate(() => history.length);
+  for (const ws of attachments) ws.send(JSON.stringify({ t: "exit", code: 3 }));
+  await title(page, "Exited · Local shell · Local · Sessions");
+  await page.getByTestId("term-exited").getByText("session exited (3)").waitFor();
+  expect(page.url()).toBe(url); expect(await page.evaluate(() => history.length)).toBe(historyLength);
+  await page.getByTestId("nav-data").click(); await title(page, "Data");
+  for (const ws of attachments) ws.send(JSON.stringify({ t: "exit", code: 5 }));
+  await page.waitForTimeout(100); await title(page, "Data");
+}), 30000);
+
+test("saved exited and lost sessions keep distinct titles on direct links and reload", () => fresh(async page => {
+  answers[""] = { sessions: [{ ...shell("old-exit", "Old shell"), state: "exited" }, { ...shell("lost", "Lost shell"), state: "lost" }] };
+  await page.goto(href("session=old-exit")); await title(page, "Exited · Old shell · Local · Sessions");
+  await page.reload(); await title(page, "Exited · Old shell · Local · Sessions");
+  await page.goto(href("session=lost")); await title(page, "Lost · Lost shell · Local · Sessions");
+  await page.reload(); await title(page, "Lost · Lost shell · Local · Sessions");
 }), 30000);
 
 test("a delayed filtered peer cannot be replaced by an available local session", () => fresh(async page => {

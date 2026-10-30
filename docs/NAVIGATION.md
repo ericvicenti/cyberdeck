@@ -1,8 +1,8 @@
 # Cyberdeck navigation coverage
 
-Updated 2026-10-29. This is an implementation inventory, not a completion claim.
+Updated 2026-10-30. This is an implementation inventory, not a completion claim.
 The nightly routine and fleet deployment status live in Deck's
-`handoff/routines/cyberdeck-navigation/2026-10-29.md`.
+`handoff/routines/cyberdeck-navigation/2026-10-30.md`.
 
 ## Source and rollout status
 
@@ -78,7 +78,7 @@ credentials should not be replayed from a link.
 | `data` / Data | root filter, repo query | Covered. Scans are actions; table has a fixed 100-item cap, not a pageable UI. |
 | `files` / Files, TreeNode, dialogs | path, hidden files, sort/order, query, deep search, File Info modal | Covered, including stale listing/deep-search protection. Multi-selection, expanded tree folders, clipboard, rename/chmod/delete/import drafts stay transient; assess any desired navigable selection separately. Failed directory/info has a matching title. |
 | `edit` / Editor | file path, text/media/markdown, playlist; video transport mode, loop/shuffle | Path/title reconstruct content; empty paths and missing text have accurate views/titles. Documents are retained per node/path across files, primary views and history, preserving unsaved buffers, undo and media. Saves capture a revision and cannot clear later edits; duplicate saves are serialized. Requests and delayed media events stay bound to the original node. Hidden ended/error events cannot navigate or retitle another view. Explicit playlist selection pauses the old track; ordinary navigation leaves playback intact. Drafts remain in memory until tab close, refresh or lock. PDF previews now restore page/zoom/rotation, typed failures and passwords through the parent route (see October 27). Persisted media playback position/preferences remain outside this slice. |
-| `term` / Term, TermPane, SeedPane, PromptBar | node/session, new-session form, cwd prefill; transcript pagination | `filter` selects the tab-strip machine (`self` = serving node, absent = every machine); `target` selects the New form destination independently of the underlying session node. Both restore on reload/new-tab/Back/Forward, and selecting a session retains its filter. Default selection waits for its owner and replaces once; offline/unknown nodes have distinct errors, delayed peers do not become false missing sessions. Seed session links use authenticated entity titles. Links never create a process. Daemon persistence covered in existing E2E. Filtered links now default within their selected machine; unknown filters, fleet lookup errors and failed/denied lists preserve honest URLs and titles. Older overlapping polls cannot replace newer content or trigger stale locks. New-session drafts survive view/history changes in memory per machine and cwd prefill; refresh/lock clears them. Explicit Open preserves newer drafts and never redirects a different view when it finishes. Seed transcript controls and attachment/exit failure titles remain. |
+| `term` / Term, TermPane, SeedPane, PromptBar | node/session, new-session form, cwd prefill; transcript pagination | `filter` selects the tab-strip machine (`self` = serving node, absent = every machine); `target` selects the New form destination independently of the underlying session node. Both restore on reload/new-tab/Back/Forward, and selecting a session retains its filter. Default selection waits for its owner and replaces once; offline/unknown nodes have distinct errors, delayed peers do not become false missing sessions. Seed session links use authenticated entity titles. Links never create a process. Daemon persistence covered in existing E2E. Filtered links now default within their selected machine; unknown filters, fleet lookup errors and failed/denied lists preserve honest URLs and titles. Older overlapping polls cannot replace newer content or trigger stale locks. New-session drafts survive view/history changes in memory per machine and cwd prefill; refresh/lock clears them. Explicit Open preserves newer drafts and never redirects a different view when it finishes. Terminal disconnect, exit and lost states now have matching titles; reconnect needs no route write or process restart. Seed transcript controls and deeper attachment failure diagnostics remain. |
 | `cmux` / Cmux | surface, scrollback, creation form | Surface/scrollback URL/default/title covered. Polling screen response guarded. Workspace creation, input and desktop focus are explicit actions. Missing surfaces have a not-found state/title and never poll a nonexistent terminal. Backend unavailable has its own title. |
 | `cloud` / Cloud + RemoteBrowser | profile, target URL, archive query, provider+conversation | Covered. Remote URL/title state mirrors into the parent route after a request acknowledgement; initial profile state cannot overwrite direct links, redirects replace the requested URL, page/user navigation pushes once, and Back/Forward restores without remounting the persistent browser. The UI settles unacknowledged state for older daemons during rolling updates. Missing profiles, invalid target URLs and unavailable browsers show matching errors/titles before any browser socket is opened. |
 | `remote` / ScreenRemote | physical screen connection, text/scroll mode, remote buttons | Static route/title; captures server kiosk, which has its own navigation. Do not attach normal Playwright to active kiosk (it changes emulated focus); only noDefaults/raw CDP for future physical verification. |
@@ -372,6 +372,12 @@ inert sockets and explicit fake creation responses, never actual shells or messa
 its failed-session response exists only in the fresh test browser. All WebSockets,
 external requests and API writes are blocked. It verifies form destinations, history,
 reload/new tabs, draft disposal, missing filters/machines and error-title cleanup.
+
+Terminal attachment checks are in `bun test tests/term-navigation.test.ts --timeout 30000`:
+the synthetic socket closes, reconnects and reports an exit; saved exit/lost links
+reload with distinct titles while browser assertions
+check the exact title, unchanged URL/history and cleanup on leaving Sessions. No
+production terminal is opened or stopped by these checks.
 
 The Seed UI package 0.1.11 has no host callback for its memory-content read outcomes
 or transcript paging state. Its exported host/client/provider interfaces were audited

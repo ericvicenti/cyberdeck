@@ -24,8 +24,11 @@ const runs = ["run-a", "run-b"].map(id => ({ id, task: id === "run-a" ? "T-1" : 
 const overview = { fleetDir: "/home/test/Code/Deck", status: { host: "Test", time: "", hosts: [{name:"Test",roles:[],kind:"laptop",os:"macos",online:true,cyberdeck:null}], repo: { branch: "test", dirty: 0 }, handoffOpen: 0, sessionsIndexed: 0 }, projects, todo: { sections: [] }, handoff: [{file:"handoff/test-cx.md",host:"Test",agent:"cx",text:"test notes"}], collab: { tasks: [], runs, auto: false }, services: { probedAt: null, rows: [] } };
 const entry = (name: string, size = 1) => ({ name, size, type: "file", mtime: size, mode: 0o644, uid: 1, gid: 1, nlink: 1, ino: size, hidden: name.startsWith("."), target: null, targetType: null });
 const session = (id: string) => ({ id, title: `Shell ${id}`, cwd: "/home/test", cmd: null, tool: "shell", prompt: null, runner: "pty", state: "running", createdAt: 1, exitedAt: null, exitCode: null, clients: 0, lastOutputAt: null, bells: 0, busy: false });
-const server = Bun.serve<{legacy:boolean}>({port:0,hostname:"127.0.0.1",async fetch(req, server) {
+const server = Bun.serve<{legacy:boolean;terminal?:boolean}>({port:0,hostname:"127.0.0.1",async fetch(req, server) {
   const u = new URL(req.url), original = u.pathname;
+  if (original.endsWith("/sessions/one/attach") || original.endsWith("/sessions/two/attach") || original.endsWith("/sessions/remote/attach")) {
+    if (server.upgrade(req,{data:{legacy:false,terminal:true}})) return;
+  }
   if (/^\/api\/browser\/[^/]+\/stream$/.test(original) && server.upgrade(req,{data:{legacy:original.includes("/claude/")}})) { browserConnections.push(original); return; }
   if (original.startsWith("/api/")) {
     requests.push(original + u.search);
@@ -86,10 +89,12 @@ const server = Bun.serve<{legacy:boolean}>({port:0,hostname:"127.0.0.1",async fe
   return await file.exists() ? new Response(file) : new Response("Not found",{status:404});
 }, websocket: {
   open(ws) {
+    if (ws.data.terminal) return;
     browserSockets.add(ws);
     ws.send(JSON.stringify({t:"state",...(ws.data.legacy?{}:{navigationProtocol:1}),url:"about:blank",title:""}));
   },
   message(ws, raw) {
+    if (ws.data.terminal) return;
     const message = JSON.parse(String(raw));
     browserMessages.push(message);
     if (!["nav","back","forward","reload"].includes(message.t) || message.navigationId === undefined) return;

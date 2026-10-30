@@ -232,14 +232,17 @@ export function Term({ params, onLocked, drafts }: { params: URLSearchParams; on
     if (current && current.id === s.id && current.node === s.node) { if (rest[0]) navigate("term", { session: rest[0].id, node: rest[0].node || undefined }); else { navigate("term", { new: "1" }); } }
   };
   const cwdOptions = useMemo(() => Array.from(new Set([...recentCwds(), ...projectDirs(overview)])), [overview, adding]);
+  const currentKey = current ? `${current.node}:${current.id}` : "";
+  const currentStateTitle = current?.state === "lost" ? "Lost · "
+    : current?.state === "exited" || statuses[currentKey] === "exited" ? "Exited · "
+    : statuses[currentKey] === "closed" ? "Disconnected · " : "";
   useRouteTitle(adding ? `New session on ${formTarget.name}` : unknownNode ? `Machine not found · Sessions`
-    : seedSelected ? undefined : current ? `${current.title} · ${current.nodeName} · Sessions`
+    : seedSelected ? undefined : current ? `${currentStateTitle}${current.title} · ${current.nodeName} · Sessions`
     : defaultUnavailable ? "Sessions unavailable"
     : selectionError ? `${selectionError} · ${nameOf(selectionNode)}`
     : selectedReady && active ? "Session not found" : active || defaultNode !== null ? `Loading sessions · ${nameOf(selectionNode)}` : undefined);
   const led = (s: LiveSession) => (s.state !== "running" ? "led-off" : statuses[`${s.node}:${s.id}`] === "connecting" ? "led-warn" : s.busy ? "led-run" : "led-on");
   const problems = states.filter((s) => s.error || s.seedError);
-  const currentKey = current ? `${current.node}:${current.id}` : "";
 
   return (
     <div className="flex h-full flex-col">
