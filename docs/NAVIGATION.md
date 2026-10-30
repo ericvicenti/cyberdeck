@@ -279,7 +279,7 @@ explicit frame links win during restoration, including frame zero. Hidden inspec
 with the same recording ID cannot become navigation/title owners. Title cleanup checks
 the last writer so a completed parent load cannot erase a nested error title.
 
-Remaining Commander coverage: trainer Live-card perspective; in-game tactic/menu selections; remaining
+Remaining Commander coverage: in-game tactic/menu selections; remaining
 per-view failures. Remaining Cyberdeck coverage: Seed successful-metadata/content-read
 failures and external-server title limits, PDF native-original/annotation cases, transcript/draft
 semantics and native/physical-device cases. App-wide acceptance remains incomplete.
@@ -384,6 +384,23 @@ or transcript paging state. Its exported host/client/provider interfaces were au
 on this run. Accurate content-read failure titles and external-server titles need a
 cooperative package API; do not infer success solely from parent-directory metadata,
 monkey-patch global fetch, or replace the package's editor with a reduced viewer.
-Commander Live/in-game/errors, Soniq internal navigation, these Seed states, remaining attachment/native-device
+Commander in-game/errors, Soniq internal navigation, these Seed states, remaining attachment/native-device
 cases and original-PDF controls remain outside completed acceptance. See the run
 report for deployed hosts and exact verification; keep the routine enabled.
+
+## 2026-10-30 Commander Live perspectives and terminal state titles
+
+Commander's two Live trainer cards now use independent `localSeat` and `remoteSeat`
+parameters. A missing key follows the current match's candidate seat; an explicit
+seat stays selected through direct links, reload, new tabs and Back/Forward. Missing
+snapshots retain requested seats, while out-of-range selections show an error and
+matching title. The single Commander/Cyberdeck history owner remains unchanged;
+selecting a perspective does not start or control a game. Commander client-only
+deployment keeps the hosted server and existing game connections running. Its
+synthetic standalone and embedded navigation suite covers both cards.
+
+Sessions now distinguish `Disconnected`, `Exited` and `Lost` in the document title.
+The first is the browser attachment state; the latter two come from the durable
+session record or an exit event. Reconnecting changes neither the URL nor browser
+history and does not restart the process. Production-bundle tests cover these
+states and title cleanup after leaving Sessions.
