@@ -84,7 +84,9 @@ export type ShellResult = { host: string; cwd: string; code: number | null; time
 export async function runShell(t: ShellTarget, command: string, cwd: string, timeoutSec: number, env: NodeJS.ProcessEnv = process.env): Promise<ShellResult> {
   const sshBin = () => env.CYBERDECK_SSH ?? "ssh";
   // The login shell is the remote user's; `cd` first so a missing directory fails loudly instead of running in $HOME.
-  const script = `cd ${shq(cwd)} || exit 97\nexec "\${SHELL:-/bin/sh}" -lc ${shq(command)}\n`;
+  // A `~` cwd stays unquoted so the remote shell expands it (quoting it would mean a directory literally called ~).
+  const cdTo = cwd === "~" ? "~" : cwd.startsWith("~/") ? `~/${shq(cwd.slice(2))}` : shq(cwd);
+  const script = `cd ${cdTo} || exit 97\nexec "\${SHELL:-/bin/sh}" -lc ${shq(command)}\n`;
   // Locally the command runs in its own process group (perl's setpgid; every macOS and Linux box has
   // perl) so a timeout kills the whole tree, not just the shell, and the output pipes close.
   const perl = t.local ? Bun.which("perl", { PATH: `${env.PATH ?? ""}:/usr/bin:/bin` }) : null;
@@ -109,6 +111,31 @@ export async function runShell(t: ShellTarget, command: string, cwd: string, tim
   clearTimeout(timer);
   const code = await Promise.race([p.exited, new Promise<number>((res) => setTimeout(() => { killTree(); res(-1); }, 2000))]);
   return { host: t.host, cwd, code: timedOut ? null : code, timedOut, durationMs: Date.now() - started, stdout, stderr };
+}
+
+export type OpenTarget = { url: string; label: string; scheme: "http" | "https" | "hm" };
+
+/** A URL `open_url` will hand to a browser: http(s) with a host, or an hm:// address; anything else is refused. */
+export function checkOpenUrl(raw: string): OpenTarget | { error: string } {
+  const url = raw.trim();
+  let u: URL;
+  try { u = new URL(url); } catch { return { error: `"${raw.slice(0, 80)}" is not a URL; open_url takes an http(s) address or an hm:// document address.` }; }
+  if (/[\s\x00-\x1f]/.test(url)) return { error: "The URL contains whitespace or control characters." };
+  if (u.protocol === "hm:") {
+    const parts = url.replace(/^hm:\/\//, "").split("/").filter(Boolean);
+    if (!parts[0]) return { error: "The hm:// address has no account." };
+    return { url, label: `the Seed document ${parts.at(-1)}`, scheme: "hm" };
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return { error: `${u.protocol.replace(/:$/, "")} links are not opened; only http(s) pages and hm:// documents.` };
+  if (!u.hostname) return { error: "The URL has no host." };
+  const path = u.pathname !== "/" ? u.pathname : "";
+  return { url, label: `${u.hostname}${path}`.length > 70 ? `${u.hostname}${path}`.slice(0, 67) + "..." : `${u.hostname}${path}`, scheme: u.protocol === "https:" ? "https" : "http" };
+}
+
+/** The shell line that opens `url` on the target: `open` on macOS, `xdg-open` elsewhere (detached), or a test/headless override. */
+export function openCommand(url: string, opener?: string): string {
+  if (opener) return `${opener} ${shq(url)}`;
+  return `u=${shq(url)}; if [ "$(uname -s)" = Darwin ]; then open "$u"; else command -v xdg-open >/dev/null 2>&1 || { echo "no xdg-open on this host" >&2; exit 127; }; (xdg-open "$u" >/dev/null 2>&1 </dev/null &); sleep 1; fi`;
 }
 
 export type NodeToolDeps = {
@@ -150,6 +177,28 @@ export function registerNodeTools(server: McpServer, cfg: CyberdeckConfig, contr
       const status = r.timedOut ? `timed out after ${timeoutSec}s` : r.code === 97 ? `could not cd to ${dir}` : `exit ${r.code}`;
       const sentence = `${command.length > 60 ? `${command.slice(0, 57)}...` : command} on ${t.host}: ${status} in ${(r.durationMs / 1000).toFixed(1)}s${out.truncated ? ", output truncated" : ""}.`;
       return spoken(brief, sentence, { host: t.host, cwd: dir, command, code: r.code, timedOut: r.timedOut, durationMs: r.durationMs, stdout: out.text, stderr: err.text, truncated: out.truncated || err.truncated, ...(outputFile ? { outputFile } : {}) });
+    }
+  );
+
+  server.tool(
+    "open_url",
+    `Open a web page in the default browser on ${me} (or on another fleet host over ssh with \`host\`), so the owner sees it on that machine's screen: an http(s) URL, or an hm:// address when the Seed app is installed there. Nothing else runs. Say on which host it opened. Every call is audited.`,
+    {
+      url: z.string().min(1).max(2000).describe("The page: https://…, http://…, or hm://<account>/<path>"),
+      host: z.string().max(64).optional().describe("Fleet host whose screen should show it (needs an ssh alias in the manifest); default this node"),
+      brief: BRIEF,
+    },
+    async ({ url, host, brief }) => {
+      const u = checkOpenUrl(url);
+      if ("error" in u) return fail(u.error);
+      const t = resolveShellHost(await deps.hosts(), me, host);
+      if ("error" in t) return fail(t.error);
+      audit({ at: new Date().toISOString(), by: "mcp", tool: "open_url", host: t.host, url: u.url });
+      const r = await runShell(t, openCommand(u.url, t.local ? env.CYBERDECK_OPENER : undefined), t.local ? homedir() : "~", 20, env);
+      const ok = !r.timedOut && r.code === 0;
+      const why = r.timedOut ? "no answer in 20s" : (r.stderr || r.stdout).trim().split("\n").filter(Boolean).at(-1) ?? `exit ${r.code}`;
+      const sentence = ok ? `Opened ${u.label} in the browser on ${t.host}.` : `Could not open ${u.label} on ${t.host}: ${why.length > 120 ? `${why.slice(0, 117)}...` : why}.`;
+      return spoken(brief, sentence, { host: t.host, url: u.url, ok, code: r.code, timedOut: r.timedOut, durationMs: r.durationMs, ...(r.stderr.trim() ? { stderr: r.stderr.trim().slice(-600) } : {}) });
     }
   );
 

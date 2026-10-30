@@ -21,6 +21,11 @@ process.env.DECK_STUB_LOG = DECK_LOG;
 
 let srv: TestServer;
 let bare: TestServer;
+let gateway: ReturnType<typeof Bun.serve>;
+const gatewayHits: string[] = [];
+process.env.CYBERDECK_OPENER = "echo opened";
+delete process.env.CYBERDECK_SEED_OWNER_ACCOUNT;
+delete process.env.CYBERDECK_SEED_GATEWAY;
 
 async function connect(base: string, token = TEST_TOKEN): Promise<Client> {
   const client = new Client({ name: "test-client", version: "0.0.0" });
@@ -46,7 +51,29 @@ beforeAll(() => {
   git("-C", LIVE_REPO, "add", ".");
   git("-C", LIVE_REPO, "commit", "-qm", "first");
   writeFileSync(join(LIVE_REPO, "b.txt"), "x\n");
-  srv = startTestServer(testConfig({ fleetDir: FLEET_STUB, nodeName: "test-node" }));
+  gateway = Bun.serve({
+    port: 0,
+    fetch(req) {
+      const u = new URL(req.url);
+      gatewayHits.push(u.pathname + u.search);
+      if (u.pathname !== "/api/Query") return new Response("<html>not found</html>", { status: 404, headers: { "content-type": "text/html" } });
+      const includes = JSON.parse(u.searchParams.get("includes") ?? "[]") as { space: string }[];
+      if (includes[0]?.space === "z6MkEmpty") return Response.json({ json: { results: [] } });
+      const uid = includes[0]?.space ?? "z6MkOwner";
+      const doc = (path: string[], name: string, summary: string, updated: number, created = updated - 3600) => ({
+        type: "document", id: { id: `hm://${uid}/${path.join("/")}`, uid, path }, path, metadata: { name, summary }, visibility: "PUBLIC",
+        createTime: { seconds: String(created), nanos: 0 }, updateTime: { seconds: String(updated), nanos: 0 }, sortTime: new Date(updated * 1000).toISOString(),
+      });
+      const now = Math.floor(Date.now() / 1000);
+      // Out of order on purpose: the tool sorts by the newest publish.
+      return Response.json({ json: { results: [
+        doc(["notes", "clipper-bootstrap"], "Clipper bootstrap guide", "How the Mac mini was set up", now - 9 * 86400),
+        doc(["notes", "yacht-sync"], "Desktop sync failure on yacht", "Two daemons shared one identity", now - 86400),
+        doc(["hm26"], "", "", now - 20 * 86400),
+      ] } });
+    },
+  });
+  srv = startTestServer(testConfig({ fleetDir: FLEET_STUB, nodeName: "test-node", seed: { ownerAccount: "z6MkOwner", gatewayUrl: `http://127.0.0.1:${gateway.port}` } }));
   srv.db.query(
     `INSERT INTO repos (path, name, head_branch, dirty_files, ahead, remotes, risk, risk_reasons, scanned_at)
      VALUES ('/home/x/Code/lonely', 'lonely', 'main', 2, 0, '[]', 'at-risk', '["no remote"]', 1),
@@ -58,6 +85,7 @@ beforeAll(() => {
 afterAll(() => {
   srv.stop();
   bare.stop();
+  gateway.stop(true);
 });
 
 describe("mcp transport", () => {
@@ -94,7 +122,7 @@ describe("mcp tools", () => {
     const client = await connect(srv.base);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["announce", "collab_add", "collab_run", "collab_tasks", "deck_context", "delegate", "delegate_result", "edit_file", "fleet_status", "grep", "handoff", "handoff_note", "hosts", "list_dir", "listen", "media", "note", "projects", "read_file", "repos", "repos_detail", "run_log", "scan", "service_logs", "services", "services_restart", "sessions", "sessions_search", "shell", "status", "todo", "todo_add", "todo_done", "write_file"]);
+    expect(names).toEqual(["announce", "collab_add", "collab_run", "collab_tasks", "deck_context", "delegate", "delegate_result", "documents", "edit_file", "fleet_status", "grep", "handoff", "handoff_note", "hosts", "list_dir", "listen", "media", "note", "open_url", "projects", "read_file", "repos", "repos_detail", "run_log", "scan", "service_logs", "services", "services_restart", "sessions", "sessions_search", "shell", "status", "todo", "todo_add", "todo_done", "write_file"]);
     for (const t of tools) {
       expect(t.name).toMatch(/^[a-z0-9_]{1,40}$/);
       expect(t.description?.length ?? 0).toBeGreaterThan(20);
@@ -303,6 +331,53 @@ describe("mcp tools", () => {
   });
 });
 
+describe("documents", () => {
+  test("lists the owner's published documents from the gateway, newest publish first, filters by words, and says when the newest was published", async () => {
+    const client = await connect(srv.base);
+    gatewayHits.length = 0;
+    const r = parsed(await call(client, "documents", {}));
+    expect(r.account).toBe("z6MkOwner");
+    expect(r.documents.map((d: { title: string }) => d.title)).toEqual(["Desktop sync failure on yacht", "Clipper bootstrap guide", "hm26"]);
+    expect(r.documents[0]).toMatchObject({
+      url: `http://127.0.0.1:${gateway.port}/hm/z6MkOwner/notes/yacht-sync`, hm: "hm://z6MkOwner/notes/yacht-sync", path: "notes/yacht-sync",
+      summary: "Two daemons shared one identity", visibility: "PUBLIC",
+    });
+    expect(r.brief).toBe('The newest document is "Desktop sync failure on yacht", published yesterday; before it "Clipper bootstrap guide", published 9 days ago.');
+    const hit = new URL(`http://x${gatewayHits[0]}`);
+    expect(hit.pathname).toBe("/api/Query");
+    expect(JSON.parse(hit.searchParams.get("includes")!)).toEqual([{ space: "z6MkOwner", mode: "AllDescendants" }]);
+    expect(JSON.parse(hit.searchParams.get("sort")!)).toEqual([{ term: "updated", reverse: true }]);
+    expect(hit.searchParams.get("limit")).toBe("5");
+    const q = parsed(await call(client, "documents", { query: "clipper guide", limit: 2 }));
+    expect(q.documents.map((d: { title: string }) => d.title)).toEqual(["Clipper bootstrap guide"]);
+    expect(q.brief).toBe('1 document matches "clipper guide": the newest is "Clipper bootstrap guide", published 9 days ago.');
+    expect(new URL(`http://x${gatewayHits.at(-1)}`).searchParams.get("limit")).toBe("60");
+    const none = await call(client, "documents", { query: "nothing like this", brief: true });
+    expect(none.content[0].text).toBe('No published document matches "nothing like this".');
+    const brief = await call(client, "documents", { brief: true, limit: 1 });
+    expect(brief.content[0].text).toBe('The newest document is "Desktop sync failure on yacht", published yesterday.');
+    expect(brief.structuredContent).toMatchObject({ account: "z6MkOwner", count: 1, title: "Desktop sync failure on yacht", hm: "hm://z6MkOwner/notes/yacht-sync" });
+    const other = parsed(await call(client, "documents", { account: "hm://z6MkEmpty/whatever" }));
+    expect(other).toMatchObject({ account: "z6MkEmpty", documents: [] });
+    expect(other.brief).toBe("No published documents were found for that account.");
+    await client.close();
+    // A node without an owner account says what to configure; a node whose gateway is not a Seed site says so.
+    const c2 = await connect(bare.base);
+    const unset = await call(c2, "documents", {});
+    expect(unset.isError).toBe(true);
+    expect(unset.content[0].text).toContain("seed.ownerAccount");
+    await c2.close();
+    const odd = startTestServer(testConfig({ fleetDir: null, nodeName: "odd", seed: { ownerAccount: "z6MkOwner", gatewayUrl: `http://127.0.0.1:${gateway.port}/nope` } }));
+    try {
+      const c3 = await connect(odd.base);
+      const bad = await call(c3, "documents", {});
+      expect(bad.isError).toBe(true);
+      expect(bad.content[0].text).toContain("answered 404");
+      await c3.close();
+    } finally { odd.stop(); }
+  });
+});
+
 describe("mcp brief mode", () => {
   const sentence = (r: ToolResult) => {
     const t = r.content[0]?.text ?? "";
@@ -422,7 +497,7 @@ describe("node tools", () => {
   test("the tools are listed on a full node and withheld when config turns them off", async () => {
     const client = await connect(srv.base);
     const names = (await client.listTools()).tools.map((t) => t.name);
-    for (const n of ["shell", "read_file", "write_file", "edit_file", "list_dir", "grep", "deck_context"]) expect(names).toContain(n);
+    for (const n of ["shell", "open_url", "read_file", "write_file", "edit_file", "list_dir", "grep", "deck_context"]) expect(names).toContain(n);
     await client.close();
     const off = startTestServer(testConfig({ fleetDir: FLEET_STUB, nodeName: "quiet", mcp: { nodeTools: false } }));
     try {
@@ -430,6 +505,7 @@ describe("node tools", () => {
       const quiet = (await c2.listTools()).tools.map((t) => t.name);
       expect(quiet).toContain("status");
       expect(quiet).not.toContain("shell");
+      expect(quiet).not.toContain("open_url");
       expect(quiet).not.toContain("read_file");
       await c2.close();
     } finally { off.stop(); }
@@ -465,6 +541,37 @@ describe("node tools", () => {
     expect(audit.filter((e) => e.tool === "shell").at(-1)).toMatchObject({ by: "mcp", host: "test-node", command: "echo hi" });
     await client.close();
   }, 30_000);
+
+  test("open_url opens through the opener here, over ssh on a manifest host, and refuses anything but web pages and hm documents", async () => {
+    const client = await connect(srv.base);
+    const here = parsed(await call(client, "open_url", { url: "https://hyper.media/hm/z6MkOwner/notes/yacht-sync" }));
+    expect(here).toMatchObject({ host: "test-node", ok: true, code: 0, url: "https://hyper.media/hm/z6MkOwner/notes/yacht-sync" });
+    expect(here.brief).toBe("Opened hyper.media/hm/z6MkOwner/notes/yacht-sync in the browser on test-node.");
+    const remote = parsed(await call(client, "open_url", { url: "https://example.com/", host: "other" }));
+    expect(remote).toMatchObject({ host: "other", ok: true });
+    expect(remote.brief).toBe("Opened example.com in the browser on other.");
+    const sshLog = readFileSync(SSH_LOG, "utf8");
+    expect(sshLog).toContain("other-alias");
+    // The remote machine decides its opener (the CYBERDECK_OPENER override is local only), from its home directory.
+    expect(sshLog).toContain("cd ~ || exit 97");
+    expect(sshLog).toContain("open \"$u\"");
+    expect(sshLog).toContain("'https://example.com/'");
+    expect(sshLog).not.toContain("echo opened '\\''https://example.com");
+    const hm = parsed(await call(client, "open_url", { url: "hm://z6MkOwner/notes/yacht-sync", brief: true }));
+    expect(hm.brief).toBe("Opened the Seed document yacht-sync in the browser on test-node.");
+    for (const bad of ["javascript:alert(1)", "file:///etc/passwd", "not a url", "https://", "ftp://x.example/a"]) {
+      expect((await call(client, "open_url", { url: bad })).isError).toBe(true);
+    }
+    expect((await call(client, "open_url", { url: "https://example.com", host: "nowhere" })).isError).toBe(true);
+    expect((await call(client, "open_url", { url: "https://example.com", host: "phone" })).content[0].text).toContain("no ssh alias");
+    const audit = readFileSync(process.env.CYBERDECK_AUDIT_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.tool === "open_url");
+    expect(audit.map((e) => [e.host, e.url])).toEqual([
+      ["test-node", "https://hyper.media/hm/z6MkOwner/notes/yacht-sync"],
+      ["other", "https://example.com/"],
+      ["test-node", "hm://z6MkOwner/notes/yacht-sync"],
+    ]);
+    await client.close();
+  }, 20_000);
 
   test("shell on a manifest host goes over ssh; unknown hosts and hosts without an alias are refused", async () => {
     const client = await connect(srv.base);

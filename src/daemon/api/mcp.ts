@@ -15,7 +15,7 @@ import type { Database } from "bun:sqlite";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import type { CyberdeckConfig } from "../config";
+import { seedConfig, type CyberdeckConfig } from "../config";
 import type { RepoRow } from "../db";
 import type { NodeStatus } from "../status";
 import type { Control, ServiceProbe } from "./control";
@@ -24,6 +24,7 @@ import { runScan, isScanRunning } from "../indexer/scan";
 import { resolveService, serviceLogs, restartService, restartBudget, type ManifestHost, type ServiceTarget } from "../servicectl";
 import { matchRepo, repoDetail, type RepoDetail } from "../repodetail";
 import { registerNodeTools } from "./mcp-node";
+import { listDocuments, ago as publishedAgo } from "./documents";
 import type { Kiosk } from "./kiosk";
 import { MEDIA_ACTIONS, mediaSentence, type MediaState } from "../screenmedia";
 import type { AnnounceInput, AnnounceResult, ControlAction, DelegateResult, DelegateStatus, Notice } from "../seed";
@@ -708,6 +709,36 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
       const sentence = mediaSentence(hit.name, s);
       const out = { host: hit.name, ...s };
       return s.ok ? spoken(sentence, out, brief, { host: hit.name, ok: true, playing: s.video?.playing ?? false, route: s.afterglow.route, did: s.did }) : spoken(sentence, out, brief, { host: hit.name, ok: false, error: s.error });
+    }
+  );
+
+  server.tool(
+    "documents",
+    "The owner's published Seed Hypermedia documents (notes, reports, pages), newest publish first, read from the public Seed web gateway: title, web `url`, `hm` address, summary and when it was published. `query` keeps the documents whose title, summary or path contain every word. Use it when the owner refers to a note or document he published (\"my latest note\", \"the clipper bootstrap guide\"); show him one with `open_url` and its `url`.",
+    {
+      query: z.string().max(200).optional().describe("Words that must all appear in the title, summary or path"),
+      limit: z.number().int().min(1).max(20).default(5),
+      account: z.string().max(120).optional().describe("An hm account uid (z6Mk…); default the owner's, config seed.ownerAccount"),
+      brief: BRIEF,
+    },
+    async ({ query, limit, account, brief }) => {
+      const seed = seedConfig(cfg);
+      const uid = (account ?? seed.ownerAccount ?? "").trim().replace(/^hm:\/\//, "").split("/")[0];
+      if (!uid) return fail(`No owner account is configured on ${cfg.nodeName}: set seed.ownerAccount in ~/.cyberdeck/config.json to the owner's hm uid (the z6Mk… part of a hyper.media/hm/<uid> URL), or pass account.`);
+      let docs;
+      try {
+        docs = await listDocuments(seed.gatewayUrl, uid, { limit, query: query?.trim() || undefined });
+      } catch (err) {
+        return fail(`Could not list the documents of ${uid}: ${clip(err instanceof Error ? err.message : String(err), 200)}`);
+      }
+      const q = query?.trim();
+      const say = (d: { title: string; updated: string }) => `"${d.title}", published ${publishedAgo(d.updated)}`;
+      const sentence = !docs.length
+        ? q ? `No published document matches "${q}".` : `No published documents were found for that account.`
+        : q
+          ? `${docs.length} ${docs.length === 1 ? "document matches" : "documents match"} "${q}": the newest is ${say(docs[0])}${docs[1] ? `, then ${say(docs[1])}` : ""}.`
+          : `The newest document is ${say(docs[0])}${docs[1] ? `; before it ${say(docs[1])}` : ""}.`;
+      return spoken(sentence, { account: uid, gateway: seed.gatewayUrl, ...(q ? { query: q } : {}), documents: docs }, brief, { account: uid, count: docs.length, ...(docs[0] ? { title: docs[0].title, url: docs[0].url, hm: docs[0].hm, updated: docs[0].updated } : {}) });
     }
   );
 

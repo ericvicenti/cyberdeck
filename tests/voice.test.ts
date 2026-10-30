@@ -288,7 +288,7 @@ describe("secure call url", () => {
 describe("seed config", () => {
   test("defaults, file values, then env overrides", () => {
     const env = {} as NodeJS.ProcessEnv;
-    expect(seedConfig({}, env)).toEqual({ agentsUrl: "http://127.0.0.1:3053", identity: "main", modelProvider: "OpenAI", model: "gpt-6-sol", reasoningLevel: "medium", keyFile: join(process.env.HOME!, ".cyberdeck", "seed-key"), memoryDirs: [join(process.env.HOME!, ".claude", "projects", "-Users-ericvicenti-Code", "memory")] });
+    expect(seedConfig({}, env)).toEqual({ agentsUrl: "http://127.0.0.1:3053", identity: "main", modelProvider: "OpenAI", model: "gpt-6-sol", reasoningLevel: "medium", keyFile: join(process.env.HOME!, ".cyberdeck", "seed-key"), memoryDirs: [join(process.env.HOME!, ".claude", "projects", "-Users-ericvicenti-Code", "memory")], gatewayUrl: "https://hyper.media" });
     expect(seedConfig({ roots: ["/srv/work"], seed: { reasoningLevel: "", memoryDirs: ["/x"] } }, env)).toMatchObject({ reasoningLevel: "", memoryDirs: ["/x"] });
     expect(seedConfig({ roots: ["/srv/work"] }, env).memoryDirs).toEqual([join(process.env.HOME!, ".claude", "projects", "-srv-work", "memory")]);
     expect(seedConfig({}, { CYBERDECK_SEED_MODEL: "gpt-6-astra", CYBERDECK_SEED_REASONING: "high" } as NodeJS.ProcessEnv)).toMatchObject({ model: "gpt-6-astra", reasoningLevel: "high" });
@@ -296,6 +296,10 @@ describe("seed config", () => {
     expect(seedConfig({ seed: { agentsUrl: "http://a:1/", identity: "" } }, env).identity).toBe("main");
     const over = seedConfig({ seed: { agentsUrl: "http://a:1" } }, { CYBERDECK_SEED_AGENTS_URL: "http://b:2", CYBERDECK_SEED_IDENTITY: "alt" } as NodeJS.ProcessEnv);
     expect(over).toMatchObject({ agentsUrl: "http://b:2", identity: "alt" });
+    // The owner's hm account and the gateway `documents` reads: file, env, trailing slash and whitespace trimmed.
+    expect(seedConfig({ seed: { ownerAccount: " z6MkOwner ", gatewayUrl: "https://gw.example/" } }, env)).toMatchObject({ ownerAccount: "z6MkOwner", gatewayUrl: "https://gw.example" });
+    expect(seedConfig({}, { CYBERDECK_SEED_OWNER_ACCOUNT: "z6MkEnv", CYBERDECK_SEED_GATEWAY: "http://127.0.0.1:1/" } as NodeJS.ProcessEnv)).toMatchObject({ ownerAccount: "z6MkEnv", gatewayUrl: "http://127.0.0.1:1" });
+    expect(seedConfig({ seed: { gatewayUrl: "" } }, env).gatewayUrl).toBe("https://hyper.media");
   });
   test("profiles: a seed.profiles entry layers over the seed block, never takes the env, and keeps its own agent pointers", () => {
     const cfg = { seed: { model: "gpt-6-sol", agentId: "default-agent", sessionId: "default-session", profiles: { prod: { agentsUrl: "https://agent.hm/", mcpUrl: " https://yacht.example.ts.net:8443/api/mcp " }, "Bad Name": { agentsUrl: "http://x" } } } };

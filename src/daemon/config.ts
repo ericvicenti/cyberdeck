@@ -99,6 +99,11 @@ export interface SeedConfig {
    *  on this machine; a hosted server needs the public route `cyberdeck serve mcp` prints (`cyberdeck mcp --json`,
    *  `public`). Setup of a profile refuses a remote agents server without it. */
   mcpUrl?: string;
+  /** The owner's hm account (the `z6Mk…` uid of a hyper.media/hm/<uid> URL): the `documents` MCP tool lists its
+   *  published documents, newest first, so the agent can find "the note I published". Env CYBERDECK_SEED_OWNER_ACCOUNT. */
+  ownerAccount?: string;
+  /** The Seed web gateway `documents` queries (its public `/api/Query`); default https://hyper.media. Env CYBERDECK_SEED_GATEWAY. */
+  gatewayUrl: string;
 }
 
 /** One entry of `seed.profiles`: overrides on top of the file's `seed` settings (never the CYBERDECK_SEED_* env). */
@@ -110,6 +115,7 @@ export const SEED_DEFAULTS: SeedConfig = {
   agentsUrl: "http://127.0.0.1:3053", identity: "main", modelProvider: "OpenAI", model: "gpt-6-sol", reasoningLevel: "medium",
   keyFile: join(CYBERDECK_HOME, "seed-key"),
   memoryDirs: [],
+  gatewayUrl: "https://hyper.media",
 };
 
 /** The voice hub this node must relay to (config `voice.hub`, env `CYBERDECK_VOICE_HUB`), or undefined. */
@@ -153,8 +159,12 @@ export function seedConfig(cfg: Pick<CyberdeckConfig, "seed"> & { roots?: string
     if (env.CYBERDECK_SEED_IDENTITY) out.identity = env.CYBERDECK_SEED_IDENTITY;
     if (env.CYBERDECK_SEED_MODEL) out.model = env.CYBERDECK_SEED_MODEL;
     if (env.CYBERDECK_SEED_REASONING !== undefined) out.reasoningLevel = env.CYBERDECK_SEED_REASONING;
+    if (env.CYBERDECK_SEED_OWNER_ACCOUNT) out.ownerAccount = env.CYBERDECK_SEED_OWNER_ACCOUNT;
+    if (env.CYBERDECK_SEED_GATEWAY) out.gatewayUrl = env.CYBERDECK_SEED_GATEWAY;
   }
   out.agentsUrl = out.agentsUrl.replace(/\/+$/, "");
+  out.gatewayUrl = (out.gatewayUrl || SEED_DEFAULTS.gatewayUrl).replace(/\/+$/, "");
+  if (out.ownerAccount) out.ownerAccount = out.ownerAccount.trim();
   if (out.mcpUrl) out.mcpUrl = out.mcpUrl.trim();
   return out;
 }
