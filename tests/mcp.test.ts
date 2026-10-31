@@ -56,6 +56,28 @@ beforeAll(() => {
     fetch(req) {
       const u = new URL(req.url);
       gatewayHits.push(u.pathname + u.search);
+      if (u.pathname === "/api/Resource") {
+        const id = u.searchParams.get("id") ?? "";
+        if (id === "hm://z6MkOwner/notes/yacht-sync") return Response.json({ json: { type: "document", id, document: {
+          account: "z6MkOwner", path: "/notes/yacht-sync", authors: ["z6MkOwner"], version: "bafyv1", visibility: "PUBLIC",
+          createTime: "2026-09-01T10:00:00.000Z", updateTime: "2026-09-02T12:00:00.000Z",
+          metadata: { name: "Desktop sync failure on yacht", summary: "Two daemons shared one identity" },
+          content: [
+            { block: { type: "Paragraph", text: "Two Seed daemons on yacht shared one libp2p identity." }, children: [] },
+            { block: { type: "Heading", text: "What happened", attributes: { childrenType: "Group" } }, children: [
+              { block: { type: "Paragraph", text: "The desktop app and the dev daemon both loaded the same key." }, children: [] },
+              { block: { type: "Code", text: "lsof -i :58001", attributes: { language: "sh" } }, children: [] },
+            ] },
+            { block: { type: "Heading", text: "Fix", attributes: { childrenType: "Ordered" } }, children: [
+              { block: { type: "Paragraph", text: "Stop the dev daemon." }, children: [] },
+              { block: { type: "Paragraph", text: "Give it its own data dir." }, children: [] },
+            ] },
+            { block: { type: "Image", text: "the two processes", link: "ipfs://bafyimg" }, children: [] },
+          ],
+        } } });
+        if (id === "hm://z6MkOwner/hm26") return Response.json({ json: { type: "comment", id, comment: {} } });
+        return new Response("not found", { status: 404 });
+      }
       if (u.pathname !== "/api/Query") return new Response("<html>not found</html>", { status: 404, headers: { "content-type": "text/html" } });
       const includes = JSON.parse(u.searchParams.get("includes") ?? "[]") as { space: string }[];
       if (includes[0]?.space === "z6MkEmpty") return Response.json({ json: { results: [] } });
@@ -122,7 +144,7 @@ describe("mcp tools", () => {
     const client = await connect(srv.base);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["announce", "collab_add", "collab_run", "collab_tasks", "deck_context", "delegate", "delegate_result", "documents", "edit_file", "fleet_status", "grep", "handoff", "handoff_note", "hosts", "list_dir", "listen", "media", "note", "open_url", "projects", "read_file", "repos", "repos_detail", "run_log", "scan", "service_logs", "services", "services_restart", "sessions", "sessions_search", "shell", "status", "todo", "todo_add", "todo_done", "write_file"]);
+    expect(names).toEqual(["announce", "collab_add", "collab_run", "collab_tasks", "deck_context", "delegate", "delegate_result", "documents", "edit_file", "fleet_status", "grep", "handoff", "handoff_note", "hosts", "list_dir", "listen", "media", "note", "open_url", "projects", "read_document", "read_file", "repos", "repos_detail", "run_log", "scan", "service_logs", "services", "services_restart", "sessions", "sessions_search", "shell", "status", "todo", "todo_add", "todo_done", "write_file"]);
     for (const t of tools) {
       expect(t.name).toMatch(/^[a-z0-9_]{1,40}$/);
       expect(t.description?.length ?? 0).toBeGreaterThan(20);
@@ -327,6 +349,58 @@ describe("mcp tools", () => {
     const r = await call(client, "todo");
     expect(r.isError).toBe(true);
     expect(r.content[0].text).toContain("no Deck checkout");
+    await client.close();
+  });
+});
+
+describe("read_document", () => {
+  test("reads a document as text from the gateway, by address, URL, or the newest matching query, and says what it is in brief", async () => {
+    const client = await connect(srv.base);
+    gatewayHits.length = 0;
+    const raw = await call(client, "read_document", { ref: "hm://z6MkOwner/notes/yacht-sync" });
+    const r = parsed(raw);
+    expect(new URL(`http://x${gatewayHits[0]}`).pathname).toBe("/api/Resource");
+    expect(r.document).toMatchObject({
+      title: "Desktop sync failure on yacht", summary: "Two daemons shared one identity", hm: "hm://z6MkOwner/notes/yacht-sync", path: "notes/yacht-sync",
+      url: `http://127.0.0.1:${gateway.port}/hm/z6MkOwner/notes/yacht-sync`, updated: "2026-09-02T12:00:00.000Z", authors: ["z6MkOwner"], version: "bafyv1",
+      headings: ["What happened", "Fix"], truncated: false,
+    });
+    expect(r.document.text).toBe([
+      "Two Seed daemons on yacht shared one libp2p identity.",
+      "# What happened",
+      "The desktop app and the dev daemon both loaded the same key.",
+      "```sh\nlsof -i :58001\n```",
+      "# Fix",
+      "1. Stop the dev daemon.\n\n2. Give it its own data dir.",
+      "[image: the two processes]",
+    ].join("\n\n"));
+    expect(r.document.words).toBe(41);
+    expect(r.brief).toBe('"Desktop sync failure on yacht", published on 2026-09-02, 41 words in 2 sections: Two daemons shared one identity');
+    // The same document by its web URL and by uid/path; a cut-down read says so.
+    const byUrl = parsed(await call(client, "read_document", { ref: `http://127.0.0.1:${gateway.port}/hm/z6MkOwner/notes/yacht-sync?v=1#abc` }));
+    expect(byUrl.document.hm).toBe("hm://z6MkOwner/notes/yacht-sync");
+    const short = parsed(await call(client, "read_document", { ref: "z6MkOwner/notes/yacht-sync", maxChars: 200 }));
+    expect(short.document.truncated).toBe(true);
+    expect(short.document.text).toMatch(/\[\.\.\. \d+ more characters\]$/);
+    expect(short.document.headings).toEqual(["What happened", "Fix"]);
+    // No ref: the owner's newest document (Query, then Resource); with a query, the newest match; the brief carries the pointers.
+    gatewayHits.length = 0;
+    const newest = await call(client, "read_document", { brief: true });
+    expect(gatewayHits.map((h) => new URL(`http://x${h}`).pathname)).toEqual(["/api/Query", "/api/Resource"]);
+    expect(newest.content[0]?.text).toBe('"Desktop sync failure on yacht", published on 2026-09-02, 41 words in 2 sections: Two daemons shared one identity');
+    expect(newest.structuredContent).toMatchObject({ title: "Desktop sync failure on yacht", hm: "hm://z6MkOwner/notes/yacht-sync", words: 41, headings: ["What happened", "Fix"], truncated: false });
+    const none = await call(client, "read_document", { query: "nothing like this", brief: true });
+    expect(none.content[0]?.text).toBe('No published document matches "nothing like this".');
+    // Not a document, not on the gateway, not an address: readable failures.
+    const comment = await call(client, "read_document", { ref: "hm://z6MkOwner/hm26" });
+    expect(comment.isError).toBe(true);
+    expect(comment.content[0]?.text).toContain("is a comment, not a document");
+    const missing = await call(client, "read_document", { ref: "hm://z6MkOwner/notes/none" });
+    expect(missing.isError).toBe(true);
+    expect(missing.content[0]?.text).toContain("has no document at hm://z6MkOwner/notes/none");
+    const junk = await call(client, "read_document", { ref: "https://example.com/not-seed" });
+    expect(junk.isError).toBe(true);
+    expect(junk.content[0]?.text).toContain("is not a Seed document address");
     await client.close();
   });
 });

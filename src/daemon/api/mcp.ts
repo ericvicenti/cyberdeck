@@ -24,7 +24,7 @@ import { runScan, isScanRunning } from "../indexer/scan";
 import { resolveService, serviceLogs, restartService, restartBudget, type ManifestHost, type ServiceTarget } from "../servicectl";
 import { matchRepo, repoDetail, type RepoDetail } from "../repodetail";
 import { registerNodeTools } from "./mcp-node";
-import { listDocuments, ago as publishedAgo } from "./documents";
+import { listDocuments, readDocument, ago as publishedAgo } from "./documents";
 import type { Kiosk } from "./kiosk";
 import { MEDIA_ACTIONS, mediaSentence, type MediaState } from "../screenmedia";
 import type { AnnounceInput, AnnounceResult, ControlAction, DelegateResult, DelegateStatus, Notice } from "../seed";
@@ -739,6 +739,44 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
           ? `${docs.length} ${docs.length === 1 ? "document matches" : "documents match"} "${q}": the newest is ${say(docs[0])}${docs[1] ? `, then ${say(docs[1])}` : ""}.`
           : `The newest document is ${say(docs[0])}${docs[1] ? `; before it ${say(docs[1])}` : ""}.`;
       return spoken(sentence, { account: uid, gateway: seed.gatewayUrl, ...(q ? { query: q } : {}), documents: docs }, brief, { account: uid, count: docs.length, ...(docs[0] ? { title: docs[0].title, url: docs[0].url, hm: docs[0].hm, updated: docs[0].updated } : {}) });
+    }
+  );
+
+  server.tool(
+    "read_document",
+    "Read one published Seed Hypermedia document as text (title, summary, headings, the body flattened to markdown-ish text, word count) from the public Seed web gateway, so you can summarize it or read it aloud. Name it with `ref` (an hm:// address, a gateway /hm/<uid>/<path> URL, or `<uid>/<path>`, as `documents` returns in `hm` and `url`), or leave `ref` out to read the owner's newest document, optionally the newest whose title, summary or path contain every word of `query` (\"read me my latest note\", \"what does my clipper bootstrap guide say\"). Long documents are cut at `maxChars`; `headings` lists the sections either way.",
+    {
+      ref: z.string().max(400).optional().describe("hm://<uid>/<path>, a gateway /hm/<uid>/<path> URL, or <uid>/<path>; omit to read the newest document"),
+      query: z.string().max(200).optional().describe("Without ref: words that must all appear in the title, summary or path of the document to read"),
+      account: z.string().max(120).optional().describe("Without ref: the hm account uid to pick from; default the owner's (config seed.ownerAccount)"),
+      maxChars: z.number().int().min(200).max(40_000).default(12_000).describe("Cut the text here (the brief never reads more than one sentence)"),
+      brief: BRIEF,
+    },
+    async ({ ref, query, account, maxChars, brief }) => {
+      const seed = seedConfig(cfg);
+      let target = ref?.trim() || "";
+      const q = query?.trim() || undefined;
+      if (!target) {
+        const uid = (account ?? seed.ownerAccount ?? "").trim().replace(/^hm:\/\//, "").split("/")[0];
+        if (!uid) return fail(`No owner account is configured on ${cfg.nodeName}: set seed.ownerAccount in ~/.cyberdeck/config.json, pass account, or name the document with ref.`);
+        let docs;
+        try {
+          docs = await listDocuments(seed.gatewayUrl, uid, { limit: 1, query: q });
+        } catch (err) {
+          return fail(`Could not list the documents of ${uid}: ${clip(err instanceof Error ? err.message : String(err), 200)}`);
+        }
+        if (!docs.length) return spoken(q ? `No published document matches "${q}".` : `No published documents were found for that account.`, { account: uid, ...(q ? { query: q } : {}), found: false }, brief, { found: false });
+        target = docs[0].hm;
+      }
+      let doc;
+      try {
+        doc = await readDocument(seed.gatewayUrl, target, { maxChars });
+      } catch (err) {
+        return fail(`Could not read ${target}: ${clip(err instanceof Error ? err.message : String(err), 200)}`);
+      }
+      const opening = clip(doc.text.replace(/^#+\s*/gm, "").replace(/^```[^\n]*$/gm, ""), 220);
+      const sentence = `"${doc.title}", published ${publishedAgo(doc.updated)}, ${plural(doc.words, "word")}${doc.headings.length ? ` in ${plural(doc.headings.length, "section")}` : ""}${doc.summary ? `: ${clip(doc.summary, 200)}` : opening ? `. It starts: ${opening}` : "."}`;
+      return spoken(sentence, { gateway: seed.gatewayUrl, ...(q ? { query: q } : {}), document: doc }, brief, { title: doc.title, url: doc.url, hm: doc.hm, updated: doc.updated, words: doc.words, headings: doc.headings, truncated: doc.truncated });
     }
   );
 

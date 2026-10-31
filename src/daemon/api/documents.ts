@@ -101,3 +101,142 @@ export async function listDocuments(gateway: string, account: string, opts: List
   const kept = opts.query ? docs.filter((d) => documentMatches(d, opts.query!)) : docs;
   return kept.slice(0, limit);
 }
+
+// ---- Reading one document -------------------------------------------------------------------
+
+/** One block of a document on the gateway (`/api/Resource`): the fields the text rendering needs. */
+type HmBlock = {
+  type?: string;
+  text?: string;
+  link?: string;
+  attributes?: { childrenType?: string; language?: string; name?: string; alt?: string; level?: number } | null;
+};
+type HmBlockNode = { block?: HmBlock | null; children?: HmBlockNode[] | null };
+
+export type HmDocumentBody = HmDocument & {
+  /** The document as plain markdown-ish text: headings as `#`, lists as `-`/`1.`, code fenced, media named in brackets. */
+  text: string;
+  words: number;
+  /** The heading texts in order, for "what is in it". */
+  headings: string[];
+  authors: string[];
+  version?: string;
+  /** True when `text` was cut at `maxChars`. */
+  truncated: boolean;
+};
+
+/** A document reference as the agent may say it: `hm://uid/path`, `https://<gateway>/hm/uid/path`, or `uid/path`. */
+export function parseDocumentRef(ref: string): { uid: string; path: string } | null {
+  let s = ref.trim();
+  if (!s) return null;
+  if (/^https?:\/\//i.test(s)) {
+    let u: URL;
+    try { u = new URL(s); } catch { return null; }
+    const m = u.pathname.match(/^\/hm\/([^/]+)(\/.*)?$/);
+    if (!m) return null;
+    s = `${m[1]}${m[2] ?? ""}`;
+  } else {
+    s = s.replace(/^hm:\/\//i, "");
+  }
+  s = s.split(/[?#]/)[0].replace(/\/+$/, "");
+  const [uid, ...rest] = s.split("/").filter(Boolean);
+  if (!uid || !/^z6Mk[A-Za-z0-9]+$/.test(uid)) return null;
+  return { uid, path: rest.join("/") };
+}
+
+const listMarker = (childrenType: string | undefined, index: number): string =>
+  childrenType === "Unordered" ? "- " : childrenType === "Ordered" ? `${index + 1}. ` : childrenType === "Blockquote" ? "> " : "";
+
+/** Flatten a block tree into readable text; `headings` collects the heading texts in order. */
+export function blocksToText(nodes: HmBlockNode[] | null | undefined, headings: string[] = [], depth = 0, parentChildrenType?: string): string {
+  const out: string[] = [];
+  (nodes ?? []).forEach((n, i) => {
+    const b = n.block ?? {};
+    const text = (b.text ?? "").trim();
+    const indent = "  ".repeat(Math.max(0, depth - 1));
+    const marker = depth > 0 ? listMarker(parentChildrenType, i) : "";
+    const line = (body: string) => `${indent}${marker}${body}`;
+    switch (b.type) {
+      case "Heading":
+        if (text) { headings.push(text); out.push(line(`${"#".repeat(Math.min(6, depth + 1))} ${text}`)); }
+        break;
+      case "Code":
+        out.push(`${line("```" + (b.attributes?.language ?? ""))}\n${text}\n${line("```")}`);
+        break;
+      case "Image": out.push(line(`[image${text ? `: ${text}` : ""}]`)); break;
+      case "Video": out.push(line(`[video${text ? `: ${text}` : ""}]`)); break;
+      case "File": out.push(line(`[file${b.attributes?.name ? `: ${b.attributes.name}` : text ? `: ${text}` : ""}]`)); break;
+      case "Embed": out.push(line(`[embedded document${b.link ? ` ${b.link}` : ""}]`)); break;
+      case "WebEmbed": out.push(line(`[web embed${b.link ? ` ${b.link}` : ""}]`)); break;
+      case "Button": out.push(line(`[button${text ? `: ${text}` : ""}${b.link ? ` -> ${b.link}` : ""}]`)); break;
+      case "Math": out.push(line(`$${text}$`)); break;
+      default:
+        if (text) out.push(line(text));
+    }
+    const kids = n.children ?? [];
+    if (kids.length) out.push(blocksToText(kids, headings, depth + 1, b.attributes?.childrenType ?? undefined));
+  });
+  return out.filter((s) => s !== "").join("\n\n").replace(/\n{3,}/g, "\n\n");
+}
+
+export type ReadDocumentOptions = { maxChars?: number; signal?: AbortSignal; fetch?: typeof fetch };
+
+type ResourceBody = {
+  json?: { type?: string; id?: string; document?: ResourceDocument };
+  type?: string;
+  document?: ResourceDocument;
+};
+type ResourceDocument = {
+  content?: HmBlockNode[];
+  metadata?: { name?: string; summary?: string } | null;
+  account?: string;
+  path?: string;
+  authors?: string[];
+  version?: string;
+  createTime?: string;
+  updateTime?: string;
+  visibility?: string;
+};
+
+/**
+ * One published document from the gateway's `/api/Resource`, flattened to text (cut at `maxChars`, default 12000).
+ * Throws with a readable message when the reference is not a document or the gateway does not answer.
+ */
+export async function readDocument(gateway: string, ref: string, opts: ReadDocumentOptions = {}): Promise<HmDocumentBody> {
+  const parsed = parseDocumentRef(ref);
+  if (!parsed) throw new Error(`"${ref}" is not a Seed document address (expected hm://<uid>/<path> or a ${gateway}/hm/… URL)`);
+  const hm = `hm://${parsed.uid}${parsed.path ? `/${parsed.path}` : ""}`;
+  const fetchFn = opts.fetch ?? fetch;
+  const res = await fetchFn(`${gateway}/api/Resource?${new URLSearchParams({ id: hm })}`, { headers: { accept: "application/json" }, signal: opts.signal ?? AbortSignal.timeout(15_000) });
+  if (res.status === 404) throw new Error(`${gateway} has no document at ${hm}`);
+  if (!res.ok) throw new Error(`${gateway} answered ${res.status} for ${hm}`);
+  const body = (await res.json().catch(() => null)) as ResourceBody | null;
+  const kind = body?.json?.type ?? body?.type;
+  const doc = body?.json?.document ?? body?.document;
+  if (!doc || (kind && kind !== "document")) throw new Error(kind && kind !== "document" ? `${hm} is a ${kind}, not a document` : `${gateway} did not return a document for ${hm} (is it a Seed web gateway?)`);
+  const headings: string[] = [];
+  const full = blocksToText(doc.content, headings);
+  const maxChars = Math.max(200, opts.maxChars ?? 12_000);
+  const truncated = full.length > maxChars;
+  const text = truncated ? `${full.slice(0, maxChars).replace(/\s+\S*$/, "")}\n\n[... ${full.length - maxChars} more characters]` : full;
+  const path = (doc.path ?? parsed.path).replace(/^\/+/, "");
+  const uid = doc.account ?? parsed.uid;
+  const title = (doc.metadata?.name ?? "").trim() || path.split("/").at(-1) || uid;
+  const created = doc.createTime ?? "";
+  return {
+    title,
+    url: `${gateway}/hm/${uid}${path ? `/${path}` : ""}`,
+    hm: `hm://${uid}${path ? `/${path}` : ""}`,
+    path,
+    ...(doc.metadata?.summary ? { summary: doc.metadata.summary } : {}),
+    updated: doc.updateTime ?? created,
+    created,
+    ...(doc.visibility ? { visibility: doc.visibility } : {}),
+    text,
+    words: full.replace(/^```[^\n]*$/gm, "").replace(/^\s*(#+|[-*]|\d+\.|>)\s+/gm, "").split(/\s+/).filter(Boolean).length,
+    headings,
+    authors: doc.authors ?? [],
+    ...(doc.version ? { version: doc.version } : {}),
+    truncated,
+  };
+}
