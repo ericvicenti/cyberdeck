@@ -1,8 +1,8 @@
 # Cyberdeck navigation coverage
 
-Updated 2026-10-30. This is an implementation inventory, not a completion claim.
+Updated 2026-10-31. This is an implementation inventory, not a completion claim.
 The nightly routine and fleet deployment status live in Deck's
-`handoff/routines/cyberdeck-navigation/2026-10-30.md`.
+`handoff/routines/cyberdeck-navigation/2026-10-31.md`.
 
 ## Source and rollout status
 
@@ -60,7 +60,7 @@ credentials should not be replayed from a link.
 | App / api / navigation | primary view, node, not-found, auth, titles | Covered, including legacy `service`→`svc`, Steam app→Vault tab. More parameter validation and every error title remain. |
 | `fleet` / Home | local/fleet overview, node links; pairing and account/reset dialogs; NetworkMap selected endpoints | Overview and node links covered. `networkFrom` / `networkTo` identify an inspected connection by host name, independent of the serving node. Selections push once; partial/whitespace links replace canonical defaults; Back/Forward, reload and fresh tabs restore both endpoints. Unknown/same-host links keep honest errors and titles; unavailable telemetry retains the requested pair. Pairing/reset/benchmark actions remain explicit and never replay from links. |
 | `controls` / Controls | control diagram, bindings/editor, reset notice | Static route/title covered where installed. Binding changes are settings, not navigation. Keyboard/gamepad mode preferences remain local. |
-| `applications` / Applications | application id, Casework example, pairing dialog, reload | Id, unknown-id and unavailable-listing errors/titles covered; failed lookups retain the requested link instead of showing an ordinary app list. Pairing is an explicit operation. Visited generic iframe documents now survive primary-view, application and node navigation. Opt-in generic SPA navigation now restores root-relative child routes/titles via an origin/source/request-bound bridge and keeps one history owner. Commander has a bridge integration (Starlight activation verified on October 26) for its main views, trainer tabs/inspectors/filters, workshop tabs/run inspection and community directory; its remaining nested states are listed below. Unsupported nested links in noncooperating apps report a restoration error. See `docs/EMBEDDED-NAVIGATION.md`. |
+| `applications` / Applications | application id, Casework example, pairing dialog, reload | Id, unknown-id and unavailable-listing errors/titles covered; failed lookups retain the requested link instead of showing an ordinary app list. Pairing is an explicit operation. Visited generic iframe documents now survive primary-view, application and node navigation. Opt-in generic SPA navigation now restores root-relative child routes/titles via an origin/source/request-bound bridge and keeps one history owner. Commander has a bridge integration for its main views, trainer tabs/inspectors/filters, workshop tabs/run inspection, community directory and active-match menu/chat/help/workshop. Runtime match availability and the remaining error matrix still need coverage. Unsupported nested links in noncooperating apps report a restoration error. See `docs/EMBEDDED-NAVIGATION.md`. |
 | `applications?app=soniq` / Soniq | studio track/scene/bar/step, steps/piano editor, library query/category/source/offset, project and export dialogs | Newly registered on October 28. Parent application links use the generic retained frame. The current Clipper source keeps these selections in React state; no cooperative history/title adapter was found. The registered Starlight runtime could not be reached on October 29, so its internal navigation remains unverified. Reconcile the distinct Starlight prototype and richer Clipper studio before adoption; preserve audio and project data. |
 | `applications?app=afterglow` / AfterglowFrame + BoticalMedia/public/navigation.js | child route, season/episode, search/filter, person dialog, music and YouTube state | Existing bridge retained: exact origin+source, parent-only history, route restoration, stable iframe, title cleanup. Browser regressions now prove document/timer continuity across primary views, other apps and node changes, plus hidden-message isolation and route/title restoration. A pending parent route rejects stale child acknowledgements. Missing, malformed and legacy child routes normalize with replace, preserving the iframe document and prior history. No production media is played by these checks. |
 | `applications?app=vimm` / Vault | tabs, system, query, letter, page; selected retro title modal | Covered. `game=<catalog-id>` restores a detail from its shelf/catalog/list context on fresh open, reload and history without starting playback. Invalid tab/system/query/letter/page/game values normalize; missing IDs retain an honest error/title. My list and ready-to-play metadata remain browser-local by design. |
@@ -404,3 +404,28 @@ The first is the browser attachment state; the latter two come from the durable
 session record or an exit event. Reconnecting changes neither the URL nor browser
 history and does not restart the process. Production-bundle tests cover these
 states and title cleanup after leaving Sessions.
+
+## 2026-10-31 Commander live-match panels
+
+Commander's active room URL now selects its game menu, help dialog and chat with
+`panel=menu|help|chat`. The in-game tactic workshop uses the existing
+`tactics`, `tactic`, `version`, `history` and `editor` parameters. The
+single Commander/Cyberdeck history owner restores these selections on direct
+open, refresh, new tab and Back/Forward without replacing the board or
+reconnecting to the current match. A panel link with no active match retains
+the requested URL and shows an unavailable title/error. Links never send chat,
+run a tactic, make a move or surrender.
+
+The Commander source lives on Clipper; its client-only overlay and backup are
+recorded in the latest Deck run report. Repeat the synthetic standalone and
+embedded checks from the exact captured Commander source:
+`CYBERDECK_UI=<Cyberdeck dist/ui> bunx playwright test --config navigation.config.ts`.
+The game controls and lobby suites use their own disposable server. Installed
+navigation can be checked with
+`CYBERDECK_TEST_ORIGIN=<Cyberdeck loopback tunnel> CYBERDECK_PARENT_ORIGIN=https://probe.vicenti.net CYBERDECK_CHILD_TRANSPORT=<Commander loopback tunnel> CYBERDECK_TEST_TOKEN_HOST=clipper bun scripts/check-commander-navigation-live.ts`;
+that checker blocks writes and game sockets.
+
+The remaining gaps are the Commander per-view error matrix, Soniq internal
+navigation, Seed memory-content and transcript outcome hooks, and the original
+PDF/native/attachment cases listed above. A fresh browser can restore panel
+selection only if the game service can resume that browser's live seat.

@@ -5,6 +5,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 const transport = new URL(process.env.CYBERDECK_TEST_ORIGIN || "http://127.0.0.1:4777").origin;
 const origin = new URL(process.env.CYBERDECK_PARENT_ORIGIN || transport).origin;
+const childTransport = process.env.CYBERDECK_CHILD_TRANSPORT
+  ? new URL(process.env.CYBERDECK_CHILD_TRANSPORT).origin : null;
 const host = process.env.CYBERDECK_TEST_TOKEN_HOST;
 const token = host ? (() => {
   const result = Bun.spawnSync(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, "cat ~/.cyberdeck/token"]);
@@ -36,7 +38,17 @@ await context.route("**/*",async route => {
     if(u.pathname.startsWith('/socket.io') || (u.pathname.startsWith('/api/') && !/^\/api\/trainer\/(overview|live|logs\/(coach|online))$/.test(u.pathname) && ![...allowedMatches].some(id=>u.pathname===`/api/trainer/matches/${encodeURIComponent(id)}` || u.pathname===`/api/trainer/matches/${encodeURIComponent(id)}/decisions`))) {
       mutations.push(`unexpected child request ${u.pathname}`); return route.abort();
     }
-    return route.continue();
+    // The registered Probe child requires an interactive gateway session. For a
+    // read-only installed check, fetch its exact Clipper client over an SSH tunnel
+    // while the browser keeps the registered origin and bridge security boundary.
+    if (!childTransport) return route.continue();
+    try {
+      const result = await route.fetch({url:childTransport+u.pathname+u.search});
+      return await route.fulfill({response:result});
+    } catch {
+      await route.abort().catch(() => {});
+      return;
+    }
   }
   // Use a loopback SSH tunnel while retaining the real, explicitly trusted parent
   // origin in the browser. The token is never installed in the child origin.
