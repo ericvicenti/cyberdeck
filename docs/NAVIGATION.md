@@ -61,7 +61,7 @@ credentials should not be replayed from a link.
 | `fleet` / Home | local/fleet overview, node links; pairing and account/reset dialogs; NetworkMap selected endpoints | Overview and node links covered. `networkFrom` / `networkTo` identify an inspected connection by host name, independent of the serving node. Selections push once; partial/whitespace links replace canonical defaults; Back/Forward, reload and fresh tabs restore both endpoints. Unknown/same-host links keep honest errors and titles; unavailable telemetry retains the requested pair. Pairing/reset/benchmark actions remain explicit and never replay from links. |
 | `controls` / Controls | control diagram, bindings/editor, reset notice | Static route/title covered where installed. Binding changes are settings, not navigation. Keyboard/gamepad mode preferences remain local. |
 | `applications` / Applications | application id, Casework example, pairing dialog, reload | Id, unknown-id and unavailable-listing errors/titles covered; failed lookups retain the requested link instead of showing an ordinary app list. Pairing is an explicit operation. Visited generic iframe documents now survive primary-view, application and node navigation. Opt-in generic SPA navigation now restores root-relative child routes/titles via an origin/source/request-bound bridge and keeps one history owner. Commander has a bridge integration for its main views, trainer tabs/inspectors/filters, workshop tabs/run inspection, community directory and active-match menu/chat/help/workshop. Runtime match availability and the remaining error matrix still need coverage. Unsupported nested links in noncooperating apps report a restoration error. See `docs/EMBEDDED-NAVIGATION.md`. |
-| `applications?app=soniq` / Soniq | studio track/scene/bar/step, steps/piano editor, library query/category/source/offset, project and export dialogs | Newly registered on October 28. Parent application links use the generic retained frame. The current Clipper source keeps these selections in React state; no cooperative history/title adapter was found. The registered Starlight runtime could not be reached on October 29, so its internal navigation remains unverified. Reconcile the distinct Starlight prototype and richer Clipper studio before adoption; preserve audio and project data. |
+| `applications?app=soniq` / Soniq | studio track/scene/bar/step, steps/piano editor, library query/category/source/offset, project and export dialogs | Clipper's Studio now cooperates with the generic retained frame for track/scene/bar/step, editor mode and library visibility. Direct links, reload, new tabs, Back/Forward, invalid selections and parent title/history pass isolated browser checks without starting audio. Library query/category/source/page and selected sample, project browsing and snapshot switch remain. Starlight has a distinct older prototype; do not overwrite it or Clipper's project data. |
 | `applications?app=afterglow` / AfterglowFrame + BoticalMedia/public/navigation.js | child route, season/episode, search/filter, person dialog, music and YouTube state | Existing bridge retained: exact origin+source, parent-only history, route restoration, stable iframe, title cleanup. Browser regressions now prove document/timer continuity across primary views, other apps and node changes, plus hidden-message isolation and route/title restoration. A pending parent route rejects stale child acknowledgements. Missing, malformed and legacy child routes normalize with replace, preserving the iframe document and prior history. No production media is played by these checks. |
 | `applications?app=vimm` / Vault | tabs, system, query, letter, page; selected retro title modal | Covered. `game=<catalog-id>` restores a detail from its shelf/catalog/list context on fresh open, reload and history without starting playback. Invalid tab/system/query/letter/page/game values normalize; missing IDs retain an honest error/title. My list and ready-to-play metadata remain browser-local by design. |
 | VaultPlayer / vault download and storage | running emulator, ROM cache, save state, native N64 handoff, pause menu | Play retains the selected game detail URL, while fresh links and reloads show details without starting or downloading a game. The owner survives app, primary-view, node and screen-remote navigation. Hidden games leave the modal top layer, release keyboard/controller handlers and cannot steal focus or titles. Resume returns to the existing core; explicit Save & exit completes it. Real NES homebrew fixtures prove continuity and responsive save/exit. Native N64/gamepad hardware remains unverified. |
@@ -429,3 +429,24 @@ The remaining gaps are the Commander per-view error matrix, Soniq internal
 navigation, Seed memory-content and transcript outcome hooks, and the original
 PDF/native/attachment cases listed above. A fresh browser can restore panel
 selection only if the game service can resume that browser's live seat.
+
+## 2026-11-01 Soniq Studio selections
+
+Clipper's richer Soniq Studio now uses the generic embedded-navigation version 1
+adapter for track, scene, bar, step, steps/piano editor and library visibility.
+The child writes its own history only when opened standalone; inside Cyberdeck,
+the parent owns each URL entry and title. Its route is `/studio` with omitted
+defaults and zero-based scene/bar/step parameters. Invalid or missing selections
+keep their link and show an honest title. The private child checks the exact
+parent origin and source; restoring a link does not play audio or edit notes.
+The Studio's `/studio` static fallback supports standalone fresh opens. A
+read-only live check on Clipper exercised direct links, one entry, Back, reload
+and retained iframe with no API writes or page errors, while the service PIDs
+and stopped audio transport were preserved.
+
+Soniq's source and tests are in Clipper's non-Git clean snapshot
+`~/Code/Soniq-nav-20261101` and backed-up narrow overlay; see its
+`docs/NAVIGATION.md` and the Deck run report for repeatable checks and rollback.
+The remaining Soniq state is library query/category/source/page and selected
+sample, project browsing and snapshot switches. Starlight's older Soniq
+prototype remains separate; it has not received this Clipper UI overlay.
