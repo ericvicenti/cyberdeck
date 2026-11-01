@@ -14,7 +14,11 @@ const name = (s: string) => s.toLowerCase().replace(/\.local$/, '');
 
 export class ProbeTransport {
   private tunnels = new Map<string, Promise<{ url: string; child: ReturnType<typeof Bun.spawn> }>>();
+  /** Device ids whose tunnel is up right now (listening, ssh child alive). A cold device costs an ssh handshake first. */
+  private live = new Set<string>();
   constructor(readonly state: string, readonly ssh = 'ssh') {}
+  /** True while a tunnel to this device is up: the next request costs only the round trip, not the ssh handshake. */
+  ready(id: string): boolean { return this.live.has(id); }
   directory(): { fleet: Directory; fresh: boolean } {
     const fleet = JSON.parse(readFileSync(join(this.state, 'fleet.json'), 'utf8')) as Directory;
     const status = JSON.parse(readFileSync(join(this.state, 'status.json'), 'utf8'));
@@ -64,7 +68,7 @@ export class ProbeTransport {
     // Drain errors without printing credentials or retaining unbounded logs.
     let failure = '';
     void (async () => { const reader = (child.stderr as ReadableStream<Uint8Array>).getReader(); try { while (true) { const {done, value} = await reader.read(); if (done) break; failure = (failure + new TextDecoder().decode(value)).slice(-1500); } } finally { reader.releaseLock(); } })().catch(() => {});
-    void child.exited.then(() => { const current = this.tunnels.get(id); void current?.then(t => { if (t.child === child && this.tunnels.get(id) === current) this.tunnels.delete(id); }).catch(() => {}); });
+    void child.exited.then(() => { const current = this.tunnels.get(id); void current?.then(t => { if (t.child === child && this.tunnels.get(id) === current) { this.tunnels.delete(id); this.live.delete(id); } }).catch(() => {}); });
     const deadline = Date.now() + 10_000;
     try {
       while (true) {
@@ -74,13 +78,13 @@ export class ProbeTransport {
           const done = (ok: boolean) => { socket.destroy(); resolve(ok); };
           socket.once('connect', () => done(true)); socket.once('error', () => done(false)); socket.setTimeout(250, () => done(false));
         });
-        if (listening) return { url: `http://127.0.0.1:${port}`, child };
+        if (listening) { if (child.exitCode === null) this.live.add(id); return { url: `http://127.0.0.1:${port}`, child }; }
         if (Date.now() > deadline) throw new Error('Probe SSH tunnel timed out');
         await Bun.sleep(50); // Poll actual listener readiness; never assume a startup delay means success.
       }
     } catch (e) { child.kill(); throw e; }
   }
-  close() { for (const promise of this.tunnels.values()) void promise.then(t => t.child.kill()).catch(() => {}); this.tunnels.clear(); }
+  close() { for (const promise of this.tunnels.values()) void promise.then(t => t.child.kill()).catch(() => {}); this.tunnels.clear(); this.live.clear(); }
 }
 
 let transport: ProbeTransport | null = null;
@@ -110,6 +114,17 @@ export async function peerBaseUrl(peer: Peer): Promise<string> {
   if (!peer.probe_device) return peer.url;
   if (!transport) throw new Error('Probe networking is not enabled on this node');
   return transport.url(peer.probe_device);
+}
+/** True when reaching this peer costs an ssh handshake first: it is bound to a Probe device and no tunnel to it is up.
+ *  A direct (url) peer is never cold. Callers that bound a request with a timer add the handshake to it when cold. */
+export function probeTunnelCold(peer: Pick<Peer, 'probe_device'>): boolean {
+  return !!peer.probe_device && !transport?.ready(peer.probe_device);
+}
+/** Brings the tunnel to a Probe-bound peer up (or keeps it up) without sending anything; false when it cannot.
+ *  A direct peer needs no warming and reads true. */
+export async function warmPeer(peer: Peer): Promise<boolean> {
+  if (!peer.probe_device) return true;
+  try { await peerBaseUrl(peer); return true; } catch { return false; }
 }
 export async function transportFetch(peer: Peer & { token: string }, path: string, init?: RequestInit) {
   const base = await peerBaseUrl(peer);

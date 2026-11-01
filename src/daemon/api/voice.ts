@@ -12,6 +12,7 @@ import type { Hono } from "hono";
 import { networkInterfaces } from "os";
 import { SeedBridge, SeedError } from "../seed";
 import { peerFetch, type NodeRow } from "./fleet";
+import { probeTunnelCold, warmPeer } from "../probe";
 import type { TailnetState } from "../tailscale";
 
 export type VoiceDeps = {
@@ -65,6 +66,47 @@ const RELAY_MISS_TTL_MS = 15_000;
  *  new session) wait longer. An offline hub (asleep, off the tailnet) hangs the connect, so these bound the wait. */
 export const RELAY_READ_MS = 6_000;
 export const RELAY_ACTION_MS = 15_000;
+/** A hub bound to a Probe device whose tunnel is not up costs an ssh handshake through the relay first (the
+ *  transport gives it 10 s): a cold hub gets that much more before it reads as offline. 2026-11-01: yacht's first
+ *  voice read after an idle night said "clipper is not answering over Probe" while clipper was fine, and the second
+ *  read a moment later succeeded. */
+export const RELAY_COLD_EXTRA_MS = 10_000;
+/** How often a node keeps the tunnel to its pinned Probe-bound hub up, so the first voice read is rarely the cold one. */
+export const HUB_WARM_INTERVAL_MS = 60_000;
+
+/** How long a relayed request to the hub may take: reads RELAY_READ_MS, actions RELAY_ACTION_MS, plus the ssh
+ *  handshake when the hub is a cold Probe peer (`cold` defaults to the transport's own view of that peer). */
+export function relayTimeoutMs(node: Pick<NodeRow, "probe_device">, kind: "read" | "action", cold: boolean = probeTunnelCold(node)): number {
+  return (kind === "action" ? RELAY_ACTION_MS : RELAY_READ_MS) + (cold && node.probe_device ? RELAY_COLD_EXTRA_MS : 0);
+}
+
+/** A relayed read (config, status, transcript, control: all idempotent GETs) that ran out of time is tried once more
+ *  before the hub is declared offline; an action (call grant, new session) never is, and other network errors (refused,
+ *  no route, tunnel failed) are final at once. 2026-11-01 on yacht: twice a relayed read hit the deadline over a live
+ *  Probe tunnel and the very next one answered in under a second. */
+export function shouldRetryRelay(kind: "read" | "action", attempt: number, error: string): boolean {
+  return kind === "read" && attempt === 1 && error === "no answer in time";
+}
+
+/** Keeps the tunnel to a pinned Probe-bound hub up: every `intervalMs` the hub is warmed (no request is sent),
+ *  so the ssh handshake is paid in the background and not by the first TALK of the day. A direct hub, an unpinned
+ *  relay and an unpaired hub are left alone. Returns the stop function. */
+export function keepHubWarm(relay: VoiceRelay, warm: (node: NodeRow) => Promise<boolean> = warmPeer, intervalMs = HUB_WARM_INTERVAL_MS): () => void {
+  if (!relay.pinned) return () => {};
+  let busy = false;
+  const tick = async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      const node = await relay.find().catch(() => null);
+      if (node?.probe_device) await warm(node).catch(() => false);
+    } finally { busy = false; }
+  };
+  const iv = setInterval(() => { void tick(); }, intervalMs);
+  (iv as { unref?: () => void }).unref?.();
+  void tick();
+  return () => clearInterval(iv);
+}
 /** After the hub failed to answer, every voice route answers "hub unreachable" from memory this long instead of
  *  waiting on the network again: the Desk polls, the iPad polls, and each poll must not cost another timeout. */
 export const HUB_DOWN_TTL_MS = 10_000;
@@ -87,18 +129,18 @@ export type VoiceRelay = {
   /** The relay target did not answer (network error, timeout). An HTTP error from it is not an outage: it answered.
    *  `tailnet`: this node's own connection when it is not running (the likely cause). */
   noteFailure: (error: string, tailnet?: TailnetState | null) => void;
-  /** The relay target answered. */
-  noteSuccess: () => void;
+  /** The relay target answered (`node`: which one, for the sighting hook). */
+  noteSuccess: (node?: NodeRow) => void;
   /** This node's own name (for "this node is off the tailnet"). */
   readonly self?: string;
 };
 
-function outageTracker(): Pick<VoiceRelay, "outage" | "noteFailure" | "noteSuccess"> {
+function outageTracker(onSeen?: (node: NodeRow) => void): Pick<VoiceRelay, "outage" | "noteFailure" | "noteSuccess"> {
   let down: { at: number; since: number; error: string; tailnet?: TailnetState } | null = null;
   return {
     outage() { return down && Date.now() - down.at < HUB_DOWN_TTL_MS ? { since: down.since, error: down.error, ...(down.tailnet ? { tailnet: down.tailnet } : {}) } : null; },
     noteFailure(error, tailnet) { const now = Date.now(); down = { at: now, since: down?.since ?? now, error, ...(tailnet && !tailnet.running ? { tailnet } : {}) }; },
-    noteSuccess() { down = null; },
+    noteSuccess(node) { down = null; if (node) try { onSeen?.(node); } catch {} },
   };
 }
 
@@ -107,6 +149,9 @@ export type VoiceRelayOptions = {
   hub?: string;
   /** This node's own name. */
   self?: string;
+  /** Called with the relay target each time it answers: the node row's `last_seen` is stamped from here, so
+   *  "last seen 2 h ago" in an outage means the hub's last answer, not the last time someone opened the Fleet page. */
+  onSeen?: (node: NodeRow) => void;
 };
 
 const sameName = (a: string | undefined, b: string | undefined) => !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
@@ -140,7 +185,7 @@ export function createVoiceRelay(peers: () => NodeRow[], probe: Probe = probeCon
       self: opts.self,
       async find() { return peers().find((r) => sameName(r.name, hub) || r.id === hub) ?? null; },
       reset() {},
-      ...outageTracker(),
+      ...outageTracker(opts.onSeen),
     };
   }
   const lookup = async (): Promise<NodeRow | null> => {
@@ -160,7 +205,7 @@ export function createVoiceRelay(peers: () => NodeRow[], probe: Probe = probeCon
     },
     reset() { cached = null; },
     self: opts.self,
-    ...outageTracker(),
+    ...outageTracker(opts.onSeen),
   };
 }
 
@@ -232,6 +277,8 @@ const errorStatus = (e: unknown): 502 | 503 => (e instanceof SeedError && e.stat
 const errorBody = (e: unknown) => ({ error: e instanceof Error ? e.message : String(e) });
 
 export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDeps) {
+  // The tunnel to a Probe-bound hub is kept up from here, so TALK does not pay the ssh handshake.
+  if (deps.relay && process.env.NODE_ENV !== "test") keepHubWarm(deps.relay);
   // A deploy may have added MCP tools; the agents server only sees them after a re-registration.
   if (process.env.NODE_ENV !== "test") {
     setTimeout(() => {
@@ -283,21 +330,39 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
     const t = await deps.tailnet?.().catch(() => null);
     return t && !t.running ? t : null;
   };
+  // One relayed request to the hub, with the deadline for its kind (plus the ssh handshake when the Probe tunnel is
+  // cold), one retry for a read that ran out of time, and a timestamped log line per failure with how long it took.
+  const relayFetch = async (node: NodeRow, path: string, kind: OfflineKind, init: RequestInit = {}) => {
+    const k = kind === "action" ? "action" : "read";
+    const cold = probeTunnelCold(node);
+    const timeout = relayTimeoutMs(node, k, cold);
+    for (let attempt = 1; ; attempt++) {
+      const started = Date.now();
+      try {
+        return await peerFetch(node, path, { ...init, headers: { ...(init.headers as Record<string, string>), [DIRECT_HEADER]: "1" }, signal: AbortSignal.timeout(timeout) });
+      } catch (e) {
+        const error = networkErrorText(e);
+        const retry = shouldRetryRelay(k, attempt, error);
+        console.error(`${new Date().toISOString()} voice: relay to ${node.name} ${path.split("?")[0]} failed${node.probe_device ? " (over Probe)" : ""}: ${error} after ${Date.now() - started} ms (attempt ${attempt}, deadline ${timeout} ms${cold ? ", cold tunnel" : ""})${retry ? "; trying once more" : ""}`);
+        if (!retry) throw e;
+      }
+    }
+  };
   // Forwards the request to the peer and returns its answer with `via` (and the peer's status code). A peer that does
   // not answer is remembered as down (HUB_DOWN_TTL_MS) so the next polls answer at once instead of waiting again.
   const relayed = async (c: any, node: NodeRow, path: string, kind: OfflineKind, init: RequestInit = {}) => {
     const known = deps.relay?.outage();
     if (known) return offline(c, node, known, kind);
     try {
-      const res = await peerFetch(node, path, { ...init, headers: { ...(init.headers as Record<string, string>), [DIRECT_HEADER]: "1" }, signal: AbortSignal.timeout(kind === "action" ? RELAY_ACTION_MS : RELAY_READ_MS) });
-      deps.relay?.noteSuccess();
+      const res = await relayFetch(node, path, kind, init);
+      deps.relay?.noteSuccess(node);
       const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
       if (!body || typeof body !== "object") return c.json({ error: `voice relay to ${node.name} returned ${res.status}`, via: viaOf(node) }, 502);
       return c.json({ ...body, via: viaOf(node) }, res.status as any);
     } catch (e) {
       const error = networkErrorText(e);
       const tailnet = node.probe_device ? null : await offTailnet();
-      console.error(`voice: relay to ${node.name} failed${node.probe_device ? " (over Probe)" : ""}:`, error, tailnet ? `(${tailnetText(tailnet, deps.relay?.self)}${tailnet.authUrl ? `; log in at ${tailnet.authUrl}` : ""})` : "");
+      if (tailnet) console.error(`voice: relay to ${node.name} failed: ${error} (${tailnetText(tailnet, deps.relay?.self)}${tailnet.authUrl ? `; log in at ${tailnet.authUrl}` : ""})`);
       deps.relay?.noteFailure(error, tailnet);
       return offline(c, node, deps.relay?.outage() ?? { since: Date.now(), error, ...(tailnet ? { tailnet } : {}) }, kind);
     }
@@ -349,14 +414,14 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
       const known = deps.relay?.outage();
       if (known) return offline(c, node, known, "status", s);
       try {
-        const res = await peerFetch(node, "/api/voice/status", { headers: { [DIRECT_HEADER]: "1" }, signal: AbortSignal.timeout(RELAY_READ_MS) });
-        deps.relay?.noteSuccess();
+        const res = await relayFetch(node, "/api/voice/status", "status");
+        deps.relay?.noteSuccess(node);
         const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
         if (body && typeof body === "object") return c.json({ ...body, via: viaOf(node), local: s }, res.status as any);
       } catch (e) {
         const error = networkErrorText(e);
         const tailnet = node.probe_device ? null : await offTailnet();
-        console.error(`voice: status relay to ${node.name} failed${node.probe_device ? " (over Probe)" : ""}:`, error, tailnet ? `(${tailnetText(tailnet, deps.relay?.self)})` : "");
+        if (tailnet) console.error(`voice: status relay to ${node.name} failed: ${error} (${tailnetText(tailnet, deps.relay?.self)})`);
         deps.relay?.noteFailure(error, tailnet);
         return offline(c, node, deps.relay?.outage() ?? { since: Date.now(), error, ...(tailnet ? { tailnet } : {}) }, "status", s);
       }

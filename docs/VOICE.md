@@ -412,7 +412,18 @@ tailnet or the LAN, so the voice relay from such a node works with its Tailscale
 Probe outage: the routes say `voice hub clipper is paired but not answering over Probe (Probe SSH tunnel failed:
 channel 0: open failed: …; last seen 10 h ago); calls resume when the Probe tunnel to it is back`, `via` and `hub`
 carry `transport: "probe"` (`"direct"` on `hub` for a url peer; a direct `via` is unchanged), `hub.tailnet` is never
-set and this node's Tailscale is not consulted. The Desk strip and offline card say "over Probe". The LiveKit `url`
+set and this node's Tailscale is not consulted. The Desk strip and offline card say "over Probe". A Probe-bound hub whose
+tunnel is not up is **cold**: the first request pays the ssh handshake through the relay (the transport allows it 10 s),
+so the relay adds `RELAY_COLD_EXTRA_MS` (10 s) to the read and action deadlines while `probeTunnelCold(node)` says so
+(`relayTimeoutMs`), and `keepHubWarm` re-establishes the tunnel every 60 s (`HUB_WARM_INTERVAL_MS`, started by
+`registerVoiceRoutes` for a pinned relay, no request sent) so TALK rarely meets a cold hub (2026-11-01: yacht's first
+voice read after an idle night read "clipper is not answering over Probe; last seen 24 h ago" while clipper was fine,
+and the next read succeeded). A relayed read (config, status, transcript, control) that runs out of time is tried once more before the hub is declared
+offline (`shouldRetryRelay`; actions never are, other network errors are final at once), and each failed attempt leaves
+a timestamped line in the daemon log with the elapsed time, the deadline and whether the tunnel was cold. Every relayed
+answer from the hub stamps the node row's `last_seen` (`onSeen` on
+`createVoiceRelay`), and so does the 15-minute peer sweep in `updater.ts`, so "last seen" in an outage is the hub's
+last answer and not the last time someone opened the Fleet page. The LiveKit `url`
 / `secureUrl` the hub hands out are still clipper's tailnet addresses (media is WebRTC to the browser, not relayed):
 a caller off the tailnet gets its grant but no media until the droplet's LiveKit is the public default (ROADMAP).
 

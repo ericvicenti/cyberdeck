@@ -2,7 +2,7 @@ import { test, expect } from 'bun:test';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { ProbeTransport, peerBaseUrl } from '../src/daemon/probe';
+import { ProbeTransport, peerBaseUrl, probeTunnelCold } from '../src/daemon/probe';
 
 const id = '12345678-1234-1234-1234-123456789abc';
 test('Probe carries real HTTP and binary/text WebSockets; no VPN fallback after revocation', async () => {
@@ -21,8 +21,10 @@ test('Probe carries real HTTP and binary/text WebSockets; no VPN fallback after 
   const transport = new ProbeTransport(dir, shim);
   try {
     expect(transport.match('linux')?.id).toBe(id);
+    expect(transport.ready(id)).toBe(false); // cold: the next request pays the ssh handshake
     const urls = await Promise.all([transport.url(id), transport.url(id), transport.url(id)]);
     expect(new Set(urls).size).toBe(1);
+    expect(transport.ready(id)).toBe(true); // warm: the tunnel is listening and its ssh child is alive
     expect(readFileSync(join(dir, 'launches'), 'utf8').trim().split('\n')).toHaveLength(1);
     const response = await fetch(urls[0] + '/api/files', { method: 'POST', headers: { authorization: 'Bearer peer-secret' } });
     expect(await response.json()).toEqual({ authorization: 'Bearer peer-secret', method: 'POST', path: '/api/files' });
@@ -37,10 +39,15 @@ test('Probe carries real HTTP and binary/text WebSockets; no VPN fallback after 
     expect(frames).toEqual(['terminal-input', [0, 255, 42]]);
     directory.devices = []; save();
     await expect(transport.url(id)).rejects.toThrow('no longer enrolled');
+    // Without the module-level transport a Probe peer reads cold and a url peer never does.
+    expect(probeTunnelCold({ probe_device: id })).toBe(true);
+    expect(probeTunnelCold({ probe_device: null })).toBe(false);
     await expect(peerBaseUrl({ id: 'peer', url: 'http://legacy.invalid', probe_device: id })).rejects.toThrow('not enabled');
     directory.devices = [{ id, name: 'Linux', port: null, sshPort: 22000, online: true }]; save();
     writeFileSync(join(dir, 'status.json'), JSON.stringify({ synced: 0 }));
     await expect(transport.url(id)).rejects.toThrow('stale');
+    transport.close();
+    expect(transport.ready(id)).toBe(false); // closed tunnels are cold again
   } finally {
     transport.close(); peer.stop(true);
     if (oldTarget == null) delete process.env.PROBE_TEST_TARGET; else process.env.PROBE_TEST_TARGET = oldTarget;

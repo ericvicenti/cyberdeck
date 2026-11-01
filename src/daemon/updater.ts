@@ -126,6 +126,7 @@ export function startAutoUpdater(db: Database): () => void {
           new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 4500)),
         ]);
         if (!res.ok) continue;
+        db.query("UPDATE nodes SET last_seen = ? WHERE id = ?").run(Date.now(), node.id);
         const status = await res.json();
         if (status.commit && status.commit !== mine) {
           console.log(`peer ${node.name} on ${status.commit} (we are ${mine}); nudging both`);

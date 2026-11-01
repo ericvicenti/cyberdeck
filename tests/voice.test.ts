@@ -15,7 +15,7 @@ import { initSchema } from "../src/daemon/db";
 import { createServer } from "../src/daemon/server";
 import { seedConfig, seedProfileNames } from "../src/daemon/config";
 import { caseworkAllows } from "../src/daemon/api/casework";
-import { createVoiceRelay, secureCallUrl, agoText, hubUnreachable, hubInfo, networkErrorText, viaOf, HUB_DOWN_TTL_MS } from "../src/daemon/api/voice";
+import { createVoiceRelay, secureCallUrl, agoText, hubUnreachable, hubInfo, networkErrorText, viaOf, HUB_DOWN_TTL_MS, RELAY_READ_MS, RELAY_ACTION_MS, RELAY_COLD_EXTRA_MS, relayTimeoutMs, keepHubWarm, shouldRetryRelay } from "../src/daemon/api/voice";
 import { parseBackend, livekitServeTarget, LIVEKIT_TLS_PORT } from "../src/daemon/tailscale";
 import { Tailscale } from "../src/daemon/tailscale";
 import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME, checkinNoteStatus, fleetPrompt, promptText, samePrompt, RUNWATCH_TRIGGER_NAME, RUNWATCH_PROMPT, DIGEST_TRIGGER_NAME, DIGEST_SIGNER_LABEL, digestPrompt } from "../src/daemon/seed";
@@ -909,6 +909,66 @@ describe("voice hub", () => {
     expect(grant.url).toBe("wss://livekit.example/");
     expect(grant.via).toBeUndefined();
   }, 20000);
+
+  test("a cold Probe-bound hub gets the ssh handshake on top of the read deadline; a warm or direct one does not", () => {
+    const probed = { probe_device: "1d9c1832-0000-4000-8000-000000000000" };
+    const direct = { probe_device: null };
+    expect(relayTimeoutMs(probed, "read", true)).toBe(RELAY_READ_MS + RELAY_COLD_EXTRA_MS);
+    expect(relayTimeoutMs(probed, "action", true)).toBe(RELAY_ACTION_MS + RELAY_COLD_EXTRA_MS);
+    expect(relayTimeoutMs(probed, "read", false)).toBe(RELAY_READ_MS);
+    // No transport is configured in tests: a Probe peer reads as cold by default, a url peer never does.
+    expect(relayTimeoutMs(probed, "read")).toBe(RELAY_READ_MS + RELAY_COLD_EXTRA_MS);
+    expect(relayTimeoutMs(direct, "read")).toBe(RELAY_READ_MS);
+    expect(relayTimeoutMs(direct, "action", true)).toBe(RELAY_ACTION_MS);
+    expect(RELAY_COLD_EXTRA_MS).toBeGreaterThanOrEqual(10_000); // the transport's own tunnel-start deadline
+  });
+
+  test("a read that ran out of time is tried once more; actions and other network errors are final", () => {
+    expect(shouldRetryRelay("read", 1, "no answer in time")).toBe(true);
+    expect(shouldRetryRelay("read", 2, "no answer in time")).toBe(false);
+    expect(shouldRetryRelay("action", 1, "no answer in time")).toBe(false);
+    expect(shouldRetryRelay("read", 1, "connection refused")).toBe(false);
+    expect(shouldRetryRelay("read", 1, "Probe SSH tunnel failed: channel 0: open failed")).toBe(false);
+    expect(networkErrorText(Object.assign(new Error("The operation timed out."), { name: "TimeoutError" }))).toBe("no answer in time");
+  });
+
+  test("every answer from the hub stamps its sighting; a failure does not", () => {
+    const seen: string[] = [];
+    const relay = createVoiceRelay(rows, async () => true, { hub: "clipper", self: "yacht", onSeen: (n) => seen.push(n.id) });
+    relay.noteFailure("no answer in time");
+    expect(seen).toEqual([]);
+    relay.noteSuccess(rows()[1]);
+    expect(seen).toEqual(["n-clipper"]);
+    expect(relay.outage()).toBeNull();
+    relay.noteSuccess(); // callers without a node (older code paths) still clear the outage
+    expect(seen).toEqual(["n-clipper"]);
+    // A throwing hook never breaks the relay.
+    const bad = createVoiceRelay(rows, async () => true, { hub: "clipper", self: "yacht", onSeen: () => { throw new Error("db closed"); } });
+    expect(() => bad.noteSuccess(rows()[1])).not.toThrow();
+  });
+
+  test("a pinned Probe-bound hub is kept warm on a timer; a direct hub and an unpinned relay are left alone", async () => {
+    const warmed: string[] = [];
+    const warm = async (n: { id: string }) => { warmed.push(n.id); return true; };
+    const probeRows = () => rows().map((r) => (r.id === "n-clipper" ? { ...r, probe_device: "1d9c1832-0000-4000-8000-000000000000" } : r));
+    const stop = keepHubWarm(createVoiceRelay(probeRows, async () => true, { hub: "clipper", self: "yacht" }), warm, 20);
+    await Bun.sleep(90);
+    stop();
+    const count = warmed.length;
+    expect(count).toBeGreaterThanOrEqual(3); // at once, then every tick
+    expect(new Set(warmed)).toEqual(new Set(["n-clipper"]));
+    await Bun.sleep(50);
+    expect(warmed.length).toBe(count); // stopped
+    // A direct hub: found, never warmed.
+    const direct = keepHubWarm(createVoiceRelay(rows, async () => true, { hub: "clipper", self: "yacht" }), warm, 20);
+    await Bun.sleep(50); direct();
+    expect(warmed.length).toBe(count);
+    // No pinned hub: no timer at all (the discovered-peer relay is not a hub).
+    const discovered = createVoiceRelay(probeRows, async () => true, { self: "yacht" });
+    const none = keepHubWarm(discovered, warm, 20);
+    await Bun.sleep(50); none();
+    expect(warmed.length).toBe(count);
+  });
 
   test("the relay remembers a hub that did not answer, for a while, and forgets it when it answers", () => {
     const relay = createVoiceRelay(rows, async () => true, { hub: "clipper", self: "yacht" });
