@@ -8,6 +8,7 @@ import type { Room, LocalAudioTrack, Participant, RemoteTrack, TranscriptionSegm
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "./api";
 import { readTalkMode, TALK_MODE_KEY, type TalkMode } from "./talk";
+import { callUrlCandidates, FIRST_CANDIDATE_MS } from "../../src/shared/callurl";
 
 export type VoicePhase = "idle" | "connecting" | "live" | "ending" | "error";
 /** The worker's published pipeline state; `initializing` until it says otherwise. */
@@ -20,7 +21,29 @@ export type VoiceConfig = { configured: boolean; provider: "livekit" | "none"; r
  *  off only until the hub is back, so the Desk shows an outage, not a setup problem. */
 export type VoiceHubInfo = { name: string; node: string; reachable: false; since: number; lastSeen: number | null; /** How this node reaches the hub: over the Probe SSH relay, or its url (tailnet / LAN). */ transport?: "probe" | "direct"; /** Set when this node is the one off the tailnet (Tailscale stopped or logged out): the hub is probably fine. */ tailnet?: { state: string; running: false } };
 /** `secureUrl`: the wss:// twin of `url` an https page must use (see secureCallUrl in api/voice.ts). */
-type LivekitGrant = { url: string; secureUrl?: string; token: string; room: string; identity: string; expiresAt?: number };
+/** `lanUrl`: the same server on the hub's LAN address, for a caller on the hub's network that is not on the tailnet. */
+type LivekitGrant = { url: string; secureUrl?: string; lanUrl?: string; token: string; room: string; identity: string; expiresAt?: number };
+/** The call server address that last worked on this device; tried first next time (callUrlCandidates). */
+export const CALL_URL_KEY = "cyberdeck-voice-call-url";
+const readCallUrl = () => { try { return localStorage.getItem(CALL_URL_KEY); } catch { return null; } };
+const rememberCallUrl = (url: string) => { try { localStorage.setItem(CALL_URL_KEY, url); } catch { /* private mode */ } };
+
+/** Join the room at the first candidate that answers; the SDK's own failure is thrown when none does. */
+async function connectFirst(room: Room, urls: string[], token: string): Promise<string> {
+  let last: unknown;
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i]!;
+    try {
+      await room.connect(url, token, i < urls.length - 1 ? { websocketTimeout: FIRST_CANDIDATE_MS } : undefined);
+      rememberCallUrl(url);
+      return url;
+    } catch (e) {
+      last = e;
+      await room.disconnect().catch(() => {});
+    }
+  }
+  throw last ?? new Error("No call server address to try");
+}
 
 export type Voice = {
   phase: VoicePhase;
@@ -226,7 +249,9 @@ export function useVoice({ onLocked }: { onLocked?: () => void } = {}): Voice {
       if (superseded()) return;
       // An https page may not open a plain ws:// socket (other than to localhost), and the SDK only reports a generic failure.
       // The daemon offers a wss:// twin (secureUrl) when tailscale serve publishes the call server over TLS.
-      const callUrl = location.protocol === "https:" && grant.secureUrl ? grant.secureUrl : grant.url;
+      // Off the tailnet but on the hub's LAN (yacht since Tailscale left it), `url` is unroutable and `lanUrl` is the one that answers.
+      const callUrls = callUrlCandidates(grant, location.protocol, readCallUrl());
+      const callUrl = callUrls[0] ?? grant.url;
       if (location.protocol === "https:" && /^ws:\/\/(?!localhost[:/]|127\.0\.0\.1[:/])/.test(callUrl)) throw new Error(`The call server is plain ${callUrl}, which an https page cannot reach: publish it over TLS on the voice node (tailscale serve --bg --https=7443 http://127.0.0.1:7880) or open Cyberdeck at http://localhost there`);
 
       room = new Room({ adaptiveStream: true, dynacast: true });
@@ -282,7 +307,7 @@ export function useVoice({ onLocked }: { onLocked?: () => void } = {}): Voice {
         phaseRef.current = "idle";
       });
 
-      await current.connect(callUrl, grant.token);
+      await connectFirst(current, callUrls, grant.token);
       if (superseded()) { current.removeAllListeners(); await current.disconnect(); return; }
       current.remoteParticipants.forEach((p) => readAgentState(p));
       await current.localParticipant.setMicrophoneEnabled(true);

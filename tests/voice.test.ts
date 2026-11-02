@@ -15,11 +15,12 @@ import { initSchema } from "../src/daemon/db";
 import { createServer } from "../src/daemon/server";
 import { seedConfig, seedProfileNames } from "../src/daemon/config";
 import { caseworkAllows } from "../src/daemon/api/casework";
-import { createVoiceRelay, secureCallUrl, agoText, hubUnreachable, hubInfo, networkErrorText, viaOf, HUB_DOWN_TTL_MS, RELAY_READ_MS, RELAY_ACTION_MS, RELAY_COLD_EXTRA_MS, relayTimeoutMs, keepHubWarm, shouldRetryRelay } from "../src/daemon/api/voice";
+import { createVoiceRelay, secureCallUrl, lanCallUrl, agoText, hubUnreachable, hubInfo, networkErrorText, viaOf, HUB_DOWN_TTL_MS, RELAY_READ_MS, RELAY_ACTION_MS, RELAY_COLD_EXTRA_MS, relayTimeoutMs, keepHubWarm, shouldRetryRelay } from "../src/daemon/api/voice";
 import { parseBackend, livekitServeTarget, LIVEKIT_TLS_PORT } from "../src/daemon/tailscale";
 import { Tailscale } from "../src/daemon/tailscale";
 import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME, checkinNoteStatus, fleetPrompt, promptText, samePrompt, RUNWATCH_TRIGGER_NAME, RUNWATCH_PROMPT, DIGEST_TRIGGER_NAME, DIGEST_SIGNER_LABEL, digestPrompt } from "../src/daemon/seed";
 import { testConfig, TEST_TOKEN, tmpHomeDir } from "./helpers";
+import { callUrlCandidates, isLanAddress, FIRST_CANDIDATE_MS } from "../src/shared/callurl";
 
 // Deterministic signer; the bridge builds the keypair from this instead of opening the Seed vault.
 const SEED_HEX = "7f".repeat(32);
@@ -282,6 +283,40 @@ describe("secure call url", () => {
     expect(await secureCallUrl("ws://192.168.1.99:7880", serve, hosts)).toBeNull();
     expect(await secureCallUrl("ws://127.0.0.1:7999", serve, hosts)).toBeNull();
     expect(await secureCallUrl("not a url", serve, hosts)).toBeNull();
+  });
+});
+
+describe("lan call url", () => {
+  // The hub's own addresses: loopback, its tailnet IP and its LAN IP (as on clipper).
+  const hosts = new Set(["localhost", "127.0.0.1", "100.72.8.73", "192.168.1.149"]);
+  const lan = ["192.168.1.149"];
+  test("a call server advertised on this machine's tailnet address gets its LAN twin", () => {
+    expect(lanCallUrl("ws://100.72.8.73:7880", lan, hosts)).toBe("ws://192.168.1.149:7880");
+    expect(lanCallUrl("ws://127.0.0.1:7880/rtc", lan, hosts)).toBe("ws://192.168.1.149:7880/rtc");
+  });
+  test("no twin when the url is already a LAN address, another machine, TLS, or this machine has no LAN address", () => {
+    expect(lanCallUrl("ws://192.168.1.149:7880", lan, hosts)).toBeNull();
+    expect(lanCallUrl("ws://192.168.1.99:7880", lan, hosts)).toBeNull();
+    expect(lanCallUrl("wss://voice.botical.com/rtc", lan, hosts)).toBeNull();
+    expect(lanCallUrl("ws://100.72.8.73:7880", [], hosts)).toBeNull();
+    expect(lanCallUrl("not a url", lan, hosts)).toBeNull();
+  });
+  test("isLanAddress: RFC 1918 only, never the tailnet's 100.64/10", () => {
+    for (const ok of ["10.0.0.5", "172.16.0.1", "172.31.255.1", "192.168.1.149"]) expect(isLanAddress(ok)).toBe(true);
+    for (const no of ["100.72.8.73", "172.32.0.1", "8.8.8.8", "clipper.tail.ts.net", "::1"]) expect(isLanAddress(no)).toBe(false);
+  });
+  const grant = { url: "ws://100.72.8.73:7880", secureUrl: "wss://clipper.tail.ts.net:7443", lanUrl: "ws://192.168.1.149:7880" };
+  test("an http Desk tries the tailnet url then the LAN url; the one that last worked goes first", () => {
+    expect(callUrlCandidates(grant, "http:")).toEqual(["ws://100.72.8.73:7880", "ws://192.168.1.149:7880"]);
+    expect(callUrlCandidates(grant, "http:", "ws://192.168.1.149:7880")).toEqual(["ws://192.168.1.149:7880", "ws://100.72.8.73:7880"]);
+    expect(callUrlCandidates(grant, "http:", "ws://gone.example:7880")).toEqual(["ws://100.72.8.73:7880", "ws://192.168.1.149:7880"]);
+    expect(callUrlCandidates({ url: "ws://100.72.8.73:7880" }, "http:")).toEqual(["ws://100.72.8.73:7880"]);
+    expect(callUrlCandidates({ url: "ws://192.168.1.149:7880", lanUrl: "ws://192.168.1.149:7880" }, "http:")).toEqual(["ws://192.168.1.149:7880"]);
+  });
+  test("an https Desk gets only the wss:// twin (a plain LAN ws:// is mixed content there)", () => {
+    expect(callUrlCandidates(grant, "https:")).toEqual(["wss://clipper.tail.ts.net:7443"]);
+    expect(callUrlCandidates({ url: "ws://100.72.8.73:7880", lanUrl: "ws://192.168.1.149:7880" }, "https:")).toEqual(["ws://100.72.8.73:7880"]);
+    expect(FIRST_CANDIDATE_MS).toBeLessThan(15_000);
   });
 });
 

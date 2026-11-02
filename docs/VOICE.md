@@ -15,7 +15,7 @@ node and the CLI all reach the same server, agent and session. The Desk has no m
 ```
 Casework app / web Desk / cyberdeck seed CLI, on any node
    │  GET  /api/voice/config          -> {configured, provider: "livekit", via: {node, name}}
-   │  POST /api/voice/livekit         -> {url, secureUrl, token, room, identity, expiresAt, via}
+   │  POST /api/voice/livekit         -> {url, secureUrl, lanUrl, token, room, identity, expiresAt, via}
    ▼
 Cyberdeck daemon on that node: relays every /api/voice/* route to the hub (config voice.hub)
    │  fleet proxy, x-cyberdeck-voice-direct
@@ -203,7 +203,7 @@ the node token (`~/.cyberdeck/token`) requires a re-run so the secret on the age
 | Route | Key | Returns |
 |---|---|---|
 | `GET /api/voice/config` | pairing | `{configured, provider: 'livekit' \| 'none', engine: 'seed', reason?, agentId?, sessionId?, via?}` |
-| `POST /api/voice/livekit` | pairing | `{sessionId, url, token, room, identity, expiresAt, profile?}` from `CreateVoiceSession`; `secureUrl?` is the `wss://` twin of a local plain `ws://` url when tailscale serve publishes it; `profile: {voice, speed, applied, error?}` says whether the voice profile below reached the room; `503 {error: 'voice not configured', reason}` when unconfigured; `502 {error}` on a server failure |
+| `POST /api/voice/livekit` | pairing | `{sessionId, url, token, room, identity, expiresAt, profile?}` from `CreateVoiceSession`; `secureUrl?` is the `wss://` twin of a local plain `ws://` url when tailscale serve publishes it; `lanUrl?` is the same server on the hub's first LAN address when `url` is the hub's tailnet address (`lanCallUrl`); `profile: {voice, speed, applied, error?}` says whether the voice profile below reached the room; `503 {error: 'voice not configured', reason}` when unconfigured; `502 {error}` on a server failure |
 | `GET /api/voice/status` | pairing | `{configured, reason?, agentsUrl, mcpUrl, seedProfile?, identity: {name, available, principal?, error?}, agent?: {id, name?}, sessionId?, health: {ok, voice, protocol, version, error?, checkedAt}, mcpRegisteredAt?, lastCallAt?, profile?: {voice, speed, runtimeToken, source}}`; `?profile=<name>` answers for that `seed.profiles` bridge (404 for an unknown name; also on `setup`, `providers`, `login`, `session/reset`, `livekit`, `transcript`) |
 | `GET /api/voice/profiles` | node | `{profiles: [{name: null \| string, agentsUrl, mcpUrl, configured, reason?, identity, agent?, sessionId?, health, stateFile}]}`: the default bridge (`name: null`) then every `seed.profiles` entry |
 | `POST /api/voice/session/reset` | pairing | `{sessionId, previous?, room?}`: a new session for the next call; body `{room?}` names a live call's LiveKit room, which the voice runtime is then switched to the new session (`room: {name, switched, error?}`), so the caller keeps talking |
@@ -424,8 +424,15 @@ a timestamped line in the daemon log with the elapsed time, the deadline and whe
 answer from the hub stamps the node row's `last_seen` (`onSeen` on
 `createVoiceRelay`), and so does the 15-minute peer sweep in `updater.ts`, so "last seen" in an outage is the hub's
 last answer and not the last time someone opened the Fleet page. The LiveKit `url`
-/ `secureUrl` the hub hands out are still clipper's tailnet addresses (media is WebRTC to the browser, not relayed):
-a caller off the tailnet gets its grant but no media until the droplet's LiveKit is the public default (ROADMAP).
+/ `secureUrl` the hub hands out are still clipper's tailnet addresses (media is WebRTC to the browser, not relayed).
+Since 2026-11-02 the grant also carries `lanUrl`, the same server on clipper's LAN address (`lanCallUrl` in
+`api/voice.ts`, computed on the hub and relayed as is): an http Desk tries `url` and then `lanUrl`
+(`callUrlCandidates` in `src/shared/callurl.ts`; the first of several candidates gets 6 s for its socket instead of the
+SDK's 15 s, and the address that worked is remembered in `localStorage` and tried first next time), so a caller on the
+hub's LAN that is not on the tailnet (yacht, once Tailscale was removed from it) still gets media: LiveKit answers the
+peer connection on the LAN address even though `rtc.node_ip` is the tailnet IP (verified from yacht: the tailnet url
+times out after 15 s, the LAN url joins in 0.7 s). A caller on neither network gets its grant but no media until the
+droplet's LiveKit is the public default (ROADMAP). The iPad app reads `url` only and still needs the tailnet.
 
 The web Desk talks only to the daemon in view and shows the hub in its bridge strip (`voice clipper`);
 the shell has no machine dropdown anywhere (nothing on the Desk picks a machine either). Without a
@@ -449,8 +456,9 @@ message naming the fix. On clipper:
     # configured without `via`, it maps :7443 -> `voice.livekitPort` (default 7880); `cyberdeck serve off` unmaps it.
 
 Media flows over WebRTC to the address LiveKit advertises (`rtc.node_ip`, clipper's tailnet IP), so
-any tailnet device works, on the LAN or not; a device that is not on the tailnet (the buoy iPad until
-Tailscale is installed there) cannot reach the hub at all.
+any tailnet device works, on the LAN or not; an http Desk on the hub's LAN also works off the tailnet through
+`lanUrl` (above); a device on neither network (the buoy iPad until Tailscale is installed there) cannot reach the
+hub at all.
 
 ## Phone home-screen button
 

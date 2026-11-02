@@ -10,6 +10,7 @@
 // Answers that went through a peer carry `via: {node, name}`.
 import type { Hono } from "hono";
 import { networkInterfaces } from "os";
+import { isLanAddress } from "../../shared/callurl";
 import { SeedBridge, SeedError } from "../seed";
 import { peerFetch, type NodeRow } from "./fleet";
 import { probeTunnelCold, warmPeer } from "../probe";
@@ -40,6 +41,26 @@ export function localHosts(): Set<string> {
   const hosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
   for (const list of Object.values(networkInterfaces())) for (const a of list ?? []) if (a.family === "IPv4") hosts.add(a.address);
   return hosts;
+}
+
+/** This machine's LAN IPv4 addresses (RFC 1918; never the tailnet's 100.64/10 or link-local), in interface order. */
+export function lanAddresses(): string[] {
+  const out: string[] = [];
+  for (const list of Object.values(networkInterfaces())) for (const a of list ?? []) if (a.family === "IPv4" && !a.internal && isLanAddress(a.address)) out.push(a.address);
+  return out;
+}
+
+/**
+ * The LAN twin of a plain ws:// call server on this machine: the same port and path on this node's first LAN
+ * address, for a caller on the same network that is not on the tailnet (the grant's `url` is the tailnet address
+ * LiveKit is told to advertise). Null when the url already names a LAN address, is not ours, or is not plain ws://.
+ */
+export function lanCallUrl(url: string, addrs = lanAddresses(), hosts = localHosts()): string | null {
+  let u: URL;
+  try { u = new URL(url); } catch { return null; }
+  if (u.protocol !== "ws:" || !hosts.has(u.hostname) || isLanAddress(u.hostname)) return null;
+  const lan = addrs.find((a) => a !== u.hostname);
+  return lan ? `ws://${lan}${u.port ? `:${u.port}` : ""}${u.pathname === "/" ? "" : u.pathname}` : null;
 }
 
 /**
@@ -396,7 +417,8 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
     try {
       const v = await p.bridge.createVoiceSession();
       const secureUrl = deps.serveOrigin ? await secureCallUrl(v.url, deps.serveOrigin) : null;
-      return c.json(secureUrl ? { ...v, secureUrl } : v);
+      const lanUrl = lanCallUrl(v.url);
+      return c.json({ ...v, ...(secureUrl ? { secureUrl } : {}), ...(lanUrl ? { lanUrl } : {}) });
     } catch (e) {
       console.error("voice: CreateVoiceSession failed:", e instanceof Error ? e.message : e);
       return c.json(errorBody(e), errorStatus(e));
