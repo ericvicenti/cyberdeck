@@ -250,7 +250,7 @@ export function useVoice({ onLocked }: { onLocked?: () => void } = {}): Voice {
       // An https page may not open a plain ws:// socket (other than to localhost), and the SDK only reports a generic failure.
       // The daemon offers a wss:// twin (secureUrl) when tailscale serve publishes the call server over TLS.
       // Off the tailnet but on the hub's LAN (yacht since Tailscale left it), `url` is unroutable and `lanUrl` is the one that answers.
-      const callUrls = callUrlCandidates(grant, location.protocol, readCallUrl());
+      const callUrls = callUrlCandidates(grant, location.protocol, readCallUrl(), location.hostname);
       const callUrl = callUrls[0] ?? grant.url;
       if (location.protocol === "https:" && /^ws:\/\/(?!localhost[:/]|127\.0\.0\.1[:/])/.test(callUrl)) throw new Error(`The call server is plain ${callUrl}, which an https page cannot reach: publish it over TLS on the voice node (tailscale serve --bg --https=7443 http://127.0.0.1:7880) or open Cyberdeck at http://localhost there`);
 

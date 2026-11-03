@@ -20,7 +20,7 @@ import { parseBackend, livekitServeTarget, LIVEKIT_TLS_PORT } from "../src/daemo
 import { Tailscale } from "../src/daemon/tailscale";
 import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME, checkinNoteStatus, fleetPrompt, promptText, samePrompt, RUNWATCH_TRIGGER_NAME, RUNWATCH_PROMPT, DIGEST_TRIGGER_NAME, DIGEST_SIGNER_LABEL, digestPrompt } from "../src/daemon/seed";
 import { testConfig, TEST_TOKEN, tmpHomeDir } from "./helpers";
-import { callUrlCandidates, isLanAddress, FIRST_CANDIDATE_MS } from "../src/shared/callurl";
+import { callUrlCandidates, isLanAddress, isLocalPageHost, FIRST_CANDIDATE_MS } from "../src/shared/callurl";
 
 // Deterministic signer; the bridge builds the keypair from this instead of opening the Seed vault.
 const SEED_HEX = "7f".repeat(32);
@@ -312,6 +312,17 @@ describe("lan call url", () => {
     expect(callUrlCandidates(grant, "http:", "ws://gone.example:7880")).toEqual(["ws://100.72.8.73:7880", "ws://192.168.1.149:7880"]);
     expect(callUrlCandidates({ url: "ws://100.72.8.73:7880" }, "http:")).toEqual(["ws://100.72.8.73:7880"]);
     expect(callUrlCandidates({ url: "ws://192.168.1.149:7880", lanUrl: "ws://192.168.1.149:7880" }, "http:")).toEqual(["ws://192.168.1.149:7880"]);
+  });
+  test("a Desk served from this machine or a LAN address tries the LAN address first", () => {
+    for (const host of ["127.0.0.1", "localhost", "[::1]", "192.168.1.20", "10.0.0.5"]) expect(isLocalPageHost(host)).toBe(true);
+    for (const host of ["100.72.8.73", "yacht.tail0bb35a.ts.net", "example.com", ""]) expect(isLocalPageHost(host)).toBe(false);
+    expect(callUrlCandidates(grant, "http:", null, "127.0.0.1")).toEqual(["ws://192.168.1.149:7880", "ws://100.72.8.73:7880"]);
+    expect(callUrlCandidates(grant, "http:", null, "192.168.1.20")).toEqual(["ws://192.168.1.149:7880", "ws://100.72.8.73:7880"]);
+    expect(callUrlCandidates(grant, "http:", null, "100.72.8.73")).toEqual(["ws://100.72.8.73:7880", "ws://192.168.1.149:7880"]);
+    // What last worked still wins, and an https page still gets only the wss:// twin.
+    expect(callUrlCandidates(grant, "http:", "ws://100.72.8.73:7880", "127.0.0.1")).toEqual(["ws://100.72.8.73:7880", "ws://192.168.1.149:7880"]);
+    expect(callUrlCandidates(grant, "https:", null, "127.0.0.1")).toEqual(["wss://clipper.tail.ts.net:7443"]);
+    expect(callUrlCandidates({ url: "ws://100.72.8.73:7880" }, "http:", null, "127.0.0.1")).toEqual(["ws://100.72.8.73:7880"]);
   });
   test("an https Desk gets only the wss:// twin (a plain LAN ws:// is mixed content there)", () => {
     expect(callUrlCandidates(grant, "https:")).toEqual(["wss://clipper.tail.ts.net:7443"]);

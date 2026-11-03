@@ -428,7 +428,8 @@ last answer and not the last time someone opened the Fleet page. The LiveKit `ur
 Since 2026-11-02 the grant also carries `lanUrl`, the same server on clipper's LAN address (`lanCallUrl` in
 `api/voice.ts`, computed on the hub and relayed as is): an http Desk tries `url` and then `lanUrl`
 (`callUrlCandidates` in `src/shared/callurl.ts`; the first of several candidates gets 6 s for its socket instead of the
-SDK's 15 s, and the address that worked is remembered in `localStorage` and tried first next time), so a caller on the
+SDK's 15 s, and the address that worked is remembered in `localStorage` and tried first next time; since 2026-11-03 a
+Desk served from loopback or a LAN address, `isLocalPageHost`, tries `lanUrl` first), so a caller on the
 hub's LAN that is not on the tailnet (yacht, once Tailscale was removed from it) still gets media: LiveKit answers the
 peer connection on the LAN address even though `rtc.node_ip` is the tailnet IP (verified from yacht: the tailnet url
 times out after 15 s, the LAN url joins in 0.7 s). A caller on neither network gets its grant but no media until the
