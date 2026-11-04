@@ -22,7 +22,7 @@ export type VoiceConfig = { configured: boolean; provider: "livekit" | "none"; r
 export type VoiceHubInfo = { name: string; node: string; reachable: false; since: number; lastSeen: number | null; /** How this node reaches the hub: over the Probe SSH relay, or its url (tailnet / LAN). */ transport?: "probe" | "direct"; /** Set when this node is the one off the tailnet (Tailscale stopped or logged out): the hub is probably fine. */ tailnet?: { state: string; running: false } };
 /** `secureUrl`: the wss:// twin of `url` an https page must use (see secureCallUrl in api/voice.ts). */
 /** `lanUrl`: the same server on the hub's LAN address, for a caller on the hub's network that is not on the tailnet. */
-type LivekitGrant = { url: string; secureUrl?: string; lanUrl?: string; token: string; room: string; identity: string; expiresAt?: number };
+type LivekitGrant = { url: string; secureUrl?: string; lanUrl?: string; tailnetUrl?: string; token: string; room: string; identity: string; expiresAt?: number };
 /** The call server address that last worked on this device; tried first next time (callUrlCandidates). */
 export const CALL_URL_KEY = "cyberdeck-voice-call-url";
 const readCallUrl = () => { try { return localStorage.getItem(CALL_URL_KEY); } catch { return null; } };

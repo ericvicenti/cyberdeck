@@ -10,7 +10,7 @@
 // Answers that went through a peer carry `via: {node, name}`.
 import type { Hono } from "hono";
 import { networkInterfaces } from "os";
-import { isLanAddress } from "../../shared/callurl";
+import { isLanAddress, grantForCaller } from "../../shared/callurl";
 import { SeedBridge, SeedError } from "../seed";
 import { peerFetch, type NodeRow } from "./fleet";
 import { probeTunnelCold, warmPeer } from "../probe";
@@ -29,6 +29,11 @@ export type VoiceDeps = {
   /** This node's own tailnet connection (Tailscale.backend). Asked after the hub failed to answer: a node that is
    *  itself off the tailnet blames itself, not the hub. */
   tailnet?: () => Promise<TailnetState | null>;
+  /** The address the current request came from (server.ts `peerIp`); a caller on the hub's LAN gets `url` = the LAN
+   *  address (`grantForCaller`). Absent: grants are handed out as the hub shapes them. */
+  clientIp?: (c: any) => string | null;
+  /** The LAN twin of a local call server url (default `lanCallUrl`, which reads this machine's interfaces; tests inject). */
+  lanUrl?: (url: string) => string | null;
 };
 
 /** Where a relayed answer came from. */
@@ -371,7 +376,8 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
   };
   // Forwards the request to the peer and returns its answer with `via` (and the peer's status code). A peer that does
   // not answer is remembered as down (HUB_DOWN_TTL_MS) so the next polls answer at once instead of waiting again.
-  const relayed = async (c: any, node: NodeRow, path: string, kind: OfflineKind, init: RequestInit = {}) => {
+  const forCaller = (c: any, grant: Record<string, unknown>) => deps.clientIp ? grantForCaller(grant as any, deps.clientIp(c)) : grant;
+  const relayed = async (c: any, node: NodeRow, path: string, kind: OfflineKind, init: RequestInit = {}, shape: (body: Record<string, unknown>) => Record<string, unknown> = (b) => b) => {
     const known = deps.relay?.outage();
     if (known) return offline(c, node, known, kind);
     try {
@@ -379,7 +385,7 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
       deps.relay?.noteSuccess(node);
       const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
       if (!body || typeof body !== "object") return c.json({ error: `voice relay to ${node.name} returned ${res.status}`, via: viaOf(node) }, 502);
-      return c.json({ ...body, via: viaOf(node) }, res.status as any);
+      return c.json({ ...(res.ok ? shape(body) : body), via: viaOf(node) }, res.status as any);
     } catch (e) {
       const error = networkErrorText(e);
       const tailnet = node.probe_device ? null : await offTailnet();
@@ -409,7 +415,8 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
     const p = pick(c);
     if (!p.bridge) return c.json({ error: p.error }, 404);
     const node = p.direct ? null : await relayFor(c);
-    if (node) return relayed(c, node, "/api/voice/livekit", "action", { method: "POST" });
+    // The hub shapes the grant (lanUrl is its LAN); this node knows the caller, so the LAN swap happens here.
+    if (node) return relayed(c, node, "/api/voice/livekit", "action", { method: "POST" }, (body) => forCaller(c, body));
     const missing = p.direct ? null : hubMissing(c);
     if (missing) return c.json({ error: "voice not configured", reason: missing }, 503);
     const s = await p.bridge.status();
@@ -417,8 +424,8 @@ export function registerVoiceRoutes(app: Hono, bridge: SeedBridge, deps: VoiceDe
     try {
       const v = await p.bridge.createVoiceSession();
       const secureUrl = deps.serveOrigin ? await secureCallUrl(v.url, deps.serveOrigin) : null;
-      const lanUrl = lanCallUrl(v.url);
-      return c.json({ ...v, ...(secureUrl ? { secureUrl } : {}), ...(lanUrl ? { lanUrl } : {}) });
+      const lanUrl = (deps.lanUrl ?? lanCallUrl)(v.url);
+      return c.json(forCaller(c, { ...v, ...(secureUrl ? { secureUrl } : {}), ...(lanUrl ? { lanUrl } : {}) }));
     } catch (e) {
       console.error("voice: CreateVoiceSession failed:", e instanceof Error ? e.message : e);
       return c.json(errorBody(e), errorStatus(e));

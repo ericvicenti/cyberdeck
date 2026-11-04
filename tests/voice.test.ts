@@ -20,7 +20,7 @@ import { parseBackend, livekitServeTarget, LIVEKIT_TLS_PORT } from "../src/daemo
 import { Tailscale } from "../src/daemon/tailscale";
 import { SeedBridge, DOGFOOD_PROMPT, DOGFOOD_TRIGGER_NAME, checkinNoteStatus, fleetPrompt, promptText, samePrompt, RUNWATCH_TRIGGER_NAME, RUNWATCH_PROMPT, DIGEST_TRIGGER_NAME, DIGEST_SIGNER_LABEL, digestPrompt } from "../src/daemon/seed";
 import { testConfig, TEST_TOKEN, tmpHomeDir } from "./helpers";
-import { callUrlCandidates, isLanAddress, isLocalPageHost, FIRST_CANDIDATE_MS } from "../src/shared/callurl";
+import { callUrlCandidates, isLanAddress, isLocalPageHost, FIRST_CANDIDATE_MS, grantForCaller, sameSubnet } from "../src/shared/callurl";
 
 // Deterministic signer; the bridge builds the keypair from this instead of opening the Seed vault.
 const SEED_HEX = "7f".repeat(32);
@@ -224,7 +224,7 @@ function fakeAgents(opts: { voice: boolean }) {
 }
 
 type Node = { base: string; wsBase: string; home: string; db: Database; stop: () => void; cleanup: () => void };
-function startNode(agentsUrl: string, prefix: string, companion?: object, runtimeToken?: string, extra: Partial<import("../src/daemon/config").CyberdeckConfig> = {}, tailscale: Tailscale = new Tailscale(async () => null)): Node {
+function startNode(agentsUrl: string, prefix: string, companion?: object, runtimeToken?: string, extra: Partial<import("../src/daemon/config").CyberdeckConfig> = {}, tailscale: Tailscale = new Tailscale(async () => null), serverOpts: Partial<import("../src/daemon/server").ServerOptions> = {}): Node {
   const { dir, cleanup } = tmpHomeDir(prefix);
   const companionFile = join(dir, "companion.json");
   if (companion) writeFileSync(companionFile, JSON.stringify(companion));
@@ -233,7 +233,7 @@ function startNode(agentsUrl: string, prefix: string, companion?: object, runtim
   if (runtimeToken) writeFileSync(runtimeFile, JSON.stringify({ SEED_AGENTS_VOICE_INTERNAL_TOKEN: runtimeToken, SEED_AGENTS_HTTP_PORT: "3053" }));
   const db = new Database(":memory:");
   initSchema(db);
-  const s = createServer(db, testConfig({ port: 4777, ...extra, seed: { agentsUrl, ...(extra.seed ?? {}) } }), TEST_TOKEN, "stw-test", { caseworkKey: KEY, caseworkExperiencesDir: FIXTURES, persistOwner: false, cloudSync: false, tailscale, seed: { home: dir, companionFile, runtimeFile } });
+  const s = createServer(db, testConfig({ port: 4777, ...extra, seed: { agentsUrl, ...(extra.seed ?? {}) } }), TEST_TOKEN, "stw-test", { caseworkKey: KEY, caseworkExperiencesDir: FIXTURES, persistOwner: false, cloudSync: false, tailscale, seed: { home: dir, companionFile, runtimeFile }, ...serverOpts });
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: s.fetch, websocket: s.websocket });
   return { base: `http://127.0.0.1:${server.port}`, wsBase: `ws://127.0.0.1:${server.port}`, home: dir, db, stop: () => { s.sessions.close(); void server.stop(true); }, cleanup };
 }
@@ -328,6 +328,37 @@ describe("lan call url", () => {
     expect(callUrlCandidates(grant, "https:")).toEqual(["wss://clipper.tail.ts.net:7443"]);
     expect(callUrlCandidates({ url: "ws://100.72.8.73:7880", lanUrl: "ws://192.168.1.149:7880" }, "https:")).toEqual(["ws://100.72.8.73:7880"]);
     expect(FIRST_CANDIDATE_MS).toBeLessThan(15_000);
+  });
+});
+
+describe("grant for caller", () => {
+  const grant = { url: "ws://100.72.8.73:7880", secureUrl: "wss://clipper.tail.ts.net:7443", lanUrl: "ws://192.168.1.149:7880", token: "t" };
+  test("a caller on the hub's /24 reads the LAN address as url and keeps the tailnet one as tailnetUrl", () => {
+    expect(grantForCaller(grant, "192.168.1.50")).toEqual({ ...grant, url: "ws://192.168.1.149:7880", tailnetUrl: "ws://100.72.8.73:7880" });
+    // The swapped grant still lists every candidate for the Desk, LAN first and the tailnet address last.
+    expect(callUrlCandidates(grantForCaller(grant, "192.168.1.50"), "http:")).toEqual(["ws://192.168.1.149:7880", "ws://100.72.8.73:7880"]);
+    expect(callUrlCandidates(grantForCaller(grant, "192.168.1.50"), "https:")).toEqual(["wss://clipper.tail.ts.net:7443"]);
+  });
+  test("tailnet, loopback, other-LAN and unknown callers get the grant unchanged", () => {
+    expect(grantForCaller(grant, "100.72.8.5")).toBe(grant);
+    expect(grantForCaller(grant, "127.0.0.1")).toBe(grant);
+    expect(grantForCaller(grant, "10.0.0.7")).toBe(grant);
+    expect(grantForCaller(grant, "192.168.2.9")).toBe(grant);
+    expect(grantForCaller(grant, null)).toBe(grant);
+    expect(grantForCaller(grant, "")).toBe(grant);
+    expect(grantForCaller({ url: "ws://100.72.8.73:7880" }, "192.168.1.50")).toEqual({ url: "ws://100.72.8.73:7880" });
+    expect(grantForCaller({ url: "ws://192.168.1.149:7880", lanUrl: "ws://192.168.1.149:7880" }, "192.168.1.50")).toEqual({ url: "ws://192.168.1.149:7880", lanUrl: "ws://192.168.1.149:7880" });
+    expect(grantForCaller({ url: "ws://a", lanUrl: "not a url" }, "192.168.1.50")).toEqual({ url: "ws://a", lanUrl: "not a url" });
+  });
+  test("sameSubnet compares the first three octets only", () => {
+    expect(sameSubnet("192.168.1.149", "192.168.1.2")).toBe(true);
+    expect(sameSubnet("192.168.1.149", "192.168.2.2")).toBe(false);
+    expect(sameSubnet("192.168.1.149", "::1")).toBe(false);
+  });
+  test("a tailnetUrl is the last candidate in either order", () => {
+    const g = { url: "ws://192.168.1.149:7880", lanUrl: "ws://192.168.1.149:7880", tailnetUrl: "ws://100.72.8.73:7880" };
+    expect(callUrlCandidates(g, "http:", null, "127.0.0.1")).toEqual(["ws://192.168.1.149:7880", "ws://100.72.8.73:7880"]);
+    expect(callUrlCandidates(g, "http:", "ws://100.72.8.73:7880")).toEqual(["ws://100.72.8.73:7880", "ws://192.168.1.149:7880"]);
   });
 });
 
@@ -853,6 +884,31 @@ describe("voice relay", () => {
     expect((await (await req(d, TEST_TOKEN, "/api/voice/status")).json()).local.dogfood).toBeUndefined();
   }, 20000);
 
+  test("a caller on the hub's LAN gets the LAN address as url, directly and through a relaying node", async () => {
+    const ip = (c: { req: { raw: Request } }) => c.req.raw.headers.get("x-test-ip") ?? "127.0.0.1";
+    const lan = (url: string) => (url.startsWith("wss://livekit.example") ? "ws://192.168.1.149:7880" : null);
+    const hub = startNode(voiced.url, "voice-lan-hub", { agentId: COMPANION_ID, profile: { voice: "v", speed: 1 } }, RUNTIME_TOKEN, {}, undefined, { requestIp: ip, voiceLanUrl: lan });
+    const leaf = startNode(muted.url, "voice-lan-leaf", undefined, undefined, {}, undefined, { requestIp: ip });
+    pair(leaf, "n-hub", "Hub", hub);
+    try {
+      expect((await req(hub, TEST_TOKEN, "/api/voice/setup", { method: "POST", body: "{}" })).status).toBe(200);
+      const from = (node: Node, addr: string) => req(node, KEY, "/api/voice/livekit", { method: "POST", headers: { "x-test-ip": addr } }).then((r) => r.json());
+      // The hub itself, asked by an iPad on its LAN: url is the LAN address, the tailnet one is kept, lanUrl stays.
+      const direct = await from(hub, "192.168.1.50");
+      expect(direct).toMatchObject({ url: "ws://192.168.1.149:7880", lanUrl: "ws://192.168.1.149:7880", tailnetUrl: "wss://livekit.example/" });
+      expect(direct.via).toBeUndefined();
+      // A tailnet caller, and the Desk on the hub itself (loopback), read the grant as before.
+      expect(await from(hub, "100.72.8.5")).toMatchObject({ url: "wss://livekit.example/", lanUrl: "ws://192.168.1.149:7880" });
+      expect((await from(hub, "100.72.8.5")).tailnetUrl).toBeUndefined();
+      expect((await from(hub, "127.0.0.1")).url).toBe("wss://livekit.example/");
+      // Through a relaying node the swap is decided by that node, from the caller it sees, not from the relay hop.
+      const relayed = await from(leaf, "192.168.1.51");
+      expect(relayed).toMatchObject({ url: "ws://192.168.1.149:7880", tailnetUrl: "wss://livekit.example/", via: { node: "n-hub", name: "Hub" } });
+      expect((await from(leaf, "100.72.8.5"))).toMatchObject({ url: "wss://livekit.example/", via: { node: "n-hub", name: "Hub" } });
+      // Another LAN is not the hub's LAN.
+      expect((await from(leaf, "192.168.7.3")).url).toBe("wss://livekit.example/");
+    } finally { hub.stop(); hub.cleanup(); leaf.stop(); leaf.cleanup(); }
+  }, 20000);
   test("paired only with nodes that have no voice, the node stays unconfigured", async () => {
     const cfg = await (await req(e, KEY, "/api/voice/config")).json();
     expect(cfg).toMatchObject({ configured: false, provider: "none" });

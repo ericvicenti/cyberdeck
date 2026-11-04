@@ -203,7 +203,7 @@ the node token (`~/.cyberdeck/token`) requires a re-run so the secret on the age
 | Route | Key | Returns |
 |---|---|---|
 | `GET /api/voice/config` | pairing | `{configured, provider: 'livekit' \| 'none', engine: 'seed', reason?, agentId?, sessionId?, via?}` |
-| `POST /api/voice/livekit` | pairing | `{sessionId, url, token, room, identity, expiresAt, profile?}` from `CreateVoiceSession`; `secureUrl?` is the `wss://` twin of a local plain `ws://` url when tailscale serve publishes it; `lanUrl?` is the same server on the hub's first LAN address when `url` is the hub's tailnet address (`lanCallUrl`); `profile: {voice, speed, applied, error?}` says whether the voice profile below reached the room; `503 {error: 'voice not configured', reason}` when unconfigured; `502 {error}` on a server failure |
+| `POST /api/voice/livekit` | pairing | `{sessionId, url, token, room, identity, expiresAt, profile?}` from `CreateVoiceSession`; `secureUrl?` is the `wss://` twin of a local plain `ws://` url when tailscale serve publishes it; `lanUrl?` is the same server on the hub's first LAN address when `url` is the hub's tailnet address (`lanCallUrl`); when the caller's own address is on that LAN's /24 (the iPad on home Wi-Fi, seen by the node it asked, hub or relay), `url` *is* the LAN address and the tailnet one moves to `tailnetUrl?` (`grantForCaller`), so a client that reads `url` alone still gets media; `profile: {voice, speed, applied, error?}` says whether the voice profile below reached the room; `503 {error: 'voice not configured', reason}` when unconfigured; `502 {error}` on a server failure |
 | `GET /api/voice/status` | pairing | `{configured, reason?, agentsUrl, mcpUrl, seedProfile?, identity: {name, available, principal?, error?}, agent?: {id, name?}, sessionId?, health: {ok, voice, protocol, version, error?, checkedAt}, mcpRegisteredAt?, lastCallAt?, profile?: {voice, speed, runtimeToken, source}}`; `?profile=<name>` answers for that `seed.profiles` bridge (404 for an unknown name; also on `setup`, `providers`, `login`, `session/reset`, `livekit`, `transcript`) |
 | `GET /api/voice/profiles` | node | `{profiles: [{name: null \| string, agentsUrl, mcpUrl, configured, reason?, identity, agent?, sessionId?, health, stateFile}]}`: the default bridge (`name: null`) then every `seed.profiles` entry |
 | `POST /api/voice/session/reset` | pairing | `{sessionId, previous?, room?}`: a new session for the next call; body `{room?}` names a live call's LiveKit room, which the voice runtime is then switched to the new session (`room: {name, switched, error?}`), so the caller keeps talking |
@@ -434,6 +434,11 @@ hub's LAN that is not on the tailnet (yacht, once Tailscale was removed from it)
 peer connection on the LAN address even though `rtc.node_ip` is the tailnet IP (verified from yacht: the tailnet url
 times out after 15 s, the LAN url joins in 0.7 s). A caller on neither network gets its grant but no media until the
 droplet's LiveKit is the public default (ROADMAP). The iPad app reads `url` only and still needs the tailnet.
+Since 2026-11-04 the swap also happens on the server for clients that read `url` alone: the node that received the
+request (clipper directly, or yacht relaying) compares the caller's address with `lanUrl` (`grantForCaller` in
+`src/shared/callurl.ts`, the address from Bun's `requestIP`), and a caller on the same /24 gets `url` = the LAN
+address with the tailnet one as `tailnetUrl`. That is the Casework iPad app paired with a LAN origin and no Tailscale
+on the iPad; a tailnet caller, an https Desk (`secureUrl`) and a Desk on the hub itself (loopback) are unchanged.
 
 The web Desk talks only to the daemon in view and shows the hub in its bridge strip (`voice clipper`);
 the shell has no machine dropdown anywhere (nothing on the Desk picks a machine either). Without a

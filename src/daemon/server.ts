@@ -52,6 +52,8 @@ export type AuthInfo = { method: "token" | "tailscale" | "casework" | "seed"; lo
 export type ServerOptions = {
   /** Override peer-address lookup (tests inject tailnet/LAN addresses). Default: Bun's server.requestIP. */
   requestIp?: (c: { req: { raw: Request } }) => string | null;
+  /** Override the LAN twin of a call server url (tests make the hub hand out a `lanUrl` without a real LAN). */
+  voiceLanUrl?: (url: string) => string | null;
   tailscale?: Tailscale;
   /** Write a detected owner into config.json (default true; tests turn it off). */
   persistOwner?: boolean;
@@ -246,7 +248,7 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
   const voiceRelay = createVoiceRelay(() => db.query("SELECT id, name, url, token, added_at, last_seen, probe_device FROM nodes ORDER BY last_seen DESC").all() as NodeRow[], undefined, { hub: voiceHub(cfg), self: cfg.nodeName, onSeen: (n) => db.query("UPDATE nodes SET last_seen = ? WHERE id = ?").run(Date.now(), n.id) });
   casework = registerCaseworkRoutes(app, { token, nodeName: cfg.nodeName, kiosk: cfg.kiosk?.enabled, upgradeWebSocket, isFullAuth, experiencesDir: opts.caseworkExperiencesDir, key: opts.caseworkKey, voice: () => voiceSummary(seed, voiceRelay), secureOrigin: () => ts.serveOrigin(cfg.port), seedBridge: cfg.casework });
   registerDesktopRoutes(app, cfg, upgradeWebSocket, isFullAuth);
-  registerVoiceRoutes(app, seed, { isFullAuth, serveOrigin: (port) => ts.serveOrigin(port), relay: voiceRelay, profiles: seedProfiles, tailnet: () => ts.backend() });
+  registerVoiceRoutes(app, seed, { isFullAuth, serveOrigin: (port) => ts.serveOrigin(port), relay: voiceRelay, profiles: seedProfiles, tailnet: () => ts.backend(), clientIp: peerIp, lanUrl: opts.voiceLanUrl });
   // Seed's own agents UI in the browser: signing stays here, requests reach the agents server through us.
   registerSeedAgentsRoutes(app, seed, { token, upgradeWebSocket, isFullAuth, getNode: (id) => db.query("SELECT * FROM nodes WHERE id = ?").get(id) as import("./api/fleet").NodeRow | null });
   registerDashboardRoutes(app, db, cfg);
