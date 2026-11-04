@@ -853,9 +853,13 @@ test("video: non-native format transcodes to HLS via video.js", async () => {
   expect(await gen.exited).toBe(0);
   const playlistResponse = page.waitForResponse((r) => r.url().includes("/api/media/hls/") && r.url().endsWith("index.m3u8"), { timeout: 20000 });
   await page.goto(`${BASE}/#/edit?path=${encodeURIComponent(src)}`);
-  await page.waitForSelector('[data-testid="videojs-host"] video');
+  // Earlier videos remain mounted for navigation continuity. Wait for the
+  // selected document, before this short fixture finishes and advances tracks.
+  const active = '[data-editor-document]:visible';
+  await page.waitForSelector(`${active} [data-testid="videojs-host"] video`);
   expect((await playlistResponse).status()).toBe(200);
-  await waitFor(async () => ((await page.textContent('[data-testid="video-status"]')) ?? "").toLowerCase().includes("transcod") || ((await page.textContent('[data-testid="video-status"]')) ?? "").includes("HLS"));
+  await waitFor(async () => /transcod|HLS/i.test((await page.textContent(`${active} [data-testid="video-status"]`)) ?? ""));
+  expect(new URL(page.url()).hash).toContain(encodeURIComponent(src));
 }, 30000);
 
 test("mobile: dialogs fit the viewport, editor and player usable", async () => {

@@ -527,3 +527,10 @@ Repeat installed checks with `bun scripts/check-steam-navigation-live.ts`;
 `CYBERDECK_TEST_TOKEN_HOST` reads that host's token in process over SSH. All
 Steam responses in this checker are browser fixtures; it blocks commands and
 sockets, never reaches a Steam server, and leaves active clients untouched.
+
+The existing HLS end-to-end fixture now scopes its selectors to the visible
+Editor document. Earlier videos stay mounted intentionally; a selector matching
+the old player waited until the short HLS clip advanced back to it, then read
+its direct-playback status. The failure reproduces on the pre-change UI. Both
+direct and HLS video cases pass with the selected document explicitly checked;
+playback behavior is unchanged.
