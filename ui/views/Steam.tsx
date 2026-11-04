@@ -27,29 +27,44 @@ function LaunchDecision({ session, done }: { session: SteamSession; done: () => 
 export function SteamVault({ params, query = "", expanded = false, onSupported, onLocked }: { params: URLSearchParams; query?: string; expanded?: boolean; onSupported?: (supported: boolean) => void; onLocked: () => void }) {
   const [library, setLibrary] = useState<SteamLibrary>();
   const [error, setError] = useState("");
+  const [loadFailure, setLoadFailure] = useState<{ title: string; message: string }>();
+  const [retry, setRetry] = useState(0);
   const [busy, setBusy] = useState("");
   const selectedId = params.get("steam") ?? "";
   const selected = library?.games.find(g => g.id === selectedId);
   const setSelected = (game: SteamGame | null) => updateParams({ steam: game?.id ?? null });
-  useRouteTitle(selected ? `${selected.name} · The Vault` : selectedId && library ? "Game not found · The Vault" : undefined);
+  useRouteTitle((selectedId || expanded) && loadFailure ? `${loadFailure.title} · The Vault`
+    : (selectedId || expanded) && library && !library.supported ? "Steam unavailable · The Vault"
+    : selected ? `${selected.name} · The Vault` : selectedId && library ? "Game not found · The Vault" : undefined);
   const [confirmQuit, setConfirmQuit] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   const refresh = async () => {
     const value = await api<SteamLibrary>("/api/steam");
-    setLibrary(value); onSupported?.(value.supported);
+    setLibrary(value); setLoadFailure(undefined); onSupported?.(value.supported);
   };
   useEffect(() => {
-    let alive = true;
-    const load = async () => {
+    let alive = true, current: AbortController | undefined;
+    const load = async (force = false) => {
+      if (current && !force) return;
+      current?.abort();
+      const controller = new AbortController();
+      current = controller;
       try {
-        const value = await api<SteamLibrary>("/api/steam");
-        if (alive) { setLibrary(value); onSupported?.(value.supported); }
-      } catch (e) { if (alive && e instanceof ApiError && e.status === 401) onLocked(); }
+        const value = await api<SteamLibrary>("/api/steam", { signal: controller.signal });
+        if (!value || typeof value.supported !== "boolean" || !Array.isArray(value.games) || value.games.some(game => !game || typeof game.id !== "string" || typeof game.name !== "string")) throw new Error("Invalid Steam library response");
+        if (alive && !controller.signal.aborted) { setLibrary(value); setLoadFailure(undefined); onSupported?.(value.supported); }
+      } catch (e) {
+        if (alive && !controller.signal.aborted) {
+          if (e instanceof ApiError && e.status === 401) onLocked();
+          setLoadFailure({ title: e instanceof ApiError && e.status === 403 ? "Access denied · Steam" : "Steam library unavailable", message: e instanceof Error ? e.message : String(e) });
+        }
+      } finally { if (current === controller) current = undefined; }
     };
-    void load(); const timer = setInterval(load, 3000);
-    window.addEventListener("focus", load);
-    return () => { alive = false; clearInterval(timer); window.removeEventListener("focus", load); };
-  }, []);
+    const focus = () => void load(true);
+    void load(); const timer = setInterval(() => void load(), 3000);
+    window.addEventListener("focus", focus);
+    return () => { alive = false; current?.abort(); clearInterval(timer); window.removeEventListener("focus", focus); };
+  }, [retry]);
   useEffect(() => {
     if (!selected) return;
     const before = document.activeElement as HTMLElement | null;
@@ -71,7 +86,9 @@ export function SteamVault({ params, query = "", expanded = false, onSupported, 
     catch (e) { setError(String(e)); }
     finally { setBusy(""); }
   };
-  if (!library?.supported) return library && selectedId ? <p role="alert" className="vault-warning">Steam games are unavailable on this machine.</p> : null;
+  const failure = loadFailure && <div className="vault-warning"><p role="alert">{loadFailure.title}: {loadFailure.message}</p><button className="vault-secondary" onClick={() => setRetry(n => n + 1)}>Retry Steam library</button></div>;
+  if (!library) return failure || ((expanded || selectedId) ? <p role="status">Loading Steam library…</p> : null);
+  if (!library.supported) return failure || ((expanded || selectedId) ? <p role="alert" className="vault-warning">Steam games are unavailable on this machine.</p> : null);
   const games = library.games.filter(g => g.compatible !== false && g.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const session = library.session;
   const active = session && !["ended", "error"].includes(session.phase);
@@ -80,6 +97,7 @@ export function SteamVault({ params, query = "", expanded = false, onSupported, 
       {!expanded && <button className="vault-secondary" onClick={() => navigate("applications", { app: "vimm", tab: "steam" })}>Browse all →</button>}
     </div>
     <p className="vault-detail-note">Play here. Press Home or Back + Start during a game to return to The Vault. Your game stays open so you can resume.</p>
+    {!selected && failure}
     {library.reason && <p className="vault-warning">{library.reason}</p>}
     {(error || session?.error) && <p role="alert" className="vault-warning">{error || session?.error}</p>}
     {active && <div className="vault-steam-session" role="status">
@@ -99,6 +117,7 @@ export function SteamVault({ params, query = "", expanded = false, onSupported, 
       <div className="vault-detail"><button className="vault-close" aria-label="Close" onClick={() => setSelected(null)}>×</button>
         <div className="vault-detail-art"><div className="vault-art vault-art-box"><img src={`https://cdn.akamai.steamstatic.com/steam/apps/${selected.id}/library_600x900.jpg`} alt="" /></div></div>
         <div className="vault-detail-copy"><span className="vault-eyebrow">PC · STEAM</span><h2 id="steam-detail-title">{selected.name}</h2>
+          {failure}
           <p className="vault-detail-note">{selected.ready ? "Ready to play on this machine." : "Downloads automatically when you press Play."}</p>
           <div className="vault-detail-buttons"><button className="vault-primary" disabled={!library.available || !library.connected || Boolean(busy)} onClick={() => void play(selected)}>{busy === selected.id ? "Starting…" : "Play"}</button></div>
           <p className="vault-detail-note">Home or Back + Start returns to The Vault.</p>{error && <p role="alert" className="vault-warning">{error}</p>}

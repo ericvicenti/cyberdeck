@@ -1,8 +1,8 @@
 # Cyberdeck navigation coverage
 
-Updated 2026-10-31. This is an implementation inventory, not a completion claim.
+Updated 2026-11-04. This is an implementation inventory, not a completion claim.
 The nightly routine and fleet deployment status live in Deck's
-`handoff/routines/cyberdeck-navigation/2026-10-31.md`.
+`handoff/routines/cyberdeck-navigation/2026-11-04.md`.
 
 ## Source and rollout status
 
@@ -60,12 +60,12 @@ credentials should not be replayed from a link.
 | App / api / navigation | primary view, node, not-found, auth, titles | Covered, including legacy `service`→`svc`, Steam app→Vault tab. More parameter validation and every error title remain. |
 | `fleet` / Home | local/fleet overview, node links; pairing and account/reset dialogs; NetworkMap selected endpoints | Overview and node links covered. `networkFrom` / `networkTo` identify an inspected connection by host name, independent of the serving node. Selections push once; partial/whitespace links replace canonical defaults; Back/Forward, reload and fresh tabs restore both endpoints. Unknown/same-host links keep honest errors and titles; unavailable telemetry retains the requested pair. Pairing/reset/benchmark actions remain explicit and never replay from links. |
 | `controls` / Controls | control diagram, bindings/editor, reset notice | Static route/title covered where installed. Binding changes are settings, not navigation. Keyboard/gamepad mode preferences remain local. |
-| `applications` / Applications | application id, Casework example, pairing dialog, reload | Id, unknown-id and unavailable-listing errors/titles covered; failed lookups retain the requested link instead of showing an ordinary app list. Pairing is an explicit operation. Visited generic iframe documents now survive primary-view, application and node navigation. Opt-in generic SPA navigation now restores root-relative child routes/titles via an origin/source/request-bound bridge and keeps one history owner. Commander has a bridge integration for its main views, trainer tabs/inspectors/filters, workshop tabs/run inspection, community directory and active-match menu/chat/help/workshop. Runtime match availability and the remaining error matrix still need coverage. Unsupported nested links in noncooperating apps report a restoration error. See `docs/EMBEDDED-NAVIGATION.md`. |
-| `applications?app=soniq` / Soniq | studio track/scene/bar/step, steps/piano editor, library query/category/source/offset, project and export dialogs | Clipper's Studio now cooperates with the generic retained frame for track/scene/bar/step, editor mode and library visibility. Direct links, reload, new tabs, Back/Forward, invalid selections and parent title/history pass isolated browser checks without starting audio. Library query/category/source/page and selected sample, project browsing and snapshot switch remain. Starlight has a distinct older prototype; do not overwrite it or Clipper's project data. |
+| `applications` / Applications | application id, Casework example, pairing dialog, reload | Id, unknown-id and unavailable-listing errors/titles covered; failed lookups retain the requested link instead of showing an ordinary app list. Pairing is an explicit operation. Visited generic iframe documents now survive primary-view, application and node navigation. Opt-in generic SPA navigation now restores root-relative child routes/titles via an origin/source/request-bound bridge and keeps one history owner. Commander has a bridge integration for its main views, trainer tabs/inspectors/filters, workshop tabs/run inspection, community directory and active-match menu/chat/help/workshop. Replay reads now distinguish missing, denied, unavailable and invalid content; directory reads have route-bound error titles, retry and hidden-response protection. Runtime match availability and the rest of the error matrix still need coverage. Unsupported nested links in noncooperating apps report a restoration error. See `docs/EMBEDDED-NAVIGATION.md`. |
+| `applications?app=soniq` / Soniq | studio track/scene/bar/step, steps/piano editor, library query/category/source/offset, project and export dialogs | Clipper's Studio cooperates with the retained frame for track/scene/bar/step, editor mode, library visibility/query/category/source/page/sample, and the Projects dialog/selected snapshot. Direct links, reload, new tabs, Back/Forward and truthful errors/titles are covered. Links select snapshots without loading them; only Load selected snapshot changes the project. Project list loading, denied/unavailable reads, retry and late-response isolation are covered. A real AudioContext with a verified silent sink survives dialog/history/primary-view changes. External project switches and delayed explicit command completions remain. Starlight's separate older prototype is preserved. |
 | `applications?app=afterglow` / AfterglowFrame + BoticalMedia/public/navigation.js | child route, season/episode, search/filter, person dialog, music and YouTube state | Existing bridge retained: exact origin+source, parent-only history, route restoration, stable iframe, title cleanup. Browser regressions now prove document/timer continuity across primary views, other apps and node changes, plus hidden-message isolation and route/title restoration. A pending parent route rejects stale child acknowledgements. Missing, malformed and legacy child routes normalize with replace, preserving the iframe document and prior history. No production media is played by these checks. |
 | `applications?app=vimm` / Vault | tabs, system, query, letter, page; selected retro title modal | Covered. `game=<catalog-id>` restores a detail from its shelf/catalog/list context on fresh open, reload and history without starting playback. Invalid tab/system/query/letter/page/game values normalize; missing IDs retain an honest error/title. My list and ready-to-play metadata remain browser-local by design. |
 | VaultPlayer / vault download and storage | running emulator, ROM cache, save state, native N64 handoff, pause menu | Play retains the selected game detail URL, while fresh links and reloads show details without starting or downloading a game. The owner survives app, primary-view, node and screen-remote navigation. Hidden games leave the modal top layer, release keyboard/controller handlers and cannot steal focus or titles. Resume returns to the existing core; explicit Save & exit completes it. Real NES homebrew fixtures prove continuity and responsive save/exit. Native N64/gamepad hardware remains unverified. |
-| SteamVault / Steam | selected game, PC tab, query; native install/game/session/cloud-save decisions | `steam=<id>` detail added, resolves from serving-node library, restores without Play. Game/cloud decision/quit remain runtime/confirmation actions. Keep background Steam/client/kiosk alive. |
+| SteamVault / Steam | selected game, PC tab, query; native install/game/session/cloud-save decisions | `steam=<id>` detail added, resolves from serving-node library, restores without Play. Game/cloud decision/quit remain runtime/confirmation actions. Selected PC-game links now show loading, denied/unavailable reads, unsupported machines and missing-game states with matching titles. Retry preserves history; overlapping polls cannot replace a newer read or trigger a stale lock. Keep background Steam/client/kiosk alive. |
 | GamesSection / Games | installed native games and import form | Part of Applications. Play/import are actions; no automatic execution from links. |
 | CaseworkConsole | selected device, events, camera/media/QR, calls, native scene actions | Selected device is covered by `device=<id>`, including canonical default, reload/history, missing-device error/title and no action replay. Visited consoles retain their socket, calls and previews across apps, primary views, node URLs and history; lock tears them down. `media=<stored-name>` fetches only an existing authenticated upload: fresh open, reload and history never capture, upload or autoplay. Invalid, missing and denied previews have matching errors/titles. Tests use synthetic devices/tracks only. |
 | `applications?app=afterglow&tab=music` / Spotify (the listening room), SpotifyRecordings, SpotifyVisualizer | shelves, entities, query, pagination, recordings, immersive mode | One player everywhere, inside Afterglow: `shelf`, `id`, `q`, `radio`, `page`, `immersive` and `shelf=history&recording=<id>` restore through direct links, reload and history; OAuth returns to the requested content; no link starts playback; the SDK/player stays mounted through URL and primary-view changes. Legacy `#/spotify` links are rewritten. |
@@ -450,3 +450,80 @@ Soniq's source and tests are in Clipper's non-Git clean snapshot
 The remaining Soniq state is library query/category/source/page and selected
 sample, project browsing and snapshot switches. Starlight's older Soniq
 prototype remains separate; it has not received this Clipper UI overlay.
+
+
+## 2026-11-04 Soniq projects and Commander read failures
+
+Soniq's library navigation from November 2 is installed; its Projects dialog
+and selected snapshot from the unfinished November 3 run are now reconciled,
+extended and deployed on Clipper. `dialog=projects&snapshot=<id>` opens a
+selected snapshot without loading it. The explicit **Load selected snapshot**
+button performs that command. Loading, missing selections, denied reads and
+unavailable lists have matching visible states and titles. Retry reads the same
+selection without a history entry. Aborted responses cannot replace a reopened
+view or retitle another primary view. The installed read-only check covers
+parent history, reload/new tabs, missing snapshots, retry and locked deep links.
+No production audio or project writes are used. An isolated real AudioContext
+with a verified non-audible sink retains its owner across history and primary
+views. Repeat from Clipper's exact `~/Code/Soniq-nav-20261104` snapshot:
+`npm test` and `npm run format:check`; the unchanged lockfile's dependency audit
+still reports 11 moderate advisories. `node scripts/check-project-navigation-live.mjs`
+from installed Soniq checks the running service without API writes.
+
+Commander's replay reads now name missing, denied, unavailable and invalid
+content distinctly. Directory failures bind their title to the exact source,
+filter and page; Refresh retries without navigation. Hidden or late directory
+responses cannot rename a replay, workshop or another primary view. Standalone
+and embedded production-bundle cases cover direct links, reload, new tabs,
+Back/Forward, retry and title cleanup. The workshop test now waits for the
+parent's shareable editor URL before capturing it for reload.
+
+The exact Commander snapshot on Clipper is `~/Code/Commander-nav-20261104`.
+Repeat `bun run build`, `bun run test` and
+`CYBERDECK_UI=~/.cyberdeck/src/dist/ui bunx playwright test --config navigation.config.ts`;
+set the same explicit parent-origin build list recorded with its rollback
+package. `scripts/check-commander-errors-live.ts` checks installed assets through
+the configured origin with synthetic child APIs and blocked game sockets:
+`CYBERDECK_PARENT_ORIGIN=https://probe.vicenti.net CYBERDECK_CHILD_TRANSPORT=http://127.0.0.1:4319 bun scripts/check-commander-errors-live.ts`.
+No real account, match or command is created by that checker.
+
+Both hosted apps are shared by every Cyberdeck instance. Their narrow source
+packages and rollback backups are recorded in the Deck run report. Commander
+activates only its client entrypoint and retains old chunks for open tabs;
+Cyberdeck, Commander, Soniq, kiosk and terminal processes are not restarted.
+Remaining acceptance includes Seed memory-content/external/transcript outcome
+hooks, the rest of Commander's error matrix/live remote resumption, and the
+native/attachment/original-file boundaries recorded above. Keep the routine
+enabled until those cases are resolved.
+
+
+## 2026-11-04 Steam library reads and restored Starlight UI
+
+PC-game links keep their selected `steam` ID when a library read fails. Loading,
+denied/unavailable reads, unsupported machines, missing games and invalid payloads
+have visible, recoverable states and matching titles. Retry keeps the same URL
+and history; a focus refresh cancels the older request, ordinary polls do not
+overlap, and a stale 401 cannot lock newer content. Existing library/session data
+remains mounted while a refresh fails. No link starts, stops or downloads a game.
+
+`bun test tests/steam-navigation.test.ts --timeout 30000` uses synthetic Steam
+lists and blocks commands and external artwork. It covers direct links, refresh,
+new tabs, history, error recovery, stale reads, title cleanup and authentication.
+The same seven cases pass against the exact Botical compiler tree, preserving
+its distinct Term/voice overlay. The prebuilt installer fingerprints every source
+input, backs up source/UI, keeps old chunks, and atomically activates the new
+entrypoint without restarting services.
+
+Starlight was reachable but served HTTP 404 because its October 31 build had left
+no `dist/ui/index.html` or asset chunks. Its source matches the other current
+hosts exactly. The deployment backs up its remaining assets and explicitly
+records the absent entrypoint before restoring the verified build. Recovery and
+rollback were rehearsed with isolated files before installation. All seven hosts
+now pass the installed check, with daemon PIDs and managed session records
+preserved. No hosts remain pending for this overlay.
+
+Repeat installed checks with `bun scripts/check-steam-navigation-live.ts`;
+`CYBERDECK_TEST_ORIGIN` selects a loopback tunnel and
+`CYBERDECK_TEST_TOKEN_HOST` reads that host's token in process over SSH. All
+Steam responses in this checker are browser fixtures; it blocks commands and
+sockets, never reaches a Steam server, and leaves active clients untouched.
