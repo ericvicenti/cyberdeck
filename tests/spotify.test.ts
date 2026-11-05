@@ -59,3 +59,16 @@ test("artist links stay inside the catalog and pagination is confined to Spotify
   ])
     expect(() => spotifyPagePath(url)).toThrow();
 });
+
+test("OAuth continuation preserves a saved recording but cannot carry credentials or another app", async () => {
+  const { spotifyReturnHash } = await import('../ui/lib/spotify');
+  const id = 'recording-' + 'a'.repeat(350);
+  const hash = '#/applications?' + new URLSearchParams({ app: 'afterglow', tab: 'music', shelf: 'history', recording: id, access_token: 'private', code: 'private', state: 'private' });
+  const restored = new URLSearchParams(spotifyReturnHash(hash).split('?')[1]);
+  expect(restored.get('recording')).toBe(id);
+  expect(restored.get('shelf')).toBe('history');
+  expect(restored.has('access_token')).toBe(false);
+  expect(restored.has('code')).toBe(false);
+  expect(restored.has('state')).toBe(false);
+  expect(spotifyReturnHash('#/applications?app=other&recording=wrong')).toBe('#/applications?app=afterglow&tab=music');
+});

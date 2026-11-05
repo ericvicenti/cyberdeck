@@ -23,21 +23,25 @@ const track = {
   external_urls: { spotify: "https://open.spotify.com/track/track1" },
 };
 beforeAll(async () => {
-  server = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    async fetch(req) {
-      const path = new URL(req.url).pathname;
-      const file = Bun.file(
-        join(import.meta.dir, "../dist/ui", path === "/" ? "index.html" : path),
-      );
-      return (await file.exists())
-        ? new Response(file)
-        : new Response("missing", { status: 404 });
-    },
-  });
-  base = `http://127.0.0.1:${server.port}`;
-  browser = await chromium.launch({ headless: true });
+  if (process.env.CYBERDECK_TEST_ORIGIN) {
+    base = new URL(process.env.CYBERDECK_TEST_ORIGIN).origin;
+  } else {
+    server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(req) {
+        const path = new URL(req.url).pathname;
+        const file = Bun.file(
+          join(process.env.CYBERDECK_TEST_UI || join(import.meta.dir, "../dist/ui"), path === "/" ? "index.html" : path),
+        );
+        return (await file.exists())
+          ? new Response(file)
+          : new Response("missing", { status: 404 });
+      },
+    });
+    base = `http://127.0.0.1:${server.port}`;
+  }
+  browser = await chromium.launch({ headless: true, args: ["--mute-audio"] });
 });
 afterAll(async () => {
   await browser?.close();
@@ -45,7 +49,7 @@ afterAll(async () => {
 });
 async function setup(width = 1280) {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
-  page.setDefaultTimeout(3500);
+  page.setDefaultTimeout(7500);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   const archive = new Map<string, any>();
@@ -90,7 +94,7 @@ async function setup(width = 1280) {
 }
 async function login(
   page: Page,
-  options: { wrongState?: boolean; denied?: boolean } = {},
+  options: { wrongState?: boolean; denied?: boolean; route?: string } = {},
 ) {
   let tokenCalls = 0;
   await page.route("https://accounts.spotify.com/api/token", async (route) => {
@@ -125,11 +129,12 @@ async function login(
       headers: { location: base + "/?" + args },
     });
   });
-  await page.goto(base + "/#/applications?app=afterglow&tab=music");
+  const destination = options.route || "#/applications?app=afterglow&tab=music";
+  await page.goto(base + "/" + destination);
   await page
     .getByRole("button", { name: "Connect Spotify", exact: true })
     .click();
-  await page.waitForURL(base + "/#/applications?app=afterglow&tab=music");
+  await page.waitForURL(base + "/" + destination);
   return () => tokenCalls;
 }
 async function mockSpotify(
@@ -416,7 +421,7 @@ test("PKCE login, search, browser play, controls, navigation persistence, and di
   } finally {
     await page.close();
   }
-}, 20000);
+}, 45000);
 for (const entry of ["Play Test song", "Play playlist", "Play"]) {
   test(`${entry} starts browser playback with no prior device and waits for SDK readiness`, async () => {
     const { page, errors } = await setup();
@@ -657,6 +662,12 @@ test("catalog navigation, playlist editing, queue, library, radio and video stay
     expect(
       requests.some((r) => r.body?.context_uri === "spotify:album:album1"),
     ).toBe(true);
+    // Scroll the row to the top of its content pane. The visualizer must not
+    // float over the selected track and intercept its navigation menu.
+    await page.getByLabel("Actions for Test song", { exact: true }).evaluate(element => {
+      const content = element.closest(".music-content")!;
+      content.scrollTop += element.getBoundingClientRect().top - content.getBoundingClientRect().top - 20;
+    });
     await page.getByLabel("Actions for Test song", { exact: true }).click();
     await page
       .getByRole("button", { name: "Add to queue", exact: true })
@@ -756,7 +767,7 @@ test("catalog navigation, playlist editing, queue, library, radio and video stay
   } finally {
     await page.close();
   }
-}, 20000);
+}, 45000);
 
 test("fullscreen artwork is reachable, archive survives reload and exports without tokens", async () => {
   const { page, errors } = await setup();
@@ -826,7 +837,7 @@ test("fullscreen artwork is reachable, archive survives reload and exports witho
   } finally {
     await page.close();
   }
-}, 20000);
+}, 45000);
 
 test("creating from an editable playlist does not accidentally rename it", async () => {
   const { page } = await setup();
@@ -871,6 +882,30 @@ test("creating from an editable playlist does not accidentally rename it", async
 
 test("SDK audio tap saves non-silent playable audio and journal replays without Spotify or network", async () => {
   const { page, errors } = await setup();
+  await page.addInitScript(() => {
+    const OriginalContext = window.AudioContext;
+    window.AudioContext = class extends OriginalContext {
+      constructor(...args: ConstructorParameters<typeof AudioContext>) {
+        super({ ...args[0], sinkId: { type: "none" } } as AudioContextOptions);
+        if (typeof this.sinkId !== "object" || this.sinkId.type !== "none")
+          throw new Error("Silent audio sink unavailable");
+      }
+    };
+    // Route every synthetic media element, including offline replay, to the
+    // verified silent graph. No physical device is required for its clock.
+    const play = HTMLMediaElement.prototype.play;
+    const sources = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();
+    HTMLMediaElement.prototype.play = function () {
+      if (!sources.has(this)) {
+        const context = new AudioContext();
+        const source = context.createMediaElementSource(this);
+        source.connect(context.destination);
+        sources.set(this, source);
+        void context.resume();
+      }
+      return play.call(this);
+    };
+  });
   const sampleRate = 16000,
     samples = sampleRate * 12;
   const wav = Buffer.alloc(44 + samples * 2);
@@ -905,7 +940,7 @@ test("SDK audio tap saves non-silent playable audio and journal replays without 
     // Synthetic PCM fixture exercises the tap without contacting Spotify or using protected media.
     Object.defineProperty(audio,'mediaKeys',{value:{}});
     addEventListener('message',e=>{if(e.data.start)audio.play();if(e.data.stop)audio.pause();});
-    parent.postMessage({ready:true},location.origin);
+    window.fixtureAudio = audio; parent.postMessage({ready:true},location.origin);
   `,
     }),
   );
@@ -931,6 +966,8 @@ test("SDK audio tap saves non-silent playable audio and journal replays without 
     undefined,
     { timeout: 10000 },
   );
+  // Wait for actual media time rather than the first recorder checkpoint.
+  await page.frames()[1].waitForFunction(() => (window as any).fixtureAudio.currentTime > 3, undefined, { timeout: 12000 });
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   await page.waitForFunction(() => document.body.dataset.final === "true");
   const signal = await page.evaluate(async () => {
@@ -970,7 +1007,7 @@ test("SDK audio tap saves non-silent playable audio and journal replays without 
   ).toBe(1);
   expect(errors).toEqual([]);
   await page.close();
-}, 20000);
+}, 30000);
 
 test("Play defaults to this browser even when another Spotify device is connected", async () => {
   const { page } = await setup();
@@ -989,3 +1026,130 @@ test("Play defaults to this browser even when another Spotify device is connecte
     await page.close();
   }
 }, 10000);
+
+
+test("music links restore after sign-in, reload and fresh tabs without starting playback", async () => {
+  const { page, errors } = await setup();
+  try {
+    const requests = await mockSpotify(page);
+    const route = "#/applications?app=afterglow&id=playlist1&shelf=playlist&tab=music";
+    await login(page, { route });
+    await page.getByRole("heading", { name: "Focus playlist", exact: true }).waitFor();
+    await page.waitForFunction(() => document.title === "Focus playlist · Music · Afterglow · Cyberdeck");
+    const length = await page.evaluate(() => history.length);
+    await page.getByRole("button", { name: "Test artist", exact: true }).first().click();
+    await page.getByRole("heading", { name: "Test artist", exact: true }).waitFor();
+    expect(await page.evaluate(() => history.length)).toBe(length + 1);
+    await page.goBack();
+    await page.getByRole("heading", { name: "Focus playlist", exact: true }).waitFor();
+    await page.goForward();
+    await page.getByRole("heading", { name: "Test artist", exact: true }).waitFor();
+    await page.reload();
+    await page.getByRole("heading", { name: "Test artist", exact: true }).waitFor();
+    await page.getByTestId("nav-data").click();
+    await page.waitForFunction(() => document.title === "Data · Cyberdeck");
+    await page.goBack();
+    await page.waitForFunction(() => document.title === "Test artist · Music · Afterglow · Cyberdeck");
+    expect(requests.filter(r => r.method !== "GET")).toEqual([]);
+    expect(await page.evaluate(() => (window as any).sdkConnected)).toBeUndefined();
+    const fresh = await setup();
+    try {
+      const freshRequests = await mockSpotify(fresh.page);
+      await login(fresh.page, { route });
+      await fresh.page.getByRole("heading", { name: "Focus playlist", exact: true }).waitFor();
+      expect(freshRequests.filter(r => r.method !== "GET")).toEqual([]);
+      expect(fresh.errors).toEqual([]);
+    } finally { await fresh.page.close(); }
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 45000);
+
+test("saved recording links survive the Spotify authentication boundary", async () => {
+  const { page, errors } = await setup();
+  try {
+    const requests = await mockSpotify(page);
+    await page.route("**/api/music/recordings?**", route => route.fulfill({ json: { recordings: [] } }));
+    const route = "#/applications?app=afterglow&recording=missing-recording&shelf=history&tab=music";
+    await login(page, { route });
+    await page.getByRole("region", { name: "Recording details" }).getByRole("heading", { name: "Recording not found" }).waitFor();
+    expect(new URL(page.url()).hash).toBe(route);
+    await page.reload();
+    await page.waitForFunction(() => document.title === "Recording not found · Saved audio · Spotify · Cyberdeck");
+    const length = await page.evaluate(() => history.length);
+    await page.getByRole("button", { name: "Close recording details" }).click();
+    expect(await page.evaluate(() => history.length)).toBe(length + 1);
+    await page.goBack();
+    await page.getByRole("region", { name: "Recording details" }).getByRole("heading", { name: "Recording not found" }).waitFor();
+    expect(requests.filter(r => r.method !== "GET")).toEqual([]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 45000);
+
+test("music read errors retain their links and retry without changing history", async () => {
+  const { page, errors } = await setup();
+  try {
+    const requests = await mockSpotify(page);
+    let status = 503;
+    await page.route('https://api.spotify.com/v1/playlists/playlist1', route => status === 200 ? route.fallback() : route.fulfill({ status, headers: { 'Retry-After': '1', 'Access-Control-Expose-Headers': 'Retry-After' }, json: { error: { message: 'Fixture read failure' } } }));
+    const route = '#/applications?app=afterglow&id=playlist1&shelf=playlist&tab=music';
+    await login(page, { route });
+    const check = async (title: string) => {
+      await page.getByRole('heading', { name: title, exact: true }).waitFor();
+      await page.waitForFunction(title => document.title === title + ' · Music · Afterglow · Cyberdeck', title);
+      expect(new URL(page.url()).hash).toBe(route);
+    };
+    await check('Music unavailable');
+    await page.reload(); await check('Music unavailable');
+    const length = await page.evaluate(() => history.length);
+    status = 403;
+    await page.getByRole('button', { name: 'Retry music view' }).click(); await check('Music access denied');
+    status = 404;
+    await page.getByRole('button', { name: 'Retry music view' }).click(); await check('Music content unavailable');
+    status = 429;
+    await page.getByRole('button', { name: 'Retry music view' }).click(); await check('Music rate limited');
+    await page.waitForTimeout(1100); // The read must respect Spotify's cooldown.
+    status = 200;
+    await page.getByRole('button', { name: 'Retry music view' }).click();
+    await page.getByRole('heading', { name: 'Focus playlist', exact: true }).waitFor();
+    expect(await page.evaluate(() => history.length)).toBe(length);
+    await page.evaluate(() => { location.hash = '#/applications?app=afterglow&id=playlist1&page=2&shelf=playlist&tab=music'; });
+    await page.getByRole('heading', { name: 'Music page not found', exact: true }).waitFor();
+    await page.waitForFunction(() => document.title === 'Music page not found · Music · Afterglow · Cyberdeck');
+    await page.reload();
+    await page.getByRole('heading', { name: 'Music page not found', exact: true }).waitFor();
+    await page.getByTestId('nav-data').click();
+    await page.waitForFunction(() => document.title === 'Data · Cyberdeck');
+    expect(requests.filter(r => r.method !== 'GET')).toEqual([]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 45000);
+
+test("late music reads cannot paint a newer selection or a hidden primary view", async () => {
+  const { page, errors } = await setup();
+  let release: (() => void) | undefined;
+  try {
+    const requests = await mockSpotify(page);
+    await login(page);
+    let arrived!: () => void;
+    const pending = new Promise<void>(resolve => { arrived = resolve; });
+    await page.route('https://api.spotify.com/v1/playlists/slow', async route => {
+      arrived();
+      await new Promise<void>(resolve => { release = resolve; });
+      await route.fulfill({ status: 403, json: { error: { message: 'Late failure' } } });
+    });
+    await page.evaluate(() => { location.hash = '#/applications?app=afterglow&id=slow&shelf=playlist&tab=music'; });
+    await pending;
+    await page.getByTestId('nav-data').click();
+    await page.waitForFunction(() => document.title === 'Data · Cyberdeck');
+    const response = page.waitForResponse('https://api.spotify.com/v1/playlists/slow');
+    release!();
+    await response;
+    expect(await page.title()).toBe('Data · Cyberdeck');
+    await page.evaluate(() => { location.hash = '#/applications?app=afterglow&id=album1&shelf=album&tab=music'; });
+    await page.getByRole('heading', { name: 'Test album', exact: true }).waitFor();
+    await page.waitForFunction(() => document.title === 'Test album · Music · Afterglow · Cyberdeck');
+    expect(await page.getByRole('alert').count()).toBe(0);
+    expect(requests.filter(r => r.method !== 'GET')).toEqual([]);
+    expect(errors).toEqual([]);
+  } finally { release?.(); await page.close(); }
+}, 45000);

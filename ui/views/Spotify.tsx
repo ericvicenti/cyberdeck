@@ -102,6 +102,8 @@ export function Spotify({
   const [query, setQuery] = useState("");
   const [shelf, setShelf] = useState<Shelf>(emptyShelf);
   const [resolvedRouteKey, setResolvedRouteKey] = useState("");
+  const [routeFailure, setRouteFailure] = useState<{ key: string; title: string; message: string } | null>(null);
+  const [routeRetry, setRouteRetry] = useState(0);
   const [back, setBack] = useState<Shelf[]>([]);
   const [devices, setDevices] = useState<SpotifyDevice[]>([]);
   const [selected, setSelected] = useState("");
@@ -141,6 +143,12 @@ export function Spotify({
   }
   const routeKey = params.toString();
   const currentLocation = spotifyLocation(params).location;
+  const activeRouteFailure = routeFailure?.key === routeKey ? routeFailure : null;
+  const failRoute = (e: unknown) => {
+    const status = (e as { status?: number })?.status;
+    if (!spotifyConnected()) report(e);
+    setRouteFailure({ key: routeKey, title: status === 403 ? "Music access denied" : status === 404 ? "Music content unavailable" : status === 429 ? "Music rate limited" : "Music unavailable", message: (e as Error)?.message || "This music view could not be loaded." });
+  };
   const navigateMusic = (
     next: Pick<SpotifyLocation, "shelf"> &
       Partial<
@@ -588,7 +596,10 @@ export function Spotify({
       content.current?.scrollTo({ top: 0 });
       return next;
     } catch (e) {
-      if (version === viewGeneration.current) report(e);
+      if (version === viewGeneration.current) {
+        if (replace) failRoute(e);
+        else report(e);
+      }
     } finally {
       if (version === viewGeneration.current) setLoading(false);
     }
@@ -857,6 +868,7 @@ export function Spotify({
     setImmersive(requested.immersive);
     setBack([]);
     setResolvedRouteKey("");
+    setRouteFailure(null);
     if (!connected || !account) return;
     const generation = ++routeGeneration.current;
     const restore = async () => {
@@ -883,7 +895,11 @@ export function Spotify({
         next = await collection(requested.shelf, true);
       }
       if (!next || generation !== routeGeneration.current) return;
-      for (let page = 1; page < requested.page && next.next; page++) {
+      for (let page = 1; page < requested.page; page++) {
+        if (!next.next) {
+          setRouteFailure({ key: routeKey, title: "Music page not found", message: "The requested page is not available in this music view." });
+          return;
+        }
         next = await loadMore(next);
         if (generation !== routeGeneration.current) return;
       }
@@ -891,13 +907,16 @@ export function Spotify({
       setShelf(next);
       setResolvedRouteKey(routeKey);
     };
-    void restore();
-  }, [visible, connected, account, routeKey]);
+    void restore().catch(e => {
+      if (generation === routeGeneration.current) failRoute(e);
+    });
+    return () => { routeGeneration.current++; viewGeneration.current++; };
+  }, [visible, connected, account, routeKey, routeRetry]);
   useRouteTitle(
-    visible && !currentLocation.recording && location.hash === musicHash(params) && resolvedRouteKey === routeKey
-      ? shelf.kind === "home"
-        ? "Music · Afterglow"
-        : `${shelf.title} · Music · Afterglow`
+    visible && connected && !currentLocation.recording && location.hash === musicHash(params)
+      ? activeRouteFailure ? `${activeRouteFailure.title} · Music · Afterglow`
+        : resolvedRouteKey !== routeKey ? "Loading music… · Afterglow"
+        : shelf.kind === "home" ? "Music · Afterglow" : `${shelf.title} · Music · Afterglow`
       : undefined,
   );
   const toggleSave = async (uri: string) => {
@@ -1493,7 +1512,7 @@ export function Spotify({
                       ? "ON REPEAT / ON DISCOVERY"
                       : shelf.kind}
                   </span>
-                  <h2>{shelf.title}</h2>
+                  <h2>{activeRouteFailure?.title || (loading ? "Loading music…" : shelf.title)}</h2>
                   {shelf.subtitle && (
                     <p className="music-muted">{shelf.subtitle}</p>
                   )}
@@ -1513,7 +1532,12 @@ export function Spotify({
                   />
                 </>
               )}
-              {loading ? (
+              {activeRouteFailure ? (
+                <div className="music-empty" role="alert">
+                  <p>{activeRouteFailure.message}</p>
+                  <button className="music-button" onClick={() => setRouteRetry(n => n + 1)}>Retry music view</button>
+                </div>
+              ) : loading ? (
                 <div className="music-empty" role="status">
                   Loading your music…
                 </div>

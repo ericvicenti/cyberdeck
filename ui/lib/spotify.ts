@@ -133,8 +133,8 @@ export function spotifyReturnHash(hash: string): string {
   const [path, query = ""] = hash.replace(/^#\/?/, "").split("?");
   const source = new URLSearchParams(query), params = new URLSearchParams();
   const music = path === "spotify" || isMusicRoute(path, source);
-  if (music) for (const key of ["node", "q", "shelf", "id", "page", "immersive", "radio"]) {
-    const value = source.get(key)?.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 300);
+  if (music) for (const key of ["node", "q", "shelf", "id", "page", "immersive", "radio", "recording"]) {
+    const value = source.get(key)?.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, key === "recording" ? 512 : 300);
     if (value) params.set(key, value);
   }
   return musicHash(params);
@@ -246,6 +246,9 @@ export async function spotifyToken(force = false): Promise<string> {
     });
   return (await refresh).access_token;
 }
+export class SpotifyApiError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
 let retryAfter = 0;
 /** Send an authorized API request and respect rate limiting. */
 export async function spotifyApi<T>(
@@ -257,10 +260,10 @@ export async function spotifyApi<T>(
   if (!path.startsWith("/") || path.startsWith("//"))
     throw new Error("Invalid Spotify API path.");
   if (Date.now() < retryAfter)
-    throw new Error(
+    throw new SpotifyApiError(
       `Spotify is busy. Try again in ${Math.ceil(
         (retryAfter - Date.now()) / 1000,
-      )} seconds.`,
+      )} seconds.`, 429,
     );
   const res = await fetch("https://api.spotify.com/v1" + path, {
     method,
@@ -278,22 +281,22 @@ export async function spotifyApi<T>(
   if (res.status === 429) {
     retryAfter =
       Date.now() + (Number(res.headers.get("Retry-After")) || 30) * 1000;
-    throw new Error(
-      "Spotify rate limit reached. Playback can continue; requests will resume after the cooldown.",
+    throw new SpotifyApiError(
+      "Spotify rate limit reached. Playback can continue; requests will resume after the cooldown.", res.status,
     );
   }
   if (!res.ok) {
     if (res.status === 403)
-      throw new Error(
-        "Spotify denied access. Check Premium, your app's allowed users, and reconnect to grant playback permissions.",
+      throw new SpotifyApiError(
+        "Spotify denied access. Check Premium, your app's allowed users, and reconnect to grant playback permissions.", res.status,
       );
     if (res.status === 404)
-      throw new Error(
+      throw new SpotifyApiError(
         path.startsWith("/me/player")
           ? "No active playback device. Enable browser playback or select a connected device."
-          : "Spotify does not make this content available to this app.",
+          : "Spotify does not make this content available to this app.", res.status,
       );
-    throw new Error(`Spotify request failed (${res.status}). Try again.`);
+    throw new SpotifyApiError(`Spotify request failed (${res.status}). Try again.`, res.status);
   }
   const text = await res.text();
   // Player commands may succeed with 204, an empty body or a plain-text "OK" instead of JSON.

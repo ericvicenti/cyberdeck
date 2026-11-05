@@ -1019,8 +1019,7 @@
 
 /* The spectrum is in the main listening room, not behind fullscreen. */
 .music-visualizer {
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 3;
   min-height: 220px;
   height: clamp(220px, 34vh, 410px);
