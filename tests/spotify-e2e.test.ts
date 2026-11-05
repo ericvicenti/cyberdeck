@@ -50,6 +50,7 @@ afterAll(async () => {
 async function setup(width = 1280) {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   page.setDefaultTimeout(7500);
+  page.setDefaultNavigationTimeout(30000); // Installed bundles may cross a private SSH tunnel.
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   const archive = new Map<string, any>();
