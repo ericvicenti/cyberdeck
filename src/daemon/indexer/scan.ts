@@ -3,6 +3,7 @@ import { join, basename } from "path";
 import type { Database } from "bun:sqlite";
 import type { CyberdeckConfig } from "../config";
 import { bus } from "../events";
+import { cachedJunkBytes } from "./du";
 
 async function git(repo: string, args: string[]): Promise<string> {
   const proc = Bun.spawn(["git", "-C", repo, ...args], {
@@ -61,16 +62,7 @@ async function junkBytes(repo: string, junkDirs: string[]): Promise<number> {
       }
     } catch {}
   }
-  if (targets.length === 0) return 0;
-  const proc = Bun.spawn(["du", "-sk", ...targets], { stdout: "pipe", stderr: "ignore" });
-  const out = await new Response(proc.stdout).text();
-  await proc.exited;
-  let kb = 0;
-  for (const line of out.split("\n")) {
-    const n = parseInt(line, 10);
-    if (!isNaN(n)) kb += n;
-  }
-  return kb * 1024;
+  return cachedJunkBytes(repo, targets);
 }
 
 async function scanRepo(path: string, cfg: CyberdeckConfig) {

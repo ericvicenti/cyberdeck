@@ -18,6 +18,7 @@ import { getConnInfo } from "hono/bun";
 import { Tailscale, isLoopback, isTailscaleIp } from "./tailscale";
 import { bus } from "./events";
 import { runScan, isScanRunning } from "./indexer/scan";
+import { clearJunkCache } from "./indexer/du";
 import { runDataScan, isDataScanRunning } from "./indexer/data";
 import type { RepoRow } from "./db";
 import { registerFsRoutes } from "./api/fs";
@@ -209,6 +210,8 @@ export function createServer(db: Database, cfg: CyberdeckConfig, token: string, 
 
   app.post("/api/scan", (c) => {
     if (!isScanRunning()) {
+      // An explicit scan re-measures junk sizes; automatic rescans reuse them.
+      clearJunkCache();
       runScan(db, cfg).catch((err) => console.error("scan error:", err));
     }
     if (!isDataScanRunning()) {

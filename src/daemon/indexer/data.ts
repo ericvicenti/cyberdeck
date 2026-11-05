@@ -6,23 +6,7 @@ import { join, basename } from "path";
 import type { Database } from "bun:sqlite";
 import type { CyberdeckConfig } from "../config";
 import { bus } from "../events";
-
-async function duBytes(paths: string[]): Promise<Map<string, number>> {
-  const out = new Map<string, number>();
-  if (paths.length === 0) return out;
-  // Batch to keep argv within limits.
-  for (let i = 0; i < paths.length; i += 50) {
-    const batch = paths.slice(i, i + 50);
-    const proc = Bun.spawn(["du", "-sk", ...batch], { stdout: "pipe", stderr: "ignore" });
-    const text = await new Response(proc.stdout).text();
-    await proc.exited;
-    for (const line of text.split("\n")) {
-      const m = line.match(/^(\d+)\s+(.+)$/);
-      if (m) out.set(m[2], parseInt(m[1], 10) * 1024);
-    }
-  }
-  return out;
-}
+import { duBytes } from "./du";
 
 /** Sum of cache-named subdirectories directly inside `dir` (one level deep). */
 async function cacheBytes(dir: string, cacheDirs: string[]): Promise<number> {
