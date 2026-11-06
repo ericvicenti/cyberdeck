@@ -31,7 +31,7 @@ MCP server, and grants it to the voice agent; see `docs/VOICE.md`).
 | Tool | Does | Writes? |
 |---|---|---|
 | `status` | this node (version, scan state, repo risk counts, junk bytes) and whether each paired node answers right now | no |
-| `fleet_status` | every host in the manifest with tailnet liveness, the Deck repo's sync state, open handoff count (`deck status`) | no |
+| `fleet_status` | every host in the manifest with its liveness (tailnet, or `reach: "cyberdeck"` when its paired node answers over Probe although the tailnet says offline/unknown), the Deck repo's sync state, open handoff count (`deck status`) | no |
 | `hosts` | the manifest: kind, OS, ssh alias, tailnet name, roles, agents, Cyberdeck URL, expected services | no |
 | `projects` | the project tree; with `dir`, the project owning that directory | no |
 | `todo` | `handoff/TODO.md` by section; `query` filters entries; the brief names the newest and the oldest entry | no |

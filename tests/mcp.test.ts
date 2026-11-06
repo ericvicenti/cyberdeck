@@ -471,6 +471,26 @@ describe("mcp brief mode", () => {
     await client.close();
   });
 
+  test("fleet_status counts a host the tailnet calls offline as online when its paired node answers Cyberdeck", async () => {
+    process.env.DECK_STUB_OFF_TAILNET = "bare,ghost";
+    const own = startTestServer(testConfig({ fleetDir: FLEET_STUB, nodeName: "test-node" }));
+    own.db.query("INSERT INTO nodes (id, name, url, token, added_at) VALUES (?, ?, ?, ?, ?)").run("n-bare-l", "Bare", bare.base, TEST_TOKEN, Date.now());
+    own.db.query("INSERT INTO nodes (id, name, url, token, added_at) VALUES (?, ?, ?, ?, ?)").run("n-ghost-l", "ghost", "http://127.0.0.1:9", "x", Date.now());
+    const client = await connect(own.base);
+    try {
+      const fleet = await call(client, "fleet_status", { brief: true });
+      expect(sentence(fleet)).toBe("3 of 4 hosts online, ghost offline; the Deck repo is on main; 2 handoff entries open. (bare is off the tailnet but answered Cyberdeck.)");
+      expect((fleet.structuredContent as any)).toMatchObject({ hostsOnline: 3, offline: ["ghost"] });
+      const full = parsed(await call(client, "fleet_status"));
+      expect(full.hosts.find((h: any) => h.name === "bare")).toMatchObject({ online: true, reach: "cyberdeck", transport: "http" });
+      expect(full.hosts.find((h: any) => h.name === "ghost")).toMatchObject({ online: false });
+    } finally {
+      delete process.env.DECK_STUB_OFF_TAILNET;
+      await client.close();
+      own.stop();
+    }
+  });
+
   test("read tools answer with one spoken sentence and the key numbers", async () => {
     const client = await connect(srv.base);
     expect(sentence(await call(client, "status", { brief: true }))).toContain("test-node runs Cyberdeck");

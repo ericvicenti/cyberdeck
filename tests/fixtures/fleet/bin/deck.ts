@@ -2,6 +2,8 @@
 const [cmd, sub] = process.argv.slice(2);
 // DECK_STUB_HOST renames the stub's own host (default test-node): the e2e suite runs it on a paired daemon.
 const H = process.env.DECK_STUB_HOST ?? "test-node";
+// DECK_STUB_OFF_TAILNET="a,b" adds hosts the tailnet calls offline to `status` (the peer-liveness tests pair a node by that name).
+const OFF_TAILNET = (process.env.DECK_STUB_OFF_TAILNET ?? "").split(",").filter(Boolean);
 const out: Record<string, unknown> = {
   status: { host: H, time: "2026-10-07T00:00:00Z", hosts: [{ name: H, kind: "laptop", os: "macos", ssh: H, roles: ["agents"], online: true, cyberdeck: null }, { name: "other", kind: "server", os: "linux", ssh: "other-alias", roles: [], online: true, cyberdeck: null }], repo: { branch: "main", dirty: 0, ahead: 0, behind: 0 }, handoffOpen: 2, sessionsIndexed: 1 },
   projects: [{ slug: "demo", name: "Demo", status: "active", depth: 0, parent: null, repos: ["demo"], hosts: [H], services: [`${H}/x`, "other/web-*"], links: ["ssh other-alias"], body: "A demo project.", file: "projects/demo/index.md" }],
@@ -17,6 +19,7 @@ const out: Record<string, unknown> = {
   "collab runs": [],
   services: { probedAt: "2026-10-07T00:00:00Z", rows: [{ host: H, service: "x", type: "launchd", state: "active", ok: true }, { host: "other", service: "web-api", type: "systemd", state: "inactive", ok: false }, { host: "other", service: "db", type: "docker", state: "running", ok: true }] },
 };
+for (const name of OFF_TAILNET) (out.status as { hosts: unknown[] }).hosts.push({ name, kind: "laptop", os: "macos", ssh: name, roles: [], online: false, cyberdeck: null });
 if (cmd === "context") { console.log(`host: ${H}   cwd: ${sub ?? "~/Code"}   project: demo (Demo)\n\nhandoff (1 entry):\n- 2026-10-07 **Demo** thing\n\ninbox: empty`); process.exit(0); }
 if (cmd === "projects" && sub === "--for") { console.log(JSON.stringify(process.argv[4]?.includes("demo") ? (out.projects as unknown[])[0] : null)); process.exit(0); }
 const key = cmd === "collab" ? `collab ${sub}` : cmd;

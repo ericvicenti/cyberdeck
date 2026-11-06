@@ -20,6 +20,7 @@ import type { RepoRow } from "../db";
 import type { NodeStatus } from "../status";
 import type { Control, ServiceProbe } from "./control";
 import { peerFetch, type NodeRow } from "./fleet";
+import { withPeerLiveness, type PeerSeen } from "../../shared/liveness";
 import { runScan, isScanRunning } from "../indexer/scan";
 import { resolveService, serviceLogs, restartService, restartBudget, type ManifestHost, type ServiceTarget } from "../servicectl";
 import { matchRepo, repoDetail, type RepoDetail } from "../repodetail";
@@ -152,13 +153,27 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
 
   server.tool(
     "fleet_status",
-    "Every host in the Deck manifest (laptops, servers, phone) with whether it is online on the tailnet, plus the Deck repo's sync state and how many handoff entries are open.",
+    "Every host in the Deck manifest (laptops, servers, phone) with whether it is online (on the tailnet, or answering Cyberdeck over Probe: `reach: \"cyberdeck\"`), plus the Deck repo's sync state and how many handoff entries are open.",
     { brief: BRIEF },
     async ({ brief }) => {
       const blocked = needDeck(); if (blocked) return blocked;
       const st = await control.cached<DeckStatus | null>("status", ["status", "--json"], null);
       if (!st) return spoken("The Deck CLI did not answer, so the fleet state is unknown right now.", null, brief);
-      const hosts = st.hosts ?? [];
+      // the manifest's liveness is the tailnet's; a paired node that answers over Probe is online too
+      const doubtful = new Set((st.hosts ?? []).filter((h) => h.online !== true).map((h) => h.name.toLowerCase()));
+      const seen = await Promise.all(peers().filter((n) => doubtful.has(n.name.toLowerCase())).map(async (n): Promise<PeerSeen> => {
+        const transport = n.probe_device ? "probe" as const : "http" as const;
+        // the peer sweep, the voice relay and the hub keep-warm stamp last_seen on every answer
+        if (n.last_seen && Date.now() - n.last_seen < 120_000) return { name: n.name, online: true, transport };
+        try {
+          const res = await peerFetch(n, "/api/status", { signal: AbortSignal.timeout(n.probe_device ? 8000 : 3000) });
+          return { name: n.name, online: res.ok, transport };
+        } catch {
+          return { name: n.name, online: false, transport };
+        }
+      }));
+      const hosts = withPeerLiveness(st.hosts ?? [], seen);
+      const viaCyberdeck = hosts.filter((h) => h.reach === "cyberdeck").map((h) => h.name);
       const up = hosts.filter((h) => h.online === true).map((h) => h.name);
       const down = hosts.filter((h) => h.online === false).map((h) => h.name);
       const unknown = hosts.filter((h) => h.online !== true && h.online !== false).map((h) => h.name);
@@ -166,8 +181,9 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
       const sentence =
         `${up.length} of ${plural(hosts.length, "host")} online${down.length ? `, ${listOf(down)} offline` : ""}${unknown.length ? `, ${listOf(unknown)} unknown` : ""}` +
         (repo ? `; the Deck repo is on ${repo.branch}${repo.dirty ? ` with ${plural(repo.dirty, "dirty file")}` : ""}${repo.behind ? `, ${repo.behind} behind` : ""}${repo.ahead ? `, ${repo.ahead} unpushed` : ""}` : "") +
-        `; ${plural(st.handoffOpen ?? 0, "handoff entry", "handoff entries")} open.`;
-      return spoken(sentence, st, brief, { hostsOnline: up.length, hostsTotal: hosts.length, offline: down, handoffOpen: st.handoffOpen ?? 0 });
+        `; ${plural(st.handoffOpen ?? 0, "handoff entry", "handoff entries")} open.` +
+        (viaCyberdeck.length ? ` (${listOf(viaCyberdeck)} ${viaCyberdeck.length === 1 ? "is" : "are"} off the tailnet but answered Cyberdeck.)` : "");
+      return spoken(sentence, { ...st, hosts }, brief, { hostsOnline: up.length, hostsTotal: hosts.length, offline: down, handoffOpen: st.handoffOpen ?? 0 });
     }
   );
 

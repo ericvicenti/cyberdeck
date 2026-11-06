@@ -28,10 +28,13 @@ describe("glance", () => {
     expect(g.handoffOpen).toBe(3);
   });
 
-  test("paired nodes settle hosts the manifest leaves unknown, never override it", () => {
+  test("a paired node that answers is online even when the tailnet says offline; a silent one only fills unknowns", () => {
     const g = glance(overview(), [{ name: "Botical", online: true }, { name: "starlight", online: true }]);
-    expect(g.hosts).toMatchObject({ up: 3, down: 1, unknown: 0 });
-    expect(g.hosts.rows.find((h) => h.name === "starlight")?.online).toBe(false);
+    expect(g.hosts).toMatchObject({ up: 4, down: 0, unknown: 0 });
+    expect(g.hosts.rows.find((h) => h.name === "starlight")).toMatchObject({ online: true, reach: "cyberdeck" });
+    const quiet = glance(overview(), [{ name: "botical", online: false }, { name: "enuc", online: false }]);
+    expect(quiet.hosts).toMatchObject({ up: 2, down: 2, unknown: 0 });
+    expect(quiet.hosts.rows.find((h) => h.name === "enuc")?.online).toBe(true);
   });
 
   test("without a manifest status the paired nodes are the host list", () => {

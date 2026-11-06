@@ -2,6 +2,7 @@
 // /api/control/overview boiled down to what you would ask the agent about. Pure, so the
 // tests can feed it the fleet stub's overview.
 import type { HostStatus, Overview, Run, ServiceRow, Task } from "./control";
+import { withPeerLiveness } from "../../src/shared/liveness";
 
 export type GlanceTab = "fleet" | "services" | "agents";
 export const GLANCE_TABS: [GlanceTab, string][] = [["fleet", "Fleet"], ["services", "Services"], ["agents", "Agents"]];
@@ -17,14 +18,13 @@ const ACTIVE = new Set(["running", "review", "blocked"]);
 const hostRank = (h: HostStatus) => (h.online === false ? 0 : h.online == null ? 1 : 2);
 const taskRank = (t: Task) => (t.status === "running" ? 0 : t.status === "review" ? 1 : t.status === "blocked" ? 2 : 3);
 
-/** Paired Cyberdeck nodes (GET /api/fleet/nodes): they settle hosts the manifest leaves unknown. */
+/** Paired Cyberdeck nodes (GET /api/fleet/nodes): one that answers is online even when the tailnet says not. */
 export type NodeSeen = { name: string; online: boolean };
 
 export function glance(ov: Overview, nodes: NodeSeen[] = []): Glance {
-  const seen = new Map(nodes.map((n) => [n.name.toLowerCase(), n.online]));
   // No manifest status (the fleet CLI timed out): the paired nodes are still a fleet.
   const manifest = ov.status?.hosts ?? nodes.map((n): HostStatus => ({ name: n.name, kind: "cyberdeck", os: "node", roles: [], online: n.online, cyberdeck: null }));
-  const hostRows = manifest.map((h) => (h.online == null && seen.has(h.name.toLowerCase()) ? { ...h, online: seen.get(h.name.toLowerCase())! } : h)).sort((a, b) => hostRank(a) - hostRank(b) || a.name.localeCompare(b.name));
+  const hostRows = withPeerLiveness(manifest, nodes).sort((a, b) => hostRank(a) - hostRank(b) || a.name.localeCompare(b.name));
   const rows = ov.services?.rows ?? [];
   const tasks = ov.collab?.tasks ?? [];
   const live = tasks.filter((t) => ACTIVE.has(t.status) || t.status === "open").sort((a, b) => taskRank(a) - taskRank(b));
