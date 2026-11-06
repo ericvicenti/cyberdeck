@@ -115,9 +115,11 @@ test("unknown and unavailable filters preserve shareable errors instead of selec
 test("an explicit session owner remains independent of its filter, including an unknown filter", () => fresh(async page => {
   await page.goto(href("session=a&node=peer-a&filter=unknown")); await title(page, "A shell · Peer A · Sessions");
   await page.getByTestId("term-filter-error").waitFor();
+  await waitAttachment(page);
   await page.getByTestId("terminal-host").evaluate(el => el.setAttribute("data-retained", "yes"));
   const count = attaches;
   await page.getByTestId("term-filter-node").selectOption("peer-b");
+  await page.waitForFunction(() => new URLSearchParams(location.hash.split("?")[1]).get("filter") === "peer-b");
   await page.goBack(); await title(page, "A shell · Peer A · Sessions");
   expect(await page.getByTestId("terminal-host").getAttribute("data-retained")).toBe("yes"); expect(attaches).toBe(count);
 }), 30000);
