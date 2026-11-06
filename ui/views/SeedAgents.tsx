@@ -4,6 +4,7 @@
 // package keeps this view aligned with the UI Seed ships without copying that UI into Cyberdeck.
 import { useEffect, useMemo } from "react";
 import { useSeedEntityTitle } from "../lib/seed-route-title";
+import { useSeedReadOutcome } from "../lib/seed-read-outcome";
 import { updateParams, useRouteTitle, nodeName } from "../lib/navigation";
 import { SeedAgentsProvider, SeedAgentsView, seedAgentsRouteFromPath, seedAgentsRouteToPath, type SeedAgentsRoute } from "@seed-hypermedia/agents-ui";
 import "@seed-hypermedia/agents-ui/styles.css";
@@ -70,11 +71,12 @@ type RouteChange = (route: SeedAgentsRoute, mode: "push" | "replace", path: stri
 /** The agents UI at one route, for other views to embed (Sessions shows Seed sessions with it). */
 export function SeedAgentsEmbed({ route, onRouteChange, node = "", title }: { route: SeedAgentsRoute; onRouteChange?: RouteChange; node?: string; title?: string }) {
   const { host, session, error, retry } = useSeedAgentsHost(node);
+  const read = useSeedReadOutcome(host, route);
   const entityTitle = useSeedEntityTitle(title && session?.available && session.reachable && !error ? host : null, route);
   useRouteTitle(title ? error ? "Seed agents unavailable"
     : host && session && !session.available ? "Seed identity unavailable"
     : host && session && !session.reachable ? "Seed server unavailable"
-    : entityTitle ? `${entityTitle}${node ? ` · ${nodeName(node)}` : ""}` : title : undefined);
+    : read.title || entityTitle ? `${read.title || entityTitle}${node ? ` · ${nodeName(node)}` : ""}` : title : undefined);
   if (error) {
     return (
       <div className="m-4 hud-card p-4 text-sm" role="alert">
@@ -98,7 +100,7 @@ export function SeedAgentsEmbed({ route, onRouteChange, node = "", title }: { ro
         </div>
       )}
       <SeedAgentsProvider
-        host={host}
+        host={read.host || host}
         route={route}
         onRouteChange={onRouteChange && ((next, mode) => onRouteChange(next, mode, seedAgentsRouteToPath(next)))}
         openRouteInNewWindow={(next) => window.open(seedHash(seedAgentsRouteToPath(next), node), "_blank", "noopener")}

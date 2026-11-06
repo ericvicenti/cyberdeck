@@ -43,6 +43,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "@seed-hypermedia/agents-ui@0.1.11": "patches/@seed-hypermedia%2Fagents-ui@0.1.11.patch",
+  },
   "packages": {
     "@assemblyscript/loader": ["@assemblyscript/loader@0.9.4", "", {}, "sha512-HazVq9zwTVwGmqdwYzu7WyQ6FQVZ7SwET0KKQuKm55jD0IfUpZgN0OPIiZG3zV1iSrVYcN0bdwLRXI/VNCYsUA=="],
 

@@ -1,0 +1,52 @@
+diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-547938d70d3cca36 b/.bun-tag-547938d70d3cca36
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/chunks/index-ZHWGA37c.js b/chunks/index-ZHWGA37c.js
+index 46d2a63607a75cc74548b660fb72e79cb665942f..0edf8e8b5b17d573180a258ac6cd7d650d6a71a7 100644
+--- a/chunks/index-ZHWGA37c.js
++++ b/chunks/index-ZHWGA37c.js
+@@ -71426,7 +71426,8 @@ function lMe(e, t) {
+   });
+ }
+ function SQ(e, t, n, r) {
+-  return qt({
++  const readHost = T8e();
++  const query = qt({
+     queryKey: ["agents", "memory", e, t, n, "file", r],
+     queryFn: async () => {
+       if (!e || !t || !n || !r) return null;
+@@ -71442,6 +71443,14 @@ function SQ(e, t, n, r) {
+     retry: !1,
+     useErrorBoundary: !1
+   });
++  xe(() => {
++    if (!e || !t || !n || !r || !["success", "error"].includes(query.status)) return;
++    readHost.onReadOutcome?.({
++      kind: "memory-file", serverUrl: e, accountUid: t, agentId: n, path: r,
++      error: query.status === "error" ? query.error : undefined
++    });
++  }, [readHost, e, t, n, r, query.status, query.error, query.data]);
++  return query;
+ }
+ function cMe(e, t) {
+   return ft({
+diff --git a/host.d.ts b/host.d.ts
+index ee1c082fffbe395f63ddcf81630997454cf7804d..816e69905d5cf29d173a777b74346b3e5997caff 100644
+--- a/host.d.ts
++++ b/host.d.ts
+@@ -96,6 +96,15 @@ export type SeedAgentsNavigationMode = 'push' | 'replace' | 'spawn';
+  * for account names, avatars and hm:// links.
+  */
+ export type SeedAgentsHost = {
++    /** Reports the selected memory query's displayed outcome, without issuing a second read. */
++    onReadOutcome?: (outcome: {
++        kind: 'memory-file';
++        serverUrl: string;
++        accountUid: string;
++        agentId: string;
++        path: string;
++        error?: unknown;
++    }) => void;
+     /**
+      * Base URL of the agents server, as the browser can reach it. A canonical base ends in
+      * `/hm/api/agents` (a site serving agents on its own origin, or `https://agentic.seed.hyper.media/hm/api/agents`)
