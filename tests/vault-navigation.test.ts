@@ -22,7 +22,7 @@ const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(req) {
     if (path.endsWith("/fs/list")) return Response.json({ path: "/", parent: null, home: "/", entries: [], users: {}, groups: {} });
     return Response.json({ error: "Fixture endpoint unavailable" }, { status: 404 });
   }
-  const file = Bun.file(join(process.env.CYBERDECK_TEST_UI || join(import.meta.dir, "../dist/ui"), path === "/" ? "index.html" : path));
+  const file = Bun.file(join(import.meta.dir, "../dist/ui", path === "/" ? "index.html" : path));
   return await file.exists() ? new Response(file) : new Response("Not found", { status: 404 });
 } });
 let browser: Browser, page: Page;
@@ -90,7 +90,6 @@ test("Vault keeps the real emulator through apps, primary views, node URLs and b
   expect(await frame.evaluate(()=>(window as any).navigationProof)).toBe(proof);
   expect(await page.locator(".vault-player-frame").count()).toBe(1);
   // Saving proves the retained core remains responsive, with its original state.
-  await page.locator(".vault-player-frame").focus();
   await page.keyboard.press("Escape");await page.getByRole("button",{name:"Save progress",exact:true}).click();
   await page.getByText("Progress saved in this browser",{exact:true}).waitFor();
   await page.getByRole("button",{name:"Save & exit",exact:true}).click();
