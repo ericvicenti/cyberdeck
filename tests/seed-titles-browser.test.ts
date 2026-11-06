@@ -7,6 +7,7 @@ import * as blobs from "@seed-hypermedia/client/blobs";
 // Real published Seed UI + production Cyberdeck bundle. Synthetic signatures,
 // metadata and transcripts only; no real agent is messaged or started.
 const account = blobs.principalToString(blobs.nobleKeyPairFromSeed(new Uint8Array(32).fill(42)).principal);
+const browserBudget = process.env.CYBERDECK_TEST_ORIGIN ? 90000 : 30000;
 const actions: string[] = [], errors: string[] = [], unexpected: string[] = [];
 const pending = new Set<() => void>();
 let hold = false;
@@ -93,6 +94,7 @@ beforeAll(async()=>{browser=await chromium.launch();});
 afterAll(async()=>{for(const release of pending)release();await browser.close();server.stop(true);expect(unexpected).toEqual([]);expect(errors).toEqual([]);});
 async function fresh(fn:(page:Page)=>Promise<void>){
  const page=await browser.newPage({viewport:{width:1280,height:900}});page.setDefaultTimeout(12000);page.on("pageerror",e=>errors.push(e.message));
+ page.setDefaultNavigationTimeout(process.env.CYBERDECK_TEST_ORIGIN ? 30000 : 12000);
  await page.route("**/*",route=>new URL(route.request().url()).origin===server.url.origin?route.continue():route.abort());
  try{await fn(page);}catch(e){console.error(JSON.stringify({title:await page.title(),body:(await page.locator("body").innerText()).slice(0,1800),errors,actions:actions.slice(-15)}));throw e;}
  finally{hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;for(const release of pending)release();pending.clear();await page.close();}
@@ -113,20 +115,20 @@ test("Seed agent/tab, session and run names restore on direct links, reload, new
  await page.reload();await title(page,"local First conversation · Seed session · Cyberdeck");
  await page.goto(href("session/untitled"));await title(page,"Untitled session · Seed session · Cyberdeck");
  await page.goto(href("run/review"));await title(page,"local Review navigation · Seed run · Cyberdeck");
-}),30000);
+}),browserBudget);
 
 test("Nested memory and trigger titles use the agent's name without opening actions",()=>fresh(async page=>{
  await page.goto(href("agent/alpha?tab=memory&file=notes%2Ftoday.md"));await title(page,"notes/today.md · local Alpha assistant · Seed · Cyberdeck");
  await page.goto(href("agent/alpha?tab=triggers&trigger=morning"));await title(page,"Morning review · local Alpha assistant · Seed · Cyberdeck");
  await page.reload();await title(page,"Morning review · local Alpha assistant · Seed · Cyberdeck");
-}),30000);
+}),browserBudget);
 
 test("Seed missing, denied and unavailable entities have honest titles and clean up on exit",()=>fresh(async page=>{
  for(const [path,value] of [["agent/missing","Agent not found"],["session/missing","Session not found"],["run/missing","Run not found"],["session/denied","Access denied"],["agent/offline","Agent unavailable"]]){
   await page.goto(href(path));await title(page,`${value} · Seed · Cyberdeck`);
  }
  await page.getByTestId("nav-data").click();await title(page,"Data · Cyberdeck");
-}),30000);
+}),browserBudget);
 
 test("Late entity names cannot overwrite newer routes, nodes or the locked title",()=>fresh(async page=>{
  hold=true;
@@ -140,7 +142,7 @@ test("Late entity names cannot overwrite newer routes, nodes or the locked title
  await page.route("**/api/fs/list**",route=>route.fulfill({status:401,json:{error:"Locked"}}));
  await page.getByTestId("nav-files").click();await page.getByPlaceholder("access token").waitFor();await title(page,"Locked · Cyberdeck");
  expect(actions.some(a=>a.startsWith("peer-b:GetAgent"))).toBe(true);
-}),30000);
+}),browserBudget);
 
 
 test("Entity names refresh on return without changing the URL or adding history",()=>fresh(async page=>{
@@ -150,7 +152,7 @@ test("Entity names refresh on return without changing the URL or adding history"
  await page.evaluate(()=>window.dispatchEvent(new Event("focus")));
  await title(page,"Sessions · Renamed assistant · Seed · Cyberdeck");
  expect(page.url()).toBe(url);expect(await page.evaluate(()=>history.length)).toBe(length);
-}),30000);
+}),browserBudget);
 
 test("Leaving a delayed trigger route cannot sign its follow-up title lookup",()=>fresh(async page=>{
  hold=true;
@@ -161,7 +163,7 @@ test("Leaving a delayed trigger route cannot sign its follow-up title lookup",()
  for(const release of pending)release();pending.clear();await page.waitForTimeout(150);
  expect(actions.filter(a=>a.endsWith(":GetAgentTrigger")).length).toBe(before);
  expect(await page.title()).toBe("Data · Cyberdeck");
-}),30000);
+}),browserBudget);
 
 
 test("Sessions Seed links use the embedded entity title and restore without creating a terminal",()=>fresh(async page=>{
@@ -171,7 +173,7 @@ test("Sessions Seed links use the embedded entity title and restore without crea
  await page.goBack();await title(page,"local First conversation · Seed session · Cyberdeck");
  await page.evaluate(()=>location.hash="#/term?session=seed-missing");await title(page,"Session not found · Seed · Cyberdeck");
  await page.getByTestId("nav-data").click();await title(page,"Data · Cyberdeck");
-}),30000);
+}),browserBudget);
 
 
 test("Seed nested memory metadata failures retain URLs and identify the missing file",()=>fresh(async page=>{
@@ -182,7 +184,7 @@ test("Seed nested memory metadata failures retain URLs and identify the missing 
   await page.reload();await title(page,`${value} · Seed · Cyberdeck`);
  }
  await page.getByTestId("nav-data").click();await title(page,"Data · Cyberdeck");
-}),30000);
+}),browserBudget);
 
 test("Seed memory deletion refreshes its title; history and fresh tabs restore a valid file",()=>fresh(async page=>{
  const path="agent/alpha?tab=memory&file=notes%2Ftoday.md";
@@ -195,7 +197,7 @@ test("Seed memory deletion refreshes its title; history and fresh tabs restore a
  await page.evaluate(()=>location.hash="#/seed?r=agent%2Fbeta%3Ftab%3Dsettings");await title(page,"Settings · local Beta assistant · Seed · Cyberdeck");
  await page.goBack();await title(page,"notes/today.md · local Alpha assistant · Seed · Cyberdeck");
  await fresh(async tab=>{await tab.goto(url);await title(tab,"notes/today.md · local Alpha assistant · Seed · Cyberdeck");});
-}),30000);
+}),browserBudget);
 
 test("A late memory-directory failure cannot rename another route or selected node",()=>fresh(async page=>{
  hold=true;
@@ -204,7 +206,7 @@ test("A late memory-directory failure cannot rename another route or selected no
  await page.evaluate(()=>location.hash="#/seed?node=peer-b&r=agent%2Fbeta%3Ftab%3Dsettings");await title(page,"Settings · peer-b Beta assistant · Seed · Peer B · Cyberdeck");
  for(const release of pending)release();pending.clear();await page.waitForTimeout(100);
  expect(await page.title()).toBe("Settings · peer-b Beta assistant · Seed · Peer B · Cyberdeck");
-}),30000);
+}),browserBudget);
 
 test("Seed memory-content outcomes override successful directory metadata without extra reads", () => fresh(async page => {
   memoryReadStatus = 403;
@@ -236,7 +238,7 @@ test("Seed memory-content outcomes override successful directory metadata withou
   await title(page, "Data · Cyberdeck");
   await page.goBack();
   await title(page, "notes/today.md · local Alpha assistant · Seed · Cyberdeck");
-}), 30000);
+}), browserBudget);
 
 test("Late Seed memory failures cannot rename a different file, node or primary view", () => fresh(async page => {
   memoryReadStatus = 403; holdMemoryRead = true;
@@ -252,4 +254,4 @@ test("Late Seed memory failures cannot rename a different file, node or primary 
   expect(await page.evaluate(() => history.length)).toBe(length);
   expect(await page.title()).toBe("notes/later.md · peer-b Alpha assistant · Seed · Peer B · Cyberdeck");
   await page.getByTestId("nav-data").click(); await title(page, "Data · Cyberdeck");
-}), 30000);
+}), browserBudget);
