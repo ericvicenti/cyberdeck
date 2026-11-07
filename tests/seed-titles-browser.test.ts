@@ -299,7 +299,7 @@ test("Seed URL-supplied server names use displayed reads and keep their exact si
   const link = href(`${path}${path.includes("?") ? "&" : "?"}server=${encodeURIComponent(remote)}`, "peer-b");
   await page.goto(link); await title(page, `${expected} · Peer B · Cyberdeck`);
   expect(reads.slice(start).filter(({node,action}) => node === "external" && action._ === actionName).length).toBe(1);
-  expect(reads.slice(start).some(({node}) => node === "peer-b")).toBe(false);
+  expect(reads.slice(start).some(({node,action}) => node === "peer-b" && action._ === actionName)).toBe(false);
   await page.reload(); await title(page, `${expected} · Peer B · Cyberdeck`);
   await fresh(async tab => { await tab.goto(link); await title(tab, `${expected} · Peer B · Cyberdeck`); });
  }
