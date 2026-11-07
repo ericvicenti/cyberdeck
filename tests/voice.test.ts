@@ -698,6 +698,13 @@ describe("configured node", () => {
     const j3 = await (await req(a, TEST_TOKEN, "/api/voice/digest", { method: "POST", body: JSON.stringify({}) })).json();
     expect(j3).toMatchObject({ created: false, updated: true, triggerId: j1.triggerId });
     expect(stored[0].prompt).toBe(digestPrompt(account));
+    // The agents server hands prompts back as blocks: the current one is not re-applied, a stale one is rewritten.
+    const asBlocks = (t: string) => ({ type: "seed-prompt-blocks", blocks: [{ block: { type: "Paragraph", id: "p0", text: t } }] });
+    stored[0].prompt = asBlocks(digestPrompt(account));
+    expect(await (await req(a, TEST_TOKEN, "/api/voice/digest", { method: "POST", body: JSON.stringify({}) })).json()).toMatchObject({ updated: false });
+    stored[0].prompt = asBlocks("Weekly fleet digest. Old wording.");
+    expect(await (await req(a, TEST_TOKEN, "/api/voice/digest", { method: "POST", body: JSON.stringify({}) })).json()).toMatchObject({ updated: true });
+    expect(stored[0].prompt).toBe(digestPrompt(account));
   });
 
   test("runwatch: a run-completed trigger on the voice agent watches the harness agent, and announce lands in the transcript", async () => {

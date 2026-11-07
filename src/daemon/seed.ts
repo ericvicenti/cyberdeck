@@ -581,7 +581,7 @@ export class SeedBridge {
     let trigger = await this.#findTrigger(agentId, DIGEST_TRIGGER_NAME, this.#state.digestTriggerId);
     let created = false;
     let updated = false;
-    if (trigger && typeof trigger.prompt === "string" && trigger.prompt !== prompt) {
+    if (trigger && trigger.prompt != null && !samePrompt(trigger.prompt, prompt)) {
       const res = await this.action<{ trigger?: TriggerInfo }>({ _: "UpdateAgentTrigger", triggerId: trigger.id, patch: { prompt } });
       trigger = { ...trigger, ...(res.trigger ?? {}), prompt };
       updated = true;
@@ -643,7 +643,7 @@ export class SeedBridge {
     let updated = false;
     if (trigger) {
       const patch: Record<string, unknown> = {};
-      if (typeof trigger.prompt === "string" && trigger.prompt !== RUNWATCH_PROMPT) patch.prompt = RUNWATCH_PROMPT;
+      if (trigger.prompt != null && !samePrompt(trigger.prompt, RUNWATCH_PROMPT)) patch.prompt = RUNWATCH_PROMPT;
       if (trigger.source?.type !== "run-completed" || trigger.source?.agentId !== watched) patch.source = source;
       const threadForm = trigger.continuation?.kind !== "tool" || trigger.continuation.tool !== headless.tool;
       if (Object.keys(patch).length || threadForm) {
