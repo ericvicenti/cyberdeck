@@ -3,7 +3,6 @@
 // (ui/lib/seed-agents.ts) and keeps the route in its hash URL (#/seed?r=<path>). The published
 // package keeps this view aligned with the UI Seed ships without copying that UI into Cyberdeck.
 import { useEffect, useMemo } from "react";
-import { useSeedEntityTitle } from "../lib/seed-route-title";
 import { useSeedReadOutcome } from "../lib/seed-read-outcome";
 import { updateParams, useRouteTitle, nodeName } from "../lib/navigation";
 import { SeedAgentsProvider, SeedAgentsView, seedAgentsRouteFromPath, seedAgentsRouteToPath, type SeedAgentsRoute } from "@seed-hypermedia/agents-ui";
@@ -69,14 +68,24 @@ function seedRouteTitle(route: SeedAgentsRoute): string {
 type RouteChange = (route: SeedAgentsRoute, mode: "push" | "replace", path: string) => void;
 
 /** The agents UI at one route, for other views to embed (Sessions shows Seed sessions with it). */
-export function SeedAgentsEmbed({ route, onRouteChange, node = "", title }: { route: SeedAgentsRoute; onRouteChange?: RouteChange; node?: string; title?: string }) {
+export function SeedAgentsEmbed({ route, onRouteChange, node = "", title, routeUrl }: { route: SeedAgentsRoute; onRouteChange?: RouteChange; node?: string; title?: string; routeUrl?: (next: SeedAgentsRoute) => string | undefined }) {
   const { host, session, error, retry } = useSeedAgentsHost(node);
-  const read = useSeedReadOutcome(host, route);
-  const entityTitle = useSeedEntityTitle(title && session?.available && session.reachable && !error ? host : null, route);
+  const linkHost = useMemo(() => host && ({
+    ...host,
+    routeUrl: (next: SeedAgentsRoute) => {
+      const supplied = routeUrl?.(next);
+      if (supplied) return supplied;
+      const canonical = next.key !== "agents" && next.key !== "agent-server" &&
+        next.serverUrl?.replace(/\/+$/, "") === host.serverUrl.replace(/\/+$/, "")
+        ? { ...next, serverUrl: undefined } : next;
+      return new URL(seedHash(seedAgentsRouteToPath(canonical), node), location.href).href;
+    },
+  }), [host, node, routeUrl]);
+  const read = useSeedReadOutcome(linkHost, route);
   useRouteTitle(title ? error ? "Seed agents unavailable"
     : host && session && !session.available ? "Seed identity unavailable"
     : host && session && !session.reachable ? "Seed server unavailable"
-    : read.title || entityTitle ? `${read.title || entityTitle}${node ? ` · ${nodeName(node)}` : ""}` : title : undefined);
+    : read.title ? `${read.title}${node ? ` · ${nodeName(node)}` : ""}` : title : undefined);
   if (error) {
     return (
       <div className="m-4 hud-card p-4 text-sm" role="alert">

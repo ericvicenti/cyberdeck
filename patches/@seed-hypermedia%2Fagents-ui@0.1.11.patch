@@ -1,11 +1,182 @@
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-547938d70d3cca36 b/.bun-tag-547938d70d3cca36
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/chunks/index-ZHWGA37c.js b/chunks/index-ZHWGA37c.js
-index 46d2a63607a75cc74548b660fb72e79cb665942f..0edf8e8b5b17d573180a258ac6cd7d650d6a71a7 100644
+index 46d2a63607a75cc74548b660fb72e79cb665942f..631782b8bc895bd14a4ebbd740815b34cfed90ba 100644
 --- a/chunks/index-ZHWGA37c.js
 +++ b/chunks/index-ZHWGA37c.js
-@@ -71426,7 +71426,8 @@ function lMe(e, t) {
+@@ -21346,12 +21346,15 @@ const hue = [
+   tab: Rt(["sessions", "triggers", "memory", "tools", "prompt", "collaborators", "settings"]).optional(),
+   triggerId: $().optional(),
+   /** Memory tab: the file to open, so a `~/memory/…` link in a tool row lands on that file. */
+-  memoryPath: $().optional()
++  memoryPath: $().optional(),
++  sessionPages: et().int().min(1).max(100).optional()
+ }), Wue = j({
+   key: ne("agent-session"),
+   sessionId: $(),
+   serverUrl: $().optional(),
+-  agentId: $().optional()
++  agentId: $().optional(),
++  panel: Rt(["prompt", "message"]).optional(),
++  eventId: $().optional()
+ }), Yue = j({
+   key: ne("agent-run"),
+   runId: $(),
+@@ -22471,11 +22474,11 @@ function SN(e, t) {
+     return `/hm/agents/server?url=${encodeURIComponent(e.serverUrl)}`;
+   if (typeof e != "string" && e.key === "agent") {
+     const s = [];
+-    return e.serverUrl && s.push(`server=${encodeURIComponent(e.serverUrl)}`), e.tab && s.push(`tab=${e.tab}`), e.triggerId && s.push(`trigger=${encodeURIComponent(e.triggerId)}`), e.memoryPath && s.push(`file=${encodeURIComponent(e.memoryPath)}`), `/hm/agents/agent/${encodeURIComponent(e.agentId)}${s.length ? `?${s.join("&")}` : ""}`;
++    return e.serverUrl && s.push(`server=${encodeURIComponent(e.serverUrl)}`), e.tab && s.push(`tab=${e.tab}`), e.triggerId && s.push(`trigger=${encodeURIComponent(e.triggerId)}`), e.memoryPath && s.push(`file=${encodeURIComponent(e.memoryPath)}`), (!e.tab || e.tab === "sessions") && e.sessionPages > 1 && e.sessionPages <= 100 && s.push(`pages=${e.sessionPages}`), `/hm/agents/agent/${encodeURIComponent(e.agentId)}${s.length ? `?${s.join("&")}` : ""}`;
+   }
+   if (typeof e != "string" && e.key === "agent-session") {
+     const s = [];
+-    return e.serverUrl && s.push(`server=${encodeURIComponent(e.serverUrl)}`), e.agentId && s.push(`agent=${encodeURIComponent(e.agentId)}`), `/hm/agents/session/${encodeURIComponent(e.sessionId)}${s.length ? `?${s.join("&")}` : ""}`;
++    return e.serverUrl && s.push(`server=${encodeURIComponent(e.serverUrl)}`), e.agentId && s.push(`agent=${encodeURIComponent(e.agentId)}`), e.panel && s.push(`panel=${e.panel}`), e.eventId && s.push(`event=${encodeURIComponent(e.eventId)}`), `/hm/agents/session/${encodeURIComponent(e.sessionId)}${s.length ? `?${s.join("&")}` : ""}`;
+   }
+   if (typeof e != "string" && e.key === "agent-run") {
+     const s = [];
+@@ -22723,14 +22726,17 @@ function Bq(e, t) {
+       serverUrl: t.get("server") || void 0,
+       tab: s,
+       triggerId: t.get("trigger") || void 0,
+-      memoryPath: t.get("file") || void 0
++      memoryPath: t.get("file") || void 0,
++      sessionPages: (!s || s === "sessions") && /^(?:[2-9]|[1-9][0-9]|100)$/.test(t.get("pages") || "") ? Number(t.get("pages")) : void 0
+     };
+   }
+   return r[0] === "session" && r[1] ? {
+     key: "agent-session",
+     sessionId: r[1],
+     serverUrl: t.get("server") || void 0,
+-    agentId: t.get("agent") || void 0
++    agentId: t.get("agent") || void 0,
++    panel: t.get("panel") === "prompt" ? "prompt" : t.get("panel") === "message" && t.get("event") ? "message" : void 0,
++    eventId: t.get("event") || void 0
+   } : r[0] === "run" && r[1] ? {
+     key: "agent-run",
+     runId: r[1],
+@@ -69610,13 +69616,15 @@ function fDe(e) {
+   const n = e.match(/<trigger_instructions>\n?([\s\S]*?)\n?<\/trigger_instructions>/)?.[1]?.trim();
+   return n || void 0;
+ }
+-function _P(e, t, n) {
++function _P(e, t, n, routeUrl) {
++  if (routeUrl) return routeUrl({ key: "agent-session", serverUrl: e, agentId: t, sessionId: n });
+   if (t)
+     return `${e.replace(/\/+$/, "")}/agents/${encodeURIComponent(t)}/sessions/${encodeURIComponent(
+       n
+     )}`;
+ }
+-function xv(e, t, n, r) {
++function xv(e, t, n, r, routeUrl) {
++  if (routeUrl) return routeUrl({ key: "agent-session", serverUrl: e, agentId: t, sessionId: n, eventId: r });
+   const i = _P(e, t, n);
+   return i ? `${i}#event=${encodeURIComponent(r)}` : void 0;
+ }
+@@ -69696,7 +69704,7 @@ function sQ(e, t) {
+           eventId: u.id,
+           sessionId: u.sessionId,
+           seq: u.seq,
+-          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id)
++          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id, t.routeUrl)
+         }
+       });
+       continue;
+@@ -69723,7 +69731,7 @@ function sQ(e, t) {
+           eventId: u.id,
+           sessionId: u.sessionId,
+           seq: u.seq,
+-          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id)
++          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id, t.routeUrl)
+         }
+       };
+       n.push(x), r.set(y.id, x);
+@@ -69760,7 +69768,7 @@ function sQ(e, t) {
+             eventId: u.id,
+             sessionId: u.sessionId,
+             seq: u.seq,
+-            shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id)
++            shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id, t.routeUrl)
+           }
+         };
+         n.push(w), r.set(y.toolCallId, w);
+@@ -69794,7 +69802,7 @@ function sQ(e, t) {
+           eventId: u.id,
+           sessionId: u.sessionId,
+           seq: u.seq,
+-          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id)
++          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id, t.routeUrl)
+         }
+       });
+       continue;
+@@ -71178,8 +71186,17 @@ async function wQ(e, t, n) {
+   if (r._ !== "GetAgentResponse") throw new Error("Unexpected GetAgent response");
+   return Gt().setQueryData(["agents", "detail", e, t, n], r), r;
+ }
++// Optional host observation of the query already displayed by this provider.
++// No new reads, signing, transport interception or browser history are involved.
++function useSeedDisplayedRead(outcome, query) {
++  const host = T8e();
++  xe(() => {
++    if (!outcome.serverUrl || !outcome.accountUid || !["success", "error"].includes(query.status)) return;
++    host.onReadOutcome?.({ ...outcome, error: query.status === "error" ? query.error : undefined });
++  }, [host, outcome.kind, outcome.serverUrl, outcome.accountUid, outcome.agentId, outcome.sessionId, outcome.runId, outcome.triggerId, outcome.name, query.status, query.error, query.dataUpdatedAt, query.errorUpdatedAt]);
++}
+ function zP(e, t, n) {
+-  return qt({
++  const query = qt({
+     queryKey: ["agents", "detail", e, t, n],
+     queryFn: async () => {
+       if (!e || !t || !n) return null;
+@@ -71188,12 +71205,15 @@ function zP(e, t, n) {
+       return r;
+     },
+     enabled: !!e && !!t && !!n,
++    refetchOnWindowFocus: "always",
+     retry: !1,
+     useErrorBoundary: !1,
+     // Any invalidation that landed while the page was away (a WebSocket gap) must be honored when
+     // it comes back, even on the web client, whose defaults never refetch on mount.
+-    refetchOnMount: !0
++    refetchOnMount: "always"
+   });
++  useSeedDisplayedRead({ kind: "agent", serverUrl: e, accountUid: t, agentId: n, name: query.data?.agent.definition.name }, query);
++  return query;
+ }
+ function xQ(e, t, n, { excludeTriggered: r = !1 } = {}) {
+   return Ele({
+@@ -71240,7 +71260,7 @@ function kQ(e, t, n) {
+   });
+ }
+ function tMe(e, t, n) {
+-  return qt({
++  const query = qt({
+     queryKey: ["agents", "trigger", e, t, n],
+     queryFn: async () => {
+       if (!e || !t || !n) return null;
+@@ -71249,9 +71269,13 @@ function tMe(e, t, n) {
+       return r;
+     },
+     enabled: !!e && !!t && !!n,
++    refetchOnMount: "always",
++    refetchOnWindowFocus: "always",
+     retry: !1,
+     useErrorBoundary: !1
+   });
++  useSeedDisplayedRead({ kind: "trigger", serverUrl: e, accountUid: t, triggerId: n, name: query.data?.trigger.name }, query);
++  return query;
+ }
+ function nMe(e, t, n, r) {
+   return Pr({
+@@ -71268,6 +71292,8 @@ function nMe(e, t, n, r) {
+         return s;
+       },
+       enabled: !!e && !!t && !!n,
++      refetchOnMount: "always",
++      refetchOnWindowFocus: "always",
+       retry: !1,
+       useErrorBoundary: !1
+     }))
+@@ -71426,7 +71452,8 @@ function lMe(e, t) {
    });
  }
  function SQ(e, t, n, r) {
@@ -15,7 +186,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..0edf8e8b5b17d573180a258ac6cd7d65
      queryKey: ["agents", "memory", e, t, n, "file", r],
      queryFn: async () => {
        if (!e || !t || !n || !r) return null;
-@@ -71442,6 +71443,14 @@ function SQ(e, t, n, r) {
+@@ -71442,6 +71469,14 @@ function SQ(e, t, n, r) {
      retry: !1,
      useErrorBoundary: !1
    });
@@ -30,23 +201,256 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..0edf8e8b5b17d573180a258ac6cd7d65
  }
  function cMe(e, t) {
    return ft({
+@@ -71649,7 +71684,7 @@ function yMe(e, t) {
+   });
+ }
+ function Rg(e, t, n) {
+-  return qt({
++  const query = qt({
+     queryKey: ["agents", "session", e, t, n],
+     queryFn: async () => {
+       if (!e || !t || !n) return null;
+@@ -71658,9 +71693,13 @@ function Rg(e, t, n) {
+       return r;
+     },
+     enabled: !!e && !!t && !!n,
++    refetchOnMount: "always",
++    refetchOnWindowFocus: "always",
+     retry: !1,
+     useErrorBoundary: !1
+   });
++  useSeedDisplayedRead({ kind: "session", serverUrl: e, accountUid: t, sessionId: n, name: query.data?.session.title }, query);
++  return query;
+ }
+ function vMe(e, t, n, r, i) {
+   return qt({
+@@ -71775,7 +71814,7 @@ function bMe(e, t, n, r) {
+   });
+ }
+ function Dy(e, t, n) {
+-  return qt({
++  const query = qt({
+     queryKey: ["agents", "runs", "run", e, t, n],
+     queryFn: async () => {
+       if (!e || !t || !n) return null;
+@@ -71787,9 +71826,13 @@ function Dy(e, t, n) {
+     // Run changes stream over the WebSocket; this slow poll is only a safety net while the run is
+     // live, in case an event is dropped. A finished run never changes again, so it stops entirely.
+     refetchInterval: (r) => r && IQ.includes(r.status) ? !1 : cQ,
++    refetchOnMount: "always",
++    refetchOnWindowFocus: "always",
+     retry: !1,
+     useErrorBoundary: !1
+   });
++  useSeedDisplayedRead({ kind: "run", serverUrl: e, accountUid: t, runId: n, name: query.data?.title }, query);
++  return query;
+ }
+ const IQ = ["succeeded", "failed", "canceled"];
+ function K0(e, t, n) {
+@@ -75114,7 +75157,14 @@ const uK = pe.memo(function({
+   accountUid: s,
+   agentId: o
+ }) {
+-  const [a, l] = ee(!1), c = t.actor === "system", d = !c && t.role === "user", u = t.rawMarkdown ?? t.content, h = BBe(i, t), m = jr(), p = Ce(
++  const selectedRoute = Xye(), navigateSelected = N8e();
++  const [localOpen, setLocalOpen] = ee(!1);
++  const navigationOwned = selectedRoute.key === "agent-session" && selectedRoute.sessionId === t.sessionId;
++  const a = navigationOwned ? selectedRoute.panel === "message" && selectedRoute.eventId === t.eventId : localOpen;
++  const l = open => navigationOwned
++    ? navigateSelected({ ...selectedRoute, panel: open ? "message" : void 0, eventId: open ? t.eventId : selectedRoute.eventId })
++    : setLocalOpen(open);
++  const c = t.actor === "system", d = !c && t.role === "user", u = t.rawMarkdown ?? t.content, h = BBe(i, t), m = jr(), p = Ce(
+     () => ({ serverUrl: i, accountUid: s ?? m, agentId: o, sessionId: t.sessionId }),
+     [i, s, m, o, t.sessionId]
+   );
+@@ -85436,6 +85486,14 @@ function z5e({
+     G ? void 0 : k ?? void 0
+   ), ye = m?.data?.totals, Ne = Ot(J5e), de = Ot(V5e), ce = ge(null), ae = ge(null), Pe = ge({ tree: l?.treeScrollTop ?? 0, file: l?.fileScrollTop ?? 0 }), He = ge(null), q = ge({ selectedPath: k, expandedDirs: c });
+   q.current = { selectedPath: k, expandedDirs: c };
++  const memoryHost = T8e(), selectedDirectory = h[u.indexOf(B5(r || ""))];
++  const selectedFileExists = selectedDirectory?.data?.entries.some(entry => entry.type === "file" && entry.path === r);
++  xe(() => {
++    if (!r || !selectedDirectory || !["success", "error"].includes(selectedDirectory.status)) return;
++    memoryHost.onReadOutcome?.({ kind: "memory-selection", serverUrl: e, accountUid: t, agentId: n, path: r,
++      error: selectedDirectory.isError ? selectedDirectory.error : selectedFileExists ? undefined : { status: 404, missingEntry: true }
++    });
++  }, [memoryHost, e, t, n, r, selectedDirectory?.status, selectedDirectory?.error, selectedDirectory?.dataUpdatedAt, selectedFileExists]);
+   function N() {
+     U5e(e, n, {
+       selectedPath: q.current.selectedPath,
+@@ -86747,11 +86805,23 @@ function a$e({
+   triggerId: r,
+   memoryPath: i
+ }) {
++  const selectedAgentRoute = Xye(), displayedAgentHost = T8e(), requestedPages = selectedAgentRoute.sessionPages || 1;
+   const s = jr(), o = nn(), a = nn("replace"), l = Sd(), c = Ry(), d = Qi(), u = t || c.data || ci() || "", h = bo(u), m = zP(u, s, e), p = xQ(u, s, e), g = Ce(
+-    () => p.data?.pages.flatMap((Se) => Se.sessions) ?? [],
+-    [p.data]
++    () => p.data?.pages.slice(0, requestedPages).flatMap((Se) => Se.sessions) ?? [],
++    [p.data, requestedPages]
+   ), y = m.data?.sessionCount ?? g.length, v = kQ(u, s, e), x = EQ(u, s), w = qP(u, s), I = Ot(f$e, { isAlert: !0 }), k = Ot(s$e), S = $P(u, s, e), E = UP(u, s), C = Ot(w$e), D = Ot(lBe), T = Aa(u, s, e), O = VDe(u, s, e), M = mQ(u, s), U = Ot(By);
+   Zu(u, s, `agents/${e}`);
++  xe(() => {
++    if (n !== "sessions" || !p.data || p.isFetching || p.isError) return;
++    if (p.data.pages.length < requestedPages) {
++      if (p.hasNextPage) p.fetchNextPage();
++      else a({ ...selectedAgentRoute, sessionPages: p.data.pages.length > 1 ? p.data.pages.length : void 0 });
++    }
++  }, [n, requestedPages, p.data, p.isFetching, p.isError, p.hasNextPage]);
++  xe(() => {
++    if (n !== "sessions" || !["success", "error"].includes(p.status)) return;
++    displayedAgentHost.onReadOutcome?.({ kind: "session-list", serverUrl: u, accountUid: s, agentId: e, path: String(requestedPages), error: p.isError ? p.error : undefined });
++  }, [displayedAgentHost, n, u, s, e, requestedPages, p.status, p.error, p.dataUpdatedAt, p.errorUpdatedAt]);
+   const F = m.data?.agent.accessRole ?? "owner", B = tx(F), z = Ly(F), Y = F === "owner", [J, Q] = ee(""), [R, X] = ee(""), [re, L] = ee(""), [ie, ue] = ee(void 0), [le, G] = ee(void 0), [te, ye] = ee([]), Ne = FP(u, s, R, e), de = T.data?.find((Se) => Se.name === R)?.type, [ce, ae] = ee([]), [Pe, He] = ee(0), [q, N] = ee(!1), [_, H] = ee(!1), [V, se] = ee("idle"), [Z, De] = ee("idle"), rt = ge(0), ut = ge(0), oe = ge(null), be = ge(null), We = ge(null);
+   xe(() => {
+     n !== "sessions" || !u || _K(u, e, null);
+@@ -86947,7 +87017,8 @@ function a$e({
+             U.content,
+             D.content,
+             n === "sessions" ? /* @__PURE__ */ f("section", { className: "flex min-h-0 flex-1 flex-col", children: /* @__PURE__ */ A("div", { className: "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1", children: [
+-              !g.length && !p.isLoading ? /* @__PURE__ */ f(W, { color: "muted", children: "No sessions yet." }) : null,
++              p.isError ? /* @__PURE__ */ f(pW, { error: p.error, failed: "Couldn’t load sessions", onRetry: () => p.data && p.data.pages.length < requestedPages && p.hasNextPage ? p.fetchNextPage() : p.refetch(), retryPending: p.isFetching }) : null,
++              !g.length && !p.isLoading && !p.isError ? /* @__PURE__ */ f(W, { color: "muted", children: "No sessions yet." }) : null,
+               g.map((Se) => /* @__PURE__ */ f(
+                 jK,
+                 {
+@@ -86969,14 +87040,14 @@ function a$e({
+                 },
+                 Se.id
+               )),
+-              p.hasNextPage ? /* @__PURE__ */ f(
++              (p.hasNextPage || p.data?.pages.length > requestedPages) && requestedPages < 100 ? /* @__PURE__ */ f(
+                 fe,
+                 {
+                   className: "w-full",
+                   variant: "outline",
+                   disabled: p.isFetchingNextPage,
+                   onClick: () => {
+-                    p.fetchNextPage();
++                    o({ ...selectedAgentRoute, sessionPages: requestedPages + 1 });
+                   },
+                   children: p.isFetchingNextPage ? "Loading…" : "Load more"
+                 }
+@@ -89330,9 +89401,11 @@ function j$e({
+   routeServerUrl: t,
+   routeAgentId: n
+ }) {
+-  const r = jr(), i = nn(), s = Ry(), o = t || s.data || ci() || "", a = Rg(o, r, e), l = n || a.data?.session.agentId, c = zP(o, r, l), d = kQ(o, r, l), u = VP(o, r), h = PQ(o, r), m = KP(o, r), p = Ot(Q$e, { isAlert: !0 }), g = Ot(V$e, {
+-    className: "w-[min(44rem,calc(100vw-2rem))] max-h-[85vh]"
+-  }), y = a.data?.events.filter((Z) => Z.seq !== Number.MAX_SAFE_INTEGER).at(-1)?.seq;
++  const selectedRoute = Xye(), displayedHost = T8e();
++  const r = jr(), i = nn(), s = Ry(), o = t || s.data || ci() || "", a = Rg(o, r, e), l = n || a.data?.session.agentId, c = zP(o, r, l), d = kQ(o, r, l), u = VP(o, r), h = PQ(o, r), m = KP(o, r), p = Ot(Q$e, { isAlert: !0 }), g = {
++    open: () => i({ ...selectedRoute, panel: "prompt" }),
++    content: /* @__PURE__ */ f(ya, { open: selectedRoute.panel === "prompt", onOpenChange: open => { if (!open && selectedRoute.panel === "prompt") i({ ...selectedRoute, panel: void 0 }); }, children: /* @__PURE__ */ f(va, { className: "w-[min(44rem,calc(100vw-2rem))] max-h-[85vh]", children: /* @__PURE__ */ f(V$e, { input: { prompt: a.data?.systemPromptMarkdown || "", updatedAt: a.data?.session.updatedAt } }) }) })
++  }, y = a.data?.events.filter((Z) => Z.seq !== Number.MAX_SAFE_INTEGER).at(-1)?.seq;
+   UQ(o, e, qQ(a.data?.events));
+   const v = Zu(
+     o,
+@@ -89353,6 +89426,7 @@ function j$e({
+           agentId: l,
+           sessionId: e,
+           triggerContext: a.data?.triggerContext ?? null,
++          routeUrl: displayedHost.routeUrl,
+           runs: O.data
+         }),
+         O.data || [],
+@@ -89367,6 +89441,7 @@ function j$e({
+       a.data?.events,
+       a.data?.session.plan,
+       a.data?.triggerContext,
++      displayedHost.routeUrl,
+       e,
+       O.data
+     ]
+@@ -89416,9 +89491,14 @@ function j$e({
+   }, [D, T, w]), xe(() => {
+     E.resetToBottom();
+   }, [e]), xe(() => {
+-    const Z = hDe(window.location.hash);
+-    !Z || !M.some((De) => De.key === Z) || requestAnimationFrame(() => document.getElementById(`event-${Z}`)?.scrollIntoView({ block: "center" }));
+-  }, [M]);
++    const Z = selectedRoute.eventId;
++    if (!Z || !a.data) return;
++    const found = M.some(De => De.key === Z);
++    displayedHost.onReadOutcome?.({ kind: "session-event", serverUrl: o, accountUid: r, sessionId: e, path: Z, error: found ? undefined : { status: 404 } });
++    if (!found) return;
++    const frame = requestAnimationFrame(() => document.getElementById(`event-${Z}`)?.scrollIntoView({ block: "center" }));
++    return () => cancelAnimationFrame(frame);
++  }, [M, selectedRoute.eventId, displayedHost, o, r, e]);
+   function N() {
+     if (!a.data) return;
+     const Z = a.data.session;
+@@ -89537,7 +89617,7 @@ function j$e({
+                   label: "Copy session URL",
+                   disabled: !l,
+                   onClick: () => {
+-                    const Z = _P(o, l, e);
++                    const Z = _P(o, l, e, displayedHost.routeUrl);
+                     Z && (navigator.clipboard?.writeText(Z), we.success("Session URL copied"));
+                   }
+                 },
+@@ -89596,12 +89676,14 @@ function j$e({
+             onScroll: E.handleScroll,
+             className: "min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-1",
+             children: /* @__PURE__ */ A("div", { ref: E.contentRef, className: "flex min-h-full flex-col gap-3 pt-4", children: [
++              selectedRoute.eventId && !M.some(row => row.key === selectedRoute.eventId) ? /* @__PURE__ */ f(W, { role: "alert", children: "Selected message is not in this transcript." }) : null,
+               M.length ? null : /* @__PURE__ */ f(W, { color: "muted", children: "No messages yet." }),
+               M.map((Z) => /* @__PURE__ */ f(
+                 "div",
+                 {
+                   id: `event-${Z.key}`,
+-                  className: "target:ring-primary/40 scroll-mt-24 rounded-lg target:ring-2",
++                  className: "target:ring-primary/40 scroll-mt-24 rounded-lg target:ring-2" + (selectedRoute.eventId === Z.key ? " ring-primary/40 ring-2" : ""),
++                  "data-selected-event": selectedRoute.eventId === Z.key ? Z.key : void 0,
+                   children: /* @__PURE__ */ f(
+                     G$e,
+                     {
 diff --git a/host.d.ts b/host.d.ts
-index ee1c082fffbe395f63ddcf81630997454cf7804d..816e69905d5cf29d173a777b74346b3e5997caff 100644
+index ee1c082fffbe395f63ddcf81630997454cf7804d..66b0ab205775212bad362bfb2e72b8981ad3b205 100644
 --- a/host.d.ts
 +++ b/host.d.ts
-@@ -96,6 +96,15 @@ export type SeedAgentsNavigationMode = 'push' | 'replace' | 'spawn';
+@@ -96,6 +96,21 @@ export type SeedAgentsNavigationMode = 'push' | 'replace' | 'spawn';
   * for account names, avatars and hm:// links.
   */
  export type SeedAgentsHost = {
-+    /** Reports the selected memory query's displayed outcome, without issuing a second read. */
++    /** Canonical share links supplied by the embedding application. */
++    routeUrl?: (route: import('./routes').SeedAgentsRoute) => string;
++    /** Observes displayed reads only; does not issue another request. */
 +    onReadOutcome?: (outcome: {
-+        kind: 'memory-file';
 +        serverUrl: string;
 +        accountUid: string;
-+        agentId: string;
-+        path: string;
++        name?: string;
 +        error?: unknown;
-+    }) => void;
++    } & ({ kind: 'memory-file' | 'memory-selection'; agentId: string; path: string }
++        | { kind: 'agent'; agentId: string }
++        | { kind: 'session-list'; agentId: string; path: string }
++        | { kind: 'session'; sessionId: string }
++        | { kind: 'run'; runId: string }
++        | { kind: 'trigger'; triggerId: string }
++        | { kind: 'session-event'; sessionId: string; path: string })) => void;
      /**
       * Base URL of the agents server, as the browser can reach it. A canonical base ends in
       * `/hm/api/agents` (a site serving agents on its own origin, or `https://agentic.seed.hyper.media/hm/api/agents`)
+diff --git a/routes.d.ts b/routes.d.ts
+index aa408f2f19a1f10e10e4f10ae0decf6cfd147015..eff60c6fbe22c83805090c27627f6b6bc2502ea6 100644
+--- a/routes.d.ts
++++ b/routes.d.ts
+@@ -20,6 +20,8 @@ export type SeedAgentsRoute =
+     triggerId?: string;
+     /** Memory tab: the file to open. */
+     memoryPath?: string;
++    /** Number of session-list pages displayed (default one, maximum 100). */
++    sessionPages?: number;
+ }
+ /** One session (a conversation). */
+  | {
+@@ -27,6 +29,9 @@ export type SeedAgentsRoute =
+     sessionId: string;
+     serverUrl?: string;
+     agentId?: string;
++    /** Navigable transcript content; no actions are replayed. */
++    panel?: 'prompt' | 'message';
++    eventId?: string;
+ }
+ /** One durable run (a script or delegated model run). */
+  | {

@@ -609,3 +609,47 @@ retry cases, remote-seat fresh-browser availability, and the native/attachment/
 original-viewer boundaries documented above. Starlight rollout status and exact
 rollback locations are in the current Deck report. App-wide acceptance remains
 incomplete; the routine stays enabled.
+
+
+## 2026-11-07: Seed displayed reads and transcript content
+
+Seed titles now follow the queries already displayed by the published UI: agents,
+sessions, runs, triggers, session lists and memory directory/content outcomes.
+Cyberdeck no longer sends separate title-only metadata requests. This also names
+URL-supplied external-server content without adding signatures or changing the
+existing signing/proxy boundary. Failed reads win over stale successful metadata;
+callback ownership includes the signing host/account, server and entity.
+
+The pinned optional host API remains a Bun patch on agents-ui 0.1.11. `routeUrl`
+supplies canonical Cyberdeck session/message share links with the node retained.
+`onReadOutcome` reports existing rendered queries; it performs no transport work.
+Keep the patch through upgrades until upstream provides these APIs.
+
+Nested session routes accept `panel=prompt` for the current system prompt and
+`event=<message-id>[&panel=message]` for a selected message or its details dialog.
+Back/Forward, refresh and a fresh tab restore these views. The Sessions host
+uses the same `panel`/`event` state on `#/term?session=seed-<id>` and retains its
+transcript owner. An absent message keeps
+its link and shows an honest missing-content state/title. Transcript queries,
+composer and streaming subscriptions remain mounted during these route changes;
+opening a panel does not re-read a transcript, send a message or create a session.
+
+Agent session lists use `pages=<2..100>` for the number of loaded pages. Back
+collapses cached results, Forward restores them, and fresh links load the necessary
+cursor pages in order. Invalid/default counts are removed with replace; exhausted
+counts replace with the actual last page. Failed pages retain earlier results and
+retry in place. Delayed pages cannot rename a later entity, node or primary view.
+
+Repeat: `bun run typecheck`, `bun run build`, then
+`bun test tests/seed-titles-browser.test.ts tests/seed-navigation.test.ts --timeout 30000`.
+The production bundle and actual pinned dependency are driven in Chromium with
+synthetic signed read responses. `CYBERDECK_TEST_UI=<exact dist/ui>` selects a
+captured compiler tree; `CYBERDECK_TEST_ORIGIN=<loopback tunnel>` loads installed
+assets while all API and signing responses remain fixtures.
+
+Remaining acceptance: other Seed list/search/disclosure and attachment detail
+states, full-transcript history outside the package's returned event window,
+Commander deep malformed-payload/match/decision retry and remote-seat cases,
+native devices/attachments and original-PDF viewer controls. These are separate
+from today's completed Seed slice. The current Deck report records fleet receipts,
+rollback paths and any pending hosts; do not infer app-wide completion here.

@@ -1,4 +1,5 @@
 import { lazy, Suspense } from "react";
+import type { SeedAgentsRoute } from "@seed-hypermedia/agents-ui";
 import { updateParams, useRouteTitle, routeHash } from "../lib/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
@@ -96,17 +97,32 @@ function TermPane({ session, onStatus, onRemove }: { session: LiveSession; onSta
   );
 }
 /** A Seed session in Seed's UI: tool calls, runs, plan, sub-sessions, model and stop/retry. */
-function NativeSeedSession({ id, node }: { id: string; node: string }) {
+function NativeSeedSession({ id, node, params }: { id: string; node: string; params: URLSearchParams }) {
   const sessionId = id.replace(/^seed-/, "");
+  const eventId = params.get("event") || undefined;
+  const filter = params.get("filter") || undefined;
+  const routeUrl = useMemo(() => (next: SeedAgentsRoute) => next.key === "agent-session" && next.sessionId === sessionId
+    ? new URL(routeHash("term", { session: id, ...(node ? { node } : {}), ...(filter ? { filter } : {}), ...(next.panel ? { panel: next.panel } : {}), ...(next.eventId ? { event: next.eventId } : {}) }), location.href).href
+    : undefined, [id, sessionId, node, filter]);
+  const selectedPanel = params.get("panel");
+  const panel = selectedPanel === "prompt" ? "prompt" : selectedPanel === "message" && eventId ? "message" : undefined;
+  useEffect(() => {
+    if (params.has("panel") && selectedPanel !== panel) updateParams({ panel: panel || null }, "replace");
+    if (params.has("event") && !eventId) updateParams({ event: null }, "replace");
+  }, [selectedPanel, panel, eventId]);
   return (
     <Suspense fallback={<div className="p-6 text-xs text-zinc-500">Loading Seed agents…</div>}>
       <SeedAgentsEmbed
         node={node}
         title={`${sessionId} · Seed session`}
-        route={{ key: "agent-session", sessionId }}
+        route={{ key: "agent-session", sessionId, panel, eventId }}
+        routeUrl={routeUrl}
         onRouteChange={(next, mode, path) => {
           // Stay in Sessions for this session; anything else (the agent, a run, another session) opens the Seed view on the same machine.
-          if (next.key === "agent-session" && next.sessionId === sessionId) return;
+          if (next.key === "agent-session" && next.sessionId === sessionId) {
+            updateParams({ panel: next.panel || null, event: next.eventId || null }, mode);
+            return;
+          }
           navigate("seed", { r: path, node: node || undefined }, mode);
         }}
       />
@@ -296,7 +312,7 @@ export function Term({ params, onLocked, drafts }: { params: URLSearchParams; on
         </div>
       )}
       {/* Seed's view needs only the id, so it opens before the session list catches up. */}
-      {seedSelected && <NativeSeedSession key={`${activeNode}:${active}`} id={active} node={activeNode} />}
+      {seedSelected && <NativeSeedSession key={`${activeNode}:${active}`} id={active} node={activeNode} params={params} />}
       {!adding && current && current.tool !== "seed" && (
         <TermPane key={currentKey} session={current} onStatus={(s) => setStatuses((m) => (m[currentKey] === s ? m : { ...m, [currentKey]: s }))} onRemove={() => close(current)} />
       )}
