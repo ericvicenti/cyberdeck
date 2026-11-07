@@ -24,7 +24,9 @@ import { withPeerLiveness, type PeerSeen } from "../../shared/liveness";
 import { runScan, isScanRunning } from "../indexer/scan";
 import { resolveService, serviceLogs, restartService, restartBudget, type ManifestHost, type ServiceTarget } from "../servicectl";
 import { matchRepo, repoDetail, type RepoDetail } from "../repodetail";
-import { registerNodeTools } from "./mcp-node";
+import { registerNodeTools, resolveShellHost, runShell } from "./mcp-node";
+import { diskInfo, type DiskInfo } from "./dashboard";
+import { disksSentence, nearlyFull, remoteDisks, sizeWords, FULL_PERCENT, LOW_FREE_BYTES, REMOTE_DF, type HostDisks } from "../disks";
 import { listDocuments, readDocument, ago as publishedAgo } from "./documents";
 import type { Kiosk } from "./kiosk";
 import { MEDIA_ACTIONS, mediaSentence, type MediaState } from "../screenmedia";
@@ -46,7 +48,7 @@ the running handoff (TODO) that every coding agent (cc = Claude Code, cx = Codex
 cross-host index of those agents' sessions, and the collab queue through which a task is handed to cc
 or cx on a given host and reviewed by the other.
 
-Start with \`status\` (this node and its peers) or \`fleet_status\` (every host, online or not). Use
+Start with \`status\` (this node and its peers) or \`fleet_status\` (every host, online or not); \`disks\` says how full every machine's disks are. Use
 \`todo\` and \`handoff\` to learn what is in flight before proposing work. Use \`repos\` to find
 uncommitted or unpushed work and \`repos_detail\` to look inside one repo (it starts with a \`brief\` sentence
 you can say as-is). \`sessions_search\` finds a past cc/cx session and tells the owner how to resume it. Queue work for a laptop agent with \`collab_add\`, start it with
@@ -184,6 +186,53 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
         `; ${plural(st.handoffOpen ?? 0, "handoff entry", "handoff entries")} open.` +
         (viaCyberdeck.length ? ` (${listOf(viaCyberdeck)} ${viaCyberdeck.length === 1 ? "is" : "are"} off the tailnet but answered Cyberdeck.)` : "");
       return spoken(sentence, { ...st, hosts }, brief, { hostsOnline: up.length, hostsTotal: hosts.length, offline: down, handoffOpen: st.handoffOpen ?? 0 });
+    }
+  );
+
+  server.tool(
+    "disks",
+    `How full every machine's disks are: this node's volumes, each paired Cyberdeck node's, and a read-only \`df\` over ssh for manifest hosts without a node (servers such as agentic). A disk is nearly full at ${FULL_PERCENT}% or under ${sizeWords(LOW_FREE_BYTES)} free; the answer names those first, then the fullest of the rest. A full disk has taken fleet machines down before, so mention one when you see it.`,
+    {
+      host: z.string().max(64).optional().describe("Only this host (a node or manifest host name); default the whole fleet"),
+      brief: BRIEF,
+    },
+    async ({ host, brief }) => {
+      const want = host?.toLowerCase();
+      const pick = (name: string) => !want || name.toLowerCase() === want;
+      const me = cfg.nodeName;
+      const jobs: Promise<HostDisks>[] = [];
+      if (pick(me)) jobs.push(diskInfo(cfg).then((disks) => ({ host: me, via: "self" as const, disks })));
+      const paired = peers();
+      for (const n of paired.filter((n) => pick(n.name))) {
+        jobs.push((async (): Promise<HostDisks> => {
+          const signal = () => AbortSignal.timeout(n.probe_device ? 15_000 : 8_000);
+          try {
+            let res = await peerFetch(n, "/api/disks", { signal: signal() });
+            // a peer that has not updated yet only has the whole dashboard
+            if (res.status === 404) res = await peerFetch(n, "/api/dashboard", { signal: signal() });
+            if (!res.ok) return { host: n.name, via: "cyberdeck", disks: [], error: `HTTP ${res.status}` };
+            return { host: n.name, via: "cyberdeck", disks: ((await res.json()) as { disks?: DiskInfo[] }).disks ?? [] };
+          } catch (err) {
+            return { host: n.name, via: "cyberdeck", disks: [], error: err instanceof Error ? err.message : String(err) };
+          }
+        })());
+      }
+      // hosts with no Cyberdeck node of their own: a fixed, read-only df over the manifest's ssh alias
+      const covered = new Set([me, ...paired.map((n) => n.name)].map((s) => s.toLowerCase()));
+      const manifest = control.fleetDir() ? await control.cached<ManifestHost[]>("hosts", ["hosts", "--json"], []) : [];
+      for (const h of manifest.filter((h) => h.ssh && !covered.has(h.name.toLowerCase()) && pick(h.name))) {
+        jobs.push((async (): Promise<HostDisks> => {
+          const t = resolveShellHost(manifest, me, h.name);
+          if ("error" in t) return { host: h.name, via: "ssh", disks: [], error: t.error };
+          const r = await runShell(t, REMOTE_DF, "~", 15);
+          if (r.timedOut || r.code !== 0) return { host: h.name, via: "ssh", disks: [], error: r.timedOut ? "no answer over ssh in 15 s" : lastLine(r.stderr) || `exit ${r.code}` };
+          return { host: h.name, via: "ssh", disks: remoteDisks(r.stdout) };
+        })());
+      }
+      if (want && !jobs.length) return fail(`No node or manifest host named "${host}" with a way to read its disks (it needs a paired Cyberdeck node or an ssh alias).`);
+      const hosts = await Promise.all(jobs);
+      const full = hosts.flatMap((h) => h.disks.filter(nearlyFull).map((d) => `${h.host} ${d.mount}`));
+      return spoken(disksSentence(hosts), { hosts }, brief, { disks: hosts.reduce((n, h) => n + h.disks.length, 0), nearlyFull: full, unreachable: hosts.filter((h) => h.error).map((h) => h.host) });
     }
   );
 

@@ -1,5 +1,6 @@
 // Home dashboard: everything the widgets on the home page need in one call.
 //   GET /api/dashboard  -> { at, usage: {claude, codex}, disks, system, activity, redundancy, backup }
+//   GET /api/disks      -> { at, disks } (just this node's volumes; the `disks` MCP tool reads it from every peer)
 //   GET  /api/usage/codex/resets -> the Codex rate-limit reset credits (with expiry)
 //   POST /api/usage/codex/reset  -> spend one, through the official `codex app-server`
 //
@@ -330,7 +331,7 @@ export function parseDf(output: string): Omit<DiskInfo, "paths">[] {
   return rows;
 }
 
-async function diskInfo(cfg: CyberdeckConfig): Promise<DiskInfo[]> {
+export async function diskInfo(cfg: CyberdeckConfig): Promise<DiskInfo[]> {
   const paths = ["/", CYBERDECK_HOME, ...cfg.roots, ...(cfg.dataRoots ?? [])].filter((p, i, a) => existsSync(p) && a.indexOf(p) === i);
   const rows: DiskInfo[] = [];
   for (const path of paths) {
@@ -462,6 +463,8 @@ export function registerDashboardRoutes(app: Hono, db: Database, cfg: CyberdeckC
     cache.set(tool, { at: Date.now(), value });
     return value;
   };
+
+  app.get("/api/disks", async (c) => c.json({ at: Date.now(), disks: await diskInfo(cfg) }));
 
   app.get("/api/dashboard", async (c) => {
     const fresh = Boolean(c.req.query("fresh"));

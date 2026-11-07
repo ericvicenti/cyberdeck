@@ -8,6 +8,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { homedir } from "os";
 import { startTestServer, testConfig, TEST_TOKEN, type TestServer } from "./helpers";
 import { expandPath } from "../src/daemon/api/mcp-node";
+import { disksSentence, remoteDisks } from "../src/daemon/disks";
 
 const FLEET_STUB = join(import.meta.dir, "fixtures", "fleet");
 const SCRATCH = mkdtempSync(join(tmpdir(), "cd-servicectl-"));
@@ -144,7 +145,7 @@ describe("mcp tools", () => {
     const client = await connect(srv.base);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["announce", "collab_add", "collab_run", "collab_tasks", "deck_context", "delegate", "delegate_result", "documents", "edit_file", "fleet_status", "grep", "handoff", "handoff_note", "hosts", "list_dir", "listen", "media", "note", "open_url", "projects", "read_document", "read_file", "repos", "repos_detail", "run_log", "scan", "service_logs", "services", "services_restart", "sessions", "sessions_search", "shell", "status", "todo", "todo_add", "todo_done", "write_file"]);
+    expect(names).toEqual(["announce", "collab_add", "collab_run", "collab_tasks", "deck_context", "delegate", "delegate_result", "disks", "documents", "edit_file", "fleet_status", "grep", "handoff", "handoff_note", "hosts", "list_dir", "listen", "media", "note", "open_url", "projects", "read_document", "read_file", "repos", "repos_detail", "run_log", "scan", "service_logs", "services", "services_restart", "sessions", "sessions_search", "shell", "status", "todo", "todo_add", "todo_done", "write_file"]);
     for (const t of tools) {
       expect(t.name).toMatch(/^[a-z0-9_]{1,40}$/);
       expect(t.description?.length ?? 0).toBeGreaterThan(20);
@@ -758,3 +759,50 @@ test("delegate without a Seed bridge set up fails fast with the setup hint", asy
   expect(dr.isError).toBe(true);
   expect(dr.content[0]?.text).toMatch(/no delegated sessions yet/);
 }, 30_000);
+
+describe("disks", () => {
+  test("remoteDisks keeps block devices only and disksSentence names the nearly full ones first", () => {
+    const df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda1 50331648 48234496 2097152 96% /\ntmpfs 1000 0 1000 0% /run\n/dev/loop3 1000 1000 0 100% /snap/core/1\n/dev/sda15 100000 6000 94000 6% /boot/efi\n/dev/sdb 262144000 94371840 167772160 36% /var/lib/docker\n";
+    const rows = remoteDisks(df);
+    expect(rows.map((d) => d.mount)).toEqual(["/", "/var/lib/docker"]);
+    expect(rows[0]).toMatchObject({ percent: 96, freeBytes: 2097152 * 1024 });
+    expect(disksSentence([{ host: "agentic", via: "ssh", disks: rows }, { host: "gone", via: "cyberdeck", disks: [], error: "timeout" }]))
+      .toBe("2 disks on 1 host; nearly full: agentic / at 96% (2 GB free); next agentic /var/lib/docker at 36% (160 GB free); gone did not answer.");
+    const roomy = { mount: "/", filesystem: "/dev/x", totalBytes: 1000 * 1024 ** 3, usedBytes: 400 * 1024 ** 3, freeBytes: 600 * 1024 ** 3, percent: 40, paths: ["/"] };
+    expect(disksSentence([{ host: "yacht", via: "self", disks: [roomy] }])).toBe("1 disk on 1 host; none nearly full; fullest yacht / at 40% (600 GB free).");
+    expect(disksSentence([{ host: "gone", via: "cyberdeck", disks: [], error: "x" }])).toBe("No disk could be read; gone did not answer.");
+  });
+
+  test("reads this node, every paired node, and df over ssh for manifest hosts without a node", async () => {
+    const own = startTestServer(testConfig({ fleetDir: FLEET_STUB, nodeName: "test-node" }));
+    own.db.query("INSERT INTO nodes (id, name, url, token, added_at) VALUES (?, ?, ?, ?, ?)").run("n-bare-d", "Bare", bare.base, TEST_TOKEN, Date.now());
+    const client = await connect(own.base);
+    try {
+      const r = await call(client, "disks", { brief: true });
+      expect(r.isError).toBeFalsy();
+      expect(r.content[0]?.text).toContain("other / at 96% (2 GB free)");
+      expect((r.structuredContent as any).nearlyFull).toContain("other /");
+      expect((r.structuredContent as any).unreachable).toEqual([]);
+      const full = parsed(await call(client, "disks"));
+      expect(full.hosts.map((h: any) => `${h.host}:${h.via}`).sort()).toEqual(["Bare:cyberdeck", "other:ssh", "test-node:self"]);
+      expect(full.hosts.find((h: any) => h.host === "Bare").disks.length).toBeGreaterThan(0);
+      expect(readFileSync(SSH_LOG, "utf8")).toContain("df -Pk -l");
+      const one = parsed(await call(client, "disks", { host: "OTHER" }));
+      expect(one.hosts.map((h: any) => h.host)).toEqual(["other"]);
+      const none = await call(client, "disks", { host: "phone" });
+      expect(none.isError).toBe(true);
+      expect(none.content[0]?.text).toContain('No node or manifest host named "phone"');
+    } finally {
+      await client.close();
+      own.stop();
+    }
+  });
+
+  test("GET /api/disks serves this node's volumes", async () => {
+    const res = await fetch(`${srv.base}/api/disks`, { headers: { authorization: `Bearer ${TEST_TOKEN}` } });
+    const body = await res.json() as any;
+    expect(res.status).toBe(200);
+    expect(body.disks.length).toBeGreaterThan(0);
+    expect(body.disks[0]).toHaveProperty("percent");
+  });
+});

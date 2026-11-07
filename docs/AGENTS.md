@@ -32,6 +32,7 @@ MCP server, and grants it to the voice agent; see `docs/VOICE.md`).
 |---|---|---|
 | `status` | this node (version, scan state, repo risk counts, junk bytes) and whether each paired node answers right now | no |
 | `fleet_status` | every host in the manifest with its liveness (tailnet, or `reach: "cyberdeck"` when its paired node answers over Probe although the tailnet says offline/unknown), the Deck repo's sync state, open handoff count (`deck status`) | no |
+| `disks` | how full every machine's disks are: this node (`df -Pk`), each paired node (`GET /api/disks`, falling back to `/api/dashboard` on an older peer), and a fixed read-only `df -Pk -l` over the ssh alias of each manifest host without a node (agentic); nearly full = 90% or under 10 GB free, named first in the spoken sentence; `host` narrows to one machine. The daily check-in and the Monday digest include it | no |
 | `hosts` | the manifest: kind, OS, ssh alias, tailnet name, roles, agents, Cyberdeck URL, expected services | no |
 | `projects` | the project tree; with `dir`, the project owning that directory | no |
 | `todo` | `handoff/TODO.md` by section; `query` filters entries; the brief names the newest and the oldest entry | no |
