@@ -15,12 +15,27 @@ let renamed = "";
 let memoryRemoved = false;
 let memoryReadStatus = 200, holdMemoryRead = false;
 let sessionReadStatus = 200, runReadStatus = 200, listReadStatus = 200, holdListRead = false;
+let payloadStatus = 200, holdPayload = false, malformedPayload = "";
 const reads: { node: string; action: any }[] = [];
-const transcriptEvents = (id: string) => id === "transcript" ? ["message-one", "message two/?&"].map((eventId, index) => ({
+const toolId = "call two/?&";
+const toolEvents = [
+ { type: "message", role: "user", content: "Inspect these recorded tools" },
+ { type: "tool_call", id: toolId, name: "read", input: { path: "Truncated fixture input" } },
+ { type: "tool_result", toolCallId: toolId, name: "read", output: { content: "Truncated fixture output" } },
+ { type: "tool_call", id: "status-call", name: "status", input: { title: "Fixture status", description: "Recorded status" } },
+ { type: "tool_result", toolCallId: "status-call", name: "status", output: { ok: true } },
+ { type: "tool_call", id: "continued-call", name: "continue_session", input: { title: "Recorded successor", reason: "context_limit", transfer: { plan: "carry" } } },
+ { type: "tool_result", toolCallId: "continued-call", name: "continue_session", output: { sessionId: "two", title: "Recorded successor" } },
+ { type: "message", role: "assistant", content: "These are recorded tool results" },
+];
+const transcriptEvents = (id: string) => id === "tools" ? toolEvents.map((event, index) => ({
+ id: `tool-event-${index + 1}`, sessionId: id, seq: index + 1, createdAt: index + 1, event,
+ ...([1, 2].includes(index) ? { truncated: true } : {}),
+})) : id === "transcript" ? ["message-one", "message two/?&"].map((eventId, index) => ({
  id: eventId, sessionId: id, seq: index + 1, createdAt: index + 1,
  event: { type: "message", role: index ? "assistant" : "user", content: `Fixture transcript message ${index + 1}` },
 })) : [];
-const readActions = new Set(["ListAgents","GetAgent","GetSession","GetRun","GetAgentTrigger","ListSessions","ListRuns","ListAgentTriggers","ListAgentMemoryDir","ReadAgentMemoryFile","ListAgentTools","ListAgentCollaborators","ListAgentInvites","ListModelProviders","ListProviderModels","ListMcpServers","ListSigningIdentities","GetRunJournal"]);
+const readActions = new Set(["ListAgents","GetAgent","GetSession","GetSessionEvent","GetRun","GetAgentTrigger","ListSessions","ListRuns","ListAgentTriggers","ListAgentMemoryDir","ReadAgentMemoryFile","ListAgentTools","ListAgentCollaborators","ListAgentInvites","ListModelProviders","ListProviderModels","ListMcpServers","ListSigningIdentities","GetRunJournal"]);
 const ok = (value: unknown) => new Response(cbor.encode(value) as unknown as BodyInit,{headers:{"content-type":"application/cbor"}});
 const fail = (status: number, message: string) => new Response(cbor.encode({_:"Error",message}) as unknown as BodyInit,{status,headers:{"content-type":"application/cbor"}});
 const agent = (id: string, node: string) => ({id,account,definition:{name:renamed || `${node} ${id === "beta" ? "Beta assistant" : "Alpha assistant"}`,systemPrompt:"Fixture",model:"fixture",modelProvider:"fixture",mcpServers:[]},stateDir:"",status:"idle",createdAt:1,updatedAt:2});
@@ -48,6 +63,21 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,async fetch(req,server) {
       if (status !== 200) return fail(status, "Session list read failed");
     }
     if (action._ === "GetRun" && id === "review" && runReadStatus !== 200) return fail(runReadStatus, "Run read failed");
+    if (action._ === "GetSessionEvent") {
+      const status = payloadStatus, malformed = malformedPayload;
+      if (holdPayload) await new Promise<void>(r => pending.add(r));
+      if (status !== 200) return fail(status, "Full payload read failed");
+      const isInput = action.seq === 2;
+      const event = { ...transcriptEvents(action.sessionId).find(row => row.seq === action.seq),
+        event: isInput ? { type: "tool_call", id: toolId, name: "read", input: { path: `Full fixture input on ${node}` } }
+          : { type: "tool_result", toolCallId: toolId, name: "read", output: { content: `Full fixture output on ${node}` } },
+      };
+      if (malformed === "session") Object.assign(event, { sessionId: "different-session" });
+      if (malformed === "seq") Object.assign(event, { seq: 99 });
+      if (malformed === "tool") Object.assign(event.event, { id: "different-call", toolCallId: "different-call" });
+      if (malformed === "type") Object.assign(event.event, { type: "message" });
+      return ok({ _: "GetSessionEventResponse", event });
+    }
     if(id === "missing")return fail(404,"Entity not found");
     if(id === "denied")return fail(403,"Access denied");
     if(id === "offline")return fail(503,"Fixture unavailable");
@@ -112,7 +142,7 @@ async function fresh(fn:(page:Page)=>Promise<void>){
  page.setDefaultNavigationTimeout(process.env.CYBERDECK_TEST_ORIGIN ? 30000 : 12000);
  await page.route("**/*",route=>new URL(route.request().url()).origin===server.url.origin?route.continue():route.abort());
  try{await fn(page);}catch(e){console.error(JSON.stringify({title:await page.title(),body:(await page.locator("body").innerText()).slice(0,1800),errors,actions:actions.slice(-15)}));throw e;}
- finally{hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;for(const release of pending)release();pending.clear();await page.close();}
+ finally{hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
 }
 const href=(path:string,node="")=>`${server.url}#/seed?${new URLSearchParams({r:path,...(node?{node}:{})})}`;
 const title=(page:Page,value:string)=>page.waitForFunction(value=>document.title===value,value);
@@ -461,4 +491,188 @@ test("Seed transcript panels in Sessions have canonical URLs and retain their co
  await page.reload(); await page.getByRole("dialog").filter({hasText:"Message details"}).waitFor();
  await title(page, "Message · peer-b First conversation · Seed session · Peer B · Cyberdeck");
  await fresh(async tab => { await tab.goto(page.url()); await tab.getByRole("dialog").waitFor(); await title(tab, "Message · peer-b First conversation · Seed session · Peer B · Cyberdeck"); });
+}), browserBudget);
+
+const toolPath = (extra = "") => `session/tools?panel=tool&event=tool-event-2&tool=${encodeURIComponent(toolId)}${extra}`;
+const toolTitle = (node = "local", prefix = "Tool input/output", suffix = "") => `${prefix} · read · ${node} First conversation · Seed session${suffix} · Cyberdeck`;
+
+test("Seed tool inspectors restore collapsed tools on direct links, reload, new tabs and history", () => fresh(async page => {
+ await page.goto(href("session/tools", "peer-b"));
+ await title(page, "peer-b First conversation · Seed session · Peer B · Cyberdeck");
+ await page.getByPlaceholder("Untitled session").evaluate(el => el.setAttribute("data-tool-owner", "retained"));
+ const start = reads.length, length = await page.evaluate(() => history.length);
+ await page.locator('button[title="Show all tool calls"]').click();
+ await page.getByRole("button", { name: "View raw tool input/output" }).first().click();
+ await title(page, toolTitle("peer-b", "Tool input/output", " · Peer B"));
+ await page.getByRole("dialog").filter({ hasText: "Raw tool call payload" }).waitFor();
+ const link = page.url();
+ const nested = new URLSearchParams(new URL(link).hash.slice(7)).get("r")!;
+ expect(new URLSearchParams(nested.split("?")[1]).get("tool")).toBe(toolId);
+ expect(await page.evaluate(() => history.length)).toBe(length + 1);
+ expect(reads.slice(start).filter(({ action }) => ["GetSession", "GetSessionEvent"].includes(action._)).length).toBe(0);
+ await page.goBack(); await title(page, "peer-b First conversation · Seed session · Peer B · Cyberdeck");
+ await page.getByRole("dialog").waitFor({ state: "hidden" });
+ expect(await page.getByPlaceholder("Untitled session").getAttribute("data-tool-owner")).toBe("retained");
+ await page.goForward(); await page.getByRole("dialog").waitFor();
+ await page.reload(); await title(page, toolTitle("peer-b", "Tool input/output", " · Peer B"));
+ expect(await page.getByRole("dialog").innerText()).toContain("Truncated fixture input");
+ await fresh(async tab => { await tab.goto(link); await title(tab, toolTitle("peer-b", "Tool input/output", " · Peer B")); await tab.getByRole("dialog").waitFor(); });
+ await page.keyboard.press("Escape");
+ await title(page, "Message · peer-b First conversation · Seed session · Peer B · Cyberdeck");
+ await page.goBack(); await page.getByRole("dialog").waitFor();
+}), browserBudget);
+
+test("Seed full tool input and output are URL-owned read selections with one history entry each", () => fresh(async page => {
+ await page.goto(href(toolPath(), "peer-a")); await title(page, toolTitle("peer-a", "Tool input/output", " · Peer A"));
+ const length = await page.evaluate(() => history.length), start = reads.length;
+ await page.getByTestId("seed-full-input").getByRole("button").click();
+ await title(page, toolTitle("peer-a", "Full input", " · Peer A"));
+ await page.getByRole("dialog").getByText('"path": "Full fixture input on peer-a"', { exact: false }).waitFor();
+ expect(await page.evaluate(() => history.length)).toBe(length + 1);
+ await page.getByTestId("seed-full-output").getByRole("button").click();
+ await title(page, toolTitle("peer-a", "Full input/output", " · Peer A"));
+ await page.getByRole("dialog").getByText('"content": "Full fixture output on peer-a"', { exact: false }).waitFor();
+ const link = page.url();
+ expect(await page.evaluate(() => history.length)).toBe(length + 2);
+ expect(reads.slice(start).filter(({ action }) => action._ === "GetSession").length).toBe(0);
+ expect(reads.slice(start).filter(({ action }) => action._ === "GetSessionEvent").map(({ action }) => action.seq)).toEqual([2, 3]);
+ const beforeBack = reads.length;
+ await page.goBack(); await title(page, toolTitle("peer-a", "Full input", " · Peer A"));
+ expect(await page.getByRole("dialog").innerText()).toContain("Truncated fixture output");
+ await page.goBack(); await title(page, toolTitle("peer-a", "Tool input/output", " · Peer A"));
+ expect(await page.getByRole("dialog").innerText()).toContain("Truncated fixture input");
+ await page.goForward(); await page.goForward();
+ await title(page, toolTitle("peer-a", "Full input/output", " · Peer A"));
+ expect(reads.slice(beforeBack).filter(({ action }) => action._ === "GetSessionEvent").length).toBe(0);
+ await page.reload(); await title(page, toolTitle("peer-a", "Full input/output", " · Peer A"));
+ await page.getByRole("dialog").getByText('"content": "Full fixture output on peer-a"', { exact: false }).waitFor();
+ await fresh(async tab => { await tab.goto(link); await title(tab, toolTitle("peer-a", "Full input/output", " · Peer A")); await tab.getByRole("dialog").getByText('"path": "Full fixture input on peer-a"', { exact: false }).waitFor(); });
+ await page.getByTestId("seed-full-input").getByRole("button").click();
+ await title(page, toolTitle("peer-a", "Full output", " · Peer A"));
+ expect(await page.getByRole("dialog").innerText()).toContain("Truncated fixture input");
+}), browserBudget);
+
+test("Seed tool payload failures preserve links, match titles and retry in place", () => fresh(async page => {
+ for (const [status, expected] of [[403, "Access denied"], [404, "Tool payload not found"], [503, "Tool payload unavailable"]] as const) {
+  payloadStatus = status;
+  await page.goto("about:blank"); await page.goto(href(toolPath("&full=input")));
+  await title(page, `${expected} · Seed · Cyberdeck`);
+  await page.getByRole("dialog").getByRole("alert").filter({ hasText: "Full payload read failed" }).waitFor();
+  const url = page.url(), length = await page.evaluate(() => history.length);
+  payloadStatus = 200;
+  await page.getByTestId("seed-full-input").getByRole("button", { name: "Retry", exact: true }).click();
+  await title(page, toolTitle("local", "Full input"));
+  expect(page.url()).toBe(url); expect(await page.evaluate(() => history.length)).toBe(length);
+  expect(await page.getByRole("dialog").innerText()).toContain("Full fixture input on local");
+ }
+ await page.evaluate(() => location.hash = "#/data"); await title(page, "Data · Cyberdeck");
+}), browserBudget);
+
+test("Seed full payloads reject mismatched sessions, event sequences, tool IDs and event types", () => fresh(async page => {
+ for (const malformed of ["session", "seq", "tool", "type"]) {
+  malformedPayload = malformed;
+  await page.goto("about:blank"); await page.goto(href(toolPath("&full=output")));
+  await title(page, "Tool payload unavailable · Seed · Cyberdeck");
+  expect(await page.getByRole("dialog").innerText()).toContain("Invalid full payload response");
+  expect(await page.getByRole("dialog").innerText()).not.toContain("Full fixture output");
+  malformedPayload = "";
+  await page.getByTestId("seed-full-output").getByRole("button", { name: "Retry", exact: true }).click();
+  await title(page, toolTitle("local", "Full output"));
+  expect(await page.getByRole("dialog").innerText()).toContain("Full fixture output on local");
+ }
+}), browserBudget);
+
+test("Seed late full payload results cannot reopen or rename a later tool, session, node or view", () => fresh(async page => {
+ holdPayload = true; payloadStatus = 403;
+ await page.goto(href(toolPath("&full=input"), "peer-a"));
+ while (!pending.size) await page.waitForTimeout(10);
+ await page.evaluate(() => location.hash = "#/seed?" + new URLSearchParams({ node: "peer-b", r: "session/tools?panel=tool&tool=status-call" }));
+ await title(page, "Tool input/output · status · peer-b First conversation · Seed session · Peer B · Cyberdeck");
+ const url = page.url(), length = await page.evaluate(() => history.length);
+ for (const release of pending) release(); pending.clear(); holdPayload = false;
+ await page.waitForTimeout(120);
+ expect(page.url()).toBe(url); expect(await page.evaluate(() => history.length)).toBe(length);
+ expect(await page.title()).toBe("Tool input/output · status · peer-b First conversation · Seed session · Peer B · Cyberdeck");
+ expect(await page.getByRole("dialog").innerText()).not.toContain("Full payload read failed");
+ holdPayload = true; payloadStatus = 200;
+ await page.goto(href(toolPath("&full=output")));
+ while (!pending.size) await page.waitForTimeout(10);
+ await page.evaluate(() => location.hash = "#/seed?r=session%2Ftwo");
+ await title(page, "local Second conversation · Seed session · Cyberdeck");
+ for (const release of pending) release(); pending.clear(); holdPayload = false;
+ await page.waitForTimeout(100);
+ expect(await page.title()).toBe("local Second conversation · Seed session · Cyberdeck");
+ await page.getByRole("dialog").waitFor({ state: "hidden" });
+ await page.getByTestId("nav-data").click(); await title(page, "Data · Cyberdeck");
+}), browserBudget);
+
+test("Seed missing and malformed tool links retain honest selections and canonical defaults", () => fresh(async page => {
+ const start = reads.length;
+ await page.goto(href("session/tools?panel=tool&tool=missing&full=both"));
+ await title(page, "Tool call not found · Seed · Cyberdeck");
+ await page.getByRole("dialog").filter({ hasText: "The selected tool call is not in this transcript" }).waitFor();
+ const link = page.url();
+ await page.reload(); await title(page, "Tool call not found · Seed · Cyberdeck");
+ expect(page.url()).toBe(link);
+ expect(reads.slice(start).filter(({ action }) => action._ === "GetSessionEvent").length).toBe(0);
+ for (const [path, canonical] of [["session/tools?panel=tool&full=input", "session/tools"], [toolPath("&full=99"), toolPath()], ["session/tools?tool=unused&full=input", "session/tools"], ["session/tools?panel=tool&tool=status-call&event=unknown&full=both", "session/tools?panel=tool&event=tool-event-2&tool=status-call"]]) {
+  await page.goto(href(path));
+  await page.waitForFunction(canonical => new URLSearchParams(location.hash.slice(7)).get("r") === canonical, canonical);
+  const length = await page.evaluate(() => history.length);
+  await page.reload();
+  await page.waitForFunction(canonical => new URLSearchParams(location.hash.slice(7)).get("r") === canonical, canonical);
+  expect(await page.evaluate(() => history.length)).toBe(length);
+ }
+}), browserBudget);
+
+test("Seed recorded status and continuation inspectors use navigable raw content without following a successor", () => fresh(async page => {
+ await page.goto(href("session/tools")); await title(page, "local First conversation · Seed session · Cyberdeck");
+ await page.getByRole("button", { name: "Model, timing, and raw payload for this update" }).click();
+ await title(page, "Tool input/output · status · local First conversation · Seed session · Cyberdeck");
+ expect(await page.getByRole("dialog").innerText()).toContain("Recorded status");
+ const link = page.url();
+ await page.reload(); await title(page, "Tool input/output · status · local First conversation · Seed session · Cyberdeck");
+ await page.goto(href("session/tools?panel=tool&tool=continued-call"));
+ await title(page, "Tool input/output · continue_session · local First conversation · Seed session · Cyberdeck");
+ expect(await page.getByRole("dialog").innerText()).toContain("Recorded successor");
+ await page.goBack(); await title(page, "Tool input/output · status · local First conversation · Seed session · Cyberdeck");
+ expect(page.url()).toBe(link);
+}), browserBudget);
+
+test("Sessions retains machine filters and its transcript owner for tool payload history and fresh links", () => fresh(async page => {
+ const link = `${server.url}#/term?` + new URLSearchParams({ session: "seed-tools", node: "peer-b", filter: "peer-b", panel: "tool", tool: toolId, full: "both" });
+ await page.goto(link); await title(page, toolTitle("peer-b", "Full input/output", " · Peer B"));
+ await page.getByRole("dialog").getByText('"path": "Full fixture input on peer-b"', { exact: false }).waitFor();
+ await page.getByPlaceholder("Untitled session").evaluate(el => el.setAttribute("data-tool-owner", "sessions"));
+ await page.getByTestId("seed-full-output").getByRole("button").click();
+ await title(page, toolTitle("peer-b", "Full input", " · Peer B"));
+ expect(new URLSearchParams(new URL(page.url()).hash.slice(7)).get("filter")).toBe("peer-b");
+ await page.goBack(); await title(page, toolTitle("peer-b", "Full input/output", " · Peer B"));
+ expect(await page.getByPlaceholder("Untitled session").getAttribute("data-tool-owner")).toBe("sessions");
+ await page.reload(); await title(page, toolTitle("peer-b", "Full input/output", " · Peer B"));
+ await fresh(async tab => { await tab.goto(link); await title(tab, toolTitle("peer-b", "Full input/output", " · Peer B")); await tab.getByRole("dialog").waitFor(); });
+ await page.keyboard.press("Escape"); await title(page, "Message · peer-b First conversation · Seed session · Peer B · Cyberdeck");
+ await page.goBack(); await page.getByRole("dialog").waitFor();
+ await page.goto(`${server.url}#/term?session=seed-tools&panel=tool&full=unknown&tool=`);
+ await title(page, "local First conversation · Seed session · Cyberdeck");
+ await page.waitForFunction(() => !["panel", "tool", "full"].some(key => new URLSearchParams(location.hash.slice(7)).has(key)));
+}), browserBudget);
+
+test("Seed external-server tool details retain the signer and late reads cannot cross a lock boundary", () => fresh(async page => {
+ const remote = `${server.url}seed-fixture/external`;
+ await page.goto(href(toolPath(`&full=both&server=${encodeURIComponent(remote)}`), "peer-b"));
+ await title(page, toolTitle("external", "Full input/output", " · Peer B"));
+ await page.getByRole("dialog").getByText('"path": "Full fixture input on external"', { exact: false }).waitFor();
+ const selected = reads.filter(({ action }) => action._ === "GetSessionEvent").slice(-2);
+ expect(selected.map(read => read.node)).toEqual(["external", "external"]);
+ holdPayload = true; payloadStatus = 403;
+ await page.goto(href(toolPath("&full=input"), "peer-a"));
+ while (!pending.size) await page.waitForTimeout(10);
+ await page.route("**/api/fs/list**", route => route.fulfill({ status: 401, json: { error: "Locked" } }));
+ await page.evaluate(() => location.hash = "#/files");
+ await page.getByPlaceholder("access token").waitFor(); await title(page, "Locked · Cyberdeck");
+ for (const release of pending) release(); pending.clear(); holdPayload = false;
+ await page.waitForTimeout(100);
+ expect(await page.title()).toBe("Locked · Cyberdeck");
+ await page.getByRole("dialog").waitFor({ state: "hidden" });
 }), browserBudget);

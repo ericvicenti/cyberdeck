@@ -26,6 +26,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       case "agent": return selected.key === "agent" && selected.agentId === outcome.agentId;
       case "session": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId;
       case "session-event": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && selected.eventId === outcome.path;
+      case "session-tool": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && selected.panel === "tool" && selected.toolId === outcome.toolId && (selected.fullPayload || "") === outcome.path;
       case "trigger": return selected.key === "agent" && selected.triggerId === outcome.triggerId;
       case "run": return selected.key === "agent-run" && selected.runId === outcome.runId;
     }
@@ -54,6 +55,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
   let title: string | undefined;
   const memory = get("memory-file"), agent = get("agent"), session = get("session"), run = get("run"), event = get("session-event");
   const list = get("session-list"), selection = get("memory-selection"), trigger = get("trigger");
+  const tool = get("session-tool");
   if (agent?.error && route.key === "agent") title = failure(agent.error, "Agent");
   else if (list?.error) title = failure(list.error, "Sessions");
   else if (memory?.error) {
@@ -67,8 +69,9 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
     else title = seedAgentTitle(route, agent.name, trigger?.name);
   } else if (session && route.key === "agent-session") {
     title = session.error ? failure(session.error, "Session")
+      : tool?.error ? failure(tool.error, tool.name && route.fullPayload ? "Tool payload" : "Tool call")
       : event?.error ? failure(event.error, "Message")
-      : `${route.panel === "prompt" ? "Current system prompt · " : route.eventId ? "Message · " : ""}${session.name?.trim() || "Untitled session"} · Seed session`;
+      : `${route.panel === "prompt" ? "Current system prompt · " : route.panel === "tool" ? `${!tool || tool.pending ? "Loading tool payload · " : route.fullPayload ? `Full ${route.fullPayload === "both" ? "input/output" : route.fullPayload} · ` : "Tool input/output · "}${tool?.name || route.toolId} · ` : route.eventId ? "Message · " : ""}${session.name?.trim() || "Untitled session"} · Seed session`;
   } else if (run && route.key === "agent-run") {
     title = run.error ? failure(run.error, "Run") : `${run.name?.trim() || route.runId} · Seed run`;
   }

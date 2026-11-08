@@ -1,8 +1,8 @@
 # Cyberdeck navigation coverage
 
-Updated 2026-11-06. This is an implementation inventory, not a completion claim.
+Updated 2026-11-08. This is an implementation inventory, not a completion claim.
 The nightly routine and fleet deployment status live in Deck's
-`handoff/routines/cyberdeck-navigation/2026-11-06.md`.
+`handoff/routines/cyberdeck-navigation/2026-11-08.md`.
 
 ## Source and rollout status
 
@@ -69,7 +69,7 @@ credentials should not be replayed from a link.
 | GamesSection / Games | installed native games and import form | Part of Applications. Play/import are actions; no automatic execution from links. |
 | CaseworkConsole | selected device, events, camera/media/QR, calls, native scene actions | Selected device is covered by `device=<id>`, including canonical default, reload/history, missing-device error/title and no action replay. Visited consoles retain their socket, calls and previews across apps, primary views, node URLs and history; lock tears them down. `media=<stored-name>` fetches only an existing authenticated upload: fresh open, reload and history never capture, upload or autoplay. Invalid, missing and denied previews have matching errors/titles. Tests use synthetic devices/tracks only. |
 | `applications?app=afterglow&tab=music` / Spotify (the listening room), SpotifyRecordings, SpotifyVisualizer | shelves, entities, query, pagination, recordings, immersive mode | One player everywhere, inside Afterglow: `shelf`, `id`, `q`, `radio`, `page`, `immersive` and `shelf=history&recording=<id>` restore through direct links, reload and history; OAuth returns to the requested content, including saved recordings; read failures and unavailable pages retain the link with an honest title and read-only retry. Late or hidden reads cannot replace another view; no link starts playback; the SDK/player stays mounted through URL and primary-view changes. Legacy `#/spotify` links are rewritten. |
-| `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session, run, server, node | Nested route canonicalization, malformed/unknown path errors, route-based titles, Back/Forward and node-preserving new-window links covered. Backend, identity and server failures keep accurate titles across nested routes, reload and node transitions; late failures cannot retitle another node. Agent/tab/trigger names, memory paths, session titles (including untitled sessions) and run titles now resolve through authenticated read-only metadata on the selected node. Missing/access-denied/unavailable entities have matching titles. Route/host ownership rejects late responses; focus and 30-second visible-page refresh pick up renames. URL-supplied external servers retain route-based titles; memory-directory metadata now distinguishes missing files, directories, access denial and unavailable parents. A version-pinned optional read-outcome callback now reports the memory file query already displayed by Seed. Failed content reads override successful directory metadata in the title, without a duplicate content request. Outcomes are bound to the exact signing host, server, agent and path. Transcript outcomes/navigation and external-server entity names remain. |
+| `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session/message/tool/prompt, list pages, run, server, node | Nested paths, canonical defaults/errors, Back/Forward and node-preserving new-window links covered. Titles observe the displayed authenticated reads, including external servers; late responses are bound to the signing host/account, server and entity. Session message/prompt/tool inspectors and full tool input/output restore without replacing the transcript or composer. Agent session-list page counts restore and retry. Other global/server list/search/disclosure and attachment state, plus older-message history outside returned events, remain. See November 7–8 below. |
 | `desktop` / Desktop | selected node and connection | Primary route/title and URL-selected node covered; connect/input/credentials remain explicit runtime actions. |
 | `desk` / Desk + voice | Fleet/Services/Agents glance tab, voice call, transcript, setup, mute | `tab=services` / `tab=agents` restore from fresh links and history; default fleet ignores stale local preferences, invalid tabs replace to the default, and titles match. Tab transitions retain the voice subtree without reconnecting. Calls and permissions stay explicit. The call owner now stays mounted across primary views, node changes and screen-remote navigation. Voice requests stay on the serving daemon’s hub relay; idle configuration refreshes on return. Simulated live-room tests prove no disconnect/reconnect during navigation, release of push-to-talk when hidden, and disconnect on authentication lock. Real calls/microphones are not used by tests. |
 | `projects` / Projects | selected project, nested slug, unassigned repos, query | URL selection, canonical default, filter, title, missing project covered. Nested slugs use the same `p` key. Editing launches Files/Editor. |
@@ -653,3 +653,42 @@ Commander deep malformed-payload/match/decision retry and remote-seat cases,
 native devices/attachments and original-PDF viewer controls. These are separate
 from today's completed Seed slice. The current Deck report records fleet receipts,
 rollback paths and any pending hosts; do not infer app-wide completion here.
+
+## 2026-11-08: Recorded tool inspectors and full payloads
+
+Seed session routes now restore `panel=tool&tool=<call-id>` in the actual published
+UI. `event` canonicalizes with replace to the displayed row containing that tool,
+including grouped/collapsed thinking rows. Ordinary, status and continuation tool
+inspectors use one dialog owner at the session root; continuation handoff details
+retain their existing presentation. Missing calls retain honest links and errors.
+These selections never execute a tool or follow a continuation automatically.
+
+`full=input|output|both` selects recorded full payload reads for truncated content.
+Each selection pushes once; Back restores the truncated version, Forward uses the
+cached full read, and reload/new tabs read the same selected data. Non-truncated
+and malformed selections normalize with replace. The existing signed
+`GetSessionEvent` API supplies content; links cannot supply an arbitrary sequence.
+Responses must match the session, sequence, event type and tool call. Missing,
+denied, unavailable and malformed reads have matching views/titles and retry
+without changing history. No title-only request is added.
+
+Sessions uses the same state as top-level `panel`, `event`, `tool`, and `full`
+parameters on `#/term?session=seed-<id>`, retaining its machine and filter. Both
+hosts keep the transcript, composer and subscription owners mounted during
+inspector/history changes. Late payload success/failure cannot rename another
+call, session, machine, primary view or locked screen. Existing iframe bridges,
+playback, terminals and games are unchanged.
+
+Repeat `bun run typecheck`, `bun run build`, then
+`bun test tests/seed-titles-browser.test.ts tests/seed-navigation.test.ts tests/term-navigation.test.ts --timeout 30000`.
+The nine added browser cases use the production bundle, real pinned dependency
+and synthetic read-only signed responses. `CYBERDECK_TEST_UI` selects an exact
+artifact; `CYBERDECK_TEST_ORIGIN` loads installed assets through loopback while
+all API/signing responses remain fixtures. Keep the agents-ui 0.1.11 Bun patch
+through upgrades until the upstream host API supports the same behavior.
+
+Remaining acceptance: Seed global/server list/search/disclosure, attachment
+read/detail state and older-message history; Commander's deeper malformed/match/
+decision retry and remote-seat matrix; native/device and original-file viewer
+boundaries. This slice does not complete the routine. Fleet receipts, rollback
+paths and any pending hosts are in today's Deck report.
