@@ -1,6 +1,6 @@
 // Home dashboard: everything the widgets on the home page need in one call.
 //   GET /api/dashboard  -> { at, usage: {claude, codex}, disks, system, activity, redundancy, backup }
-//   GET /api/disks      -> { at, disks } (just this node's volumes; the `disks` MCP tool reads it from every peer)
+//   GET /api/disks      -> { at, disks } (just this node's volumes, each with its fill `trend`; the `disks` MCP tool reads it from every peer)
 //   GET  /api/usage/codex/resets -> the Codex rate-limit reset credits (with expiry)
 //   POST /api/usage/codex/reset  -> spend one, through the official `codex app-server`
 //
@@ -19,6 +19,7 @@ import type { CyberdeckConfig } from "../config";
 import { CYBERDECK_HOME } from "../config";
 import { readCodexResets, consumeCodexReset, type CodexResetOutcome } from "../codexrpc";
 import { randomUUID } from "crypto";
+import { ensureDiskSamples, sampleDisks, SAMPLE_EVERY_MS, type DiskTrend } from "../disks";
 
 export const USAGE_CACHE_MS = 60_000;
 const FETCH_TIMEOUT_MS = 10_000;
@@ -65,7 +66,11 @@ export type UsageSummary = {
   resets: UsageResets | null;
   error?: string;
 };
-export type DiskInfo = { mount: string; filesystem: string; totalBytes: number; usedBytes: number; freeBytes: number; percent: number; paths: string[] };
+export type DiskInfo = {
+  mount: string; filesystem: string; totalBytes: number; usedBytes: number; freeBytes: number; percent: number; paths: string[];
+  /** Fill rate from the node's hourly samples (`src/daemon/disks.ts`); null until 12 h of history, absent from older nodes. */
+  trend?: DiskTrend | null;
+};
 export type SystemInfo = { platform: string; cpus: number; load: [number, number, number]; totalMem: number; freeMem: number; uptimeSec: number };
 export type ActivityDay = { date: string; cc: number; cx: number };
 export type Redundancy = {
@@ -464,11 +469,18 @@ export function registerDashboardRoutes(app: Hono, db: Database, cfg: CyberdeckC
     return value;
   };
 
-  app.get("/api/disks", async (c) => c.json({ at: Date.now(), disks: await diskInfo(cfg) }));
+  // hourly free-space samples of this node's own volumes, so every reading can carry its fill rate
+  ensureDiskSamples(db);
+  const ownDisks = async () => sampleDisks(db, cfg.nodeName, await diskInfo(cfg));
+  const sampler = setInterval(() => ownDisks().catch(() => {}), SAMPLE_EVERY_MS + 60_000);
+  const firstSample = setTimeout(() => ownDisks().catch(() => {}), 60_000);
+  sampler.unref?.(); firstSample.unref?.();
+
+  app.get("/api/disks", async (c) => c.json({ at: Date.now(), disks: await ownDisks() }));
 
   app.get("/api/dashboard", async (c) => {
     const fresh = Boolean(c.req.query("fresh"));
-    const [claude, codex, disks, system] = await Promise.all([usage("claude", fresh), usage("codex", fresh), diskInfo(cfg), systemInfo()]);
+    const [claude, codex, disks, system] = await Promise.all([usage("claude", fresh), usage("codex", fresh), ownDisks(), systemInfo()]);
     const body: Dashboard = {
       at: Date.now(),
       usage: { claude: { ...claude, resets: claude.resets ?? claudeResetOffer() }, codex },

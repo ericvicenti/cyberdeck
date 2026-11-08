@@ -10,6 +10,10 @@ import { pairingOrigin } from "../lib/pairing";
 import { confirmAction } from "../lib/tv/confirm";
 import { ServerIcon, FolderIcon, TerminalIcon, GitIcon, GridIcon } from "../lib/icons";
 import type { Dashboard, UsageSummary } from "../../src/daemon/api/dashboard";
+
+/** "in ~2 d" from a disk's fill rate (the daemon's hourly samples); nothing when it is not filling or lasts months. */
+const fillsIn = (days: number | null | undefined) =>
+  days == null || days >= 90 ? null : days < 1 ? "within a day" : days < 14 ? `in ~${Math.round(days)} d` : `in ~${Math.round(days / 7)} wk`;
 import type { CodexResets } from "../../src/daemon/codexrpc";
 import { apiOn, startSession } from "../lib/sessions";
 import { Widget, Meter, StackBar, DayBars, HUD, severity, fmtIn, fmtDuration, fmtInt } from "../components/Widgets";
@@ -491,7 +495,7 @@ export function Home({ params, onLocked }: { params: URLSearchParams; onLocked: 
                 label={<span>{m.name} <span className="text-zinc-500">{d.mount}</span></span>}
                 percent={d.percent}
                 sev={severity(d.percent, 80, 92)}
-                right={<span>{fmtBytes(d.freeBytes)} free <span className="text-zinc-600">of {fmtBytes(d.totalBytes)}</span></span>}
+                right={<span>{fmtBytes(d.freeBytes)} free <span className="text-zinc-600">of {fmtBytes(d.totalBytes)}</span>{fillsIn(d.trend?.daysLeft) && <span className={d.trend!.daysLeft! < 14 ? "text-amber-400" : "text-zinc-500"} title={`losing ${fmtBytes(d.trend!.lossPerDay)} a day over the last ${d.trend!.spanDays} days`}> · full {fillsIn(d.trend?.daysLeft)}</span>}</span>}
               />
             ) : (
               <Meter key={m.id} label={<span className="text-zinc-500">{m.name}</span>} percent={null} right={m.self ? "…" : m.online ? "no data yet" : "offline"} />

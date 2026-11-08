@@ -26,7 +26,7 @@ import { resolveService, serviceLogs, restartService, restartBudget, type Manife
 import { matchRepo, repoDetail, type RepoDetail } from "../repodetail";
 import { registerNodeTools, resolveShellHost, runShell } from "./mcp-node";
 import { diskInfo, type DiskInfo } from "./dashboard";
-import { disksSentence, nearlyFull, remoteDisks, sizeWords, FULL_PERCENT, LOW_FREE_BYTES, REMOTE_DF, type HostDisks } from "../disks";
+import { disksSentence, ensureDiskSamples, fillingFast, nearlyFull, remoteDisks, sampleDisks, recordDisks, sizeWords, FILLING_DAYS, FULL_PERCENT, LOW_FREE_BYTES, REMOTE_DF, type HostDisks } from "../disks";
 import { listDocuments, readDocument, ago as publishedAgo } from "./documents";
 import type { Kiosk } from "./kiosk";
 import { MEDIA_ACTIONS, mediaSentence, type MediaState } from "../screenmedia";
@@ -191,7 +191,7 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
 
   server.tool(
     "disks",
-    `How full every machine's disks are: this node's volumes, each paired Cyberdeck node's, and a read-only \`df\` over ssh for manifest hosts without a node (servers such as agentic). A disk is nearly full at ${FULL_PERCENT}% or under ${sizeWords(LOW_FREE_BYTES)} free; the answer names those first, then the fullest of the rest. A full disk has taken fleet machines down before, so mention one when you see it.`,
+    `How full every machine's disks are: this node's volumes, each paired Cyberdeck node's, and a read-only \`df\` over ssh for manifest hosts without a node (servers such as agentic). A disk is nearly full at ${FULL_PERCENT}% or under ${sizeWords(LOW_FREE_BYTES)} free; the answer names those first, then disks due to fill within ${FILLING_DAYS} days ("filling fast"), then the fullest of the rest. Each node samples its disks hourly, so a filling disk says its rate and when it will be full ("losing 3 GB a day, full in about 2 days"); say that when you mention it. A full disk has taken fleet machines down before, so mention one when you see it.`,
     {
       host: z.string().max(64).optional().describe("Only this host (a node or manifest host name); default the whole fleet"),
       brief: BRIEF,
@@ -200,8 +200,12 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
       const want = host?.toLowerCase();
       const pick = (name: string) => !want || name.toLowerCase() === want;
       const me = cfg.nodeName;
+      ensureDiskSamples(db);
+      // a peer answers with its own trends; a peer too old to have them, and an ssh host, get this node's history of them
+      const trended = (name: string, disks: DiskInfo[]) =>
+        disks.length && disks.every((d) => d.trend !== undefined) ? (recordDisks(db, name, disks), disks) : sampleDisks(db, name, disks);
       const jobs: Promise<HostDisks>[] = [];
-      if (pick(me)) jobs.push(diskInfo(cfg).then((disks) => ({ host: me, via: "self" as const, disks })));
+      if (pick(me)) jobs.push(diskInfo(cfg).then((disks) => ({ host: me, via: "self" as const, disks: sampleDisks(db, me, disks) })));
       const paired = peers();
       for (const n of paired.filter((n) => pick(n.name))) {
         jobs.push((async (): Promise<HostDisks> => {
@@ -211,7 +215,7 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
             // a peer that has not updated yet only has the whole dashboard
             if (res.status === 404) res = await peerFetch(n, "/api/dashboard", { signal: signal() });
             if (!res.ok) return { host: n.name, via: "cyberdeck", disks: [], error: `HTTP ${res.status}` };
-            return { host: n.name, via: "cyberdeck", disks: ((await res.json()) as { disks?: DiskInfo[] }).disks ?? [] };
+            return { host: n.name, via: "cyberdeck", disks: trended(n.name, ((await res.json()) as { disks?: DiskInfo[] }).disks ?? []) };
           } catch (err) {
             return { host: n.name, via: "cyberdeck", disks: [], error: err instanceof Error ? err.message : String(err) };
           }
@@ -226,13 +230,14 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
           if ("error" in t) return { host: h.name, via: "ssh", disks: [], error: t.error };
           const r = await runShell(t, REMOTE_DF, "~", 15);
           if (r.timedOut || r.code !== 0) return { host: h.name, via: "ssh", disks: [], error: r.timedOut ? "no answer over ssh in 15 s" : lastLine(r.stderr) || `exit ${r.code}` };
-          return { host: h.name, via: "ssh", disks: remoteDisks(r.stdout) };
+          return { host: h.name, via: "ssh", disks: sampleDisks(db, h.name, remoteDisks(r.stdout)) };
         })());
       }
       if (want && !jobs.length) return fail(`No node or manifest host named "${host}" with a way to read its disks (it needs a paired Cyberdeck node or an ssh alias).`);
       const hosts = await Promise.all(jobs);
       const full = hosts.flatMap((h) => h.disks.filter(nearlyFull).map((d) => `${h.host} ${d.mount}`));
-      return spoken(disksSentence(hosts), { hosts }, brief, { disks: hosts.reduce((n, h) => n + h.disks.length, 0), nearlyFull: full, unreachable: hosts.filter((h) => h.error).map((h) => h.host) });
+      const filling = hosts.flatMap((h) => h.disks.filter(fillingFast).map((d) => `${h.host} ${d.mount}`));
+      return spoken(disksSentence(hosts), { hosts }, brief, { disks: hosts.reduce((n, h) => n + h.disks.length, 0), nearlyFull: full, fillingFast: filling, unreachable: hosts.filter((h) => h.error).map((h) => h.host) });
     }
   );
 

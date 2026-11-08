@@ -8,7 +8,8 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { homedir } from "os";
 import { startTestServer, testConfig, TEST_TOKEN, type TestServer } from "./helpers";
 import { expandPath } from "../src/daemon/api/mcp-node";
-import { disksSentence, remoteDisks } from "../src/daemon/disks";
+import { Database } from "bun:sqlite";
+import { diskTrend, disksSentence, ensureDiskSamples, recordDisks, remoteDisks, trendWords, withTrends } from "../src/daemon/disks";
 
 const FLEET_STUB = join(import.meta.dir, "fixtures", "fleet");
 const SCRATCH = mkdtempSync(join(tmpdir(), "cd-servicectl-"));
@@ -773,19 +774,72 @@ describe("disks", () => {
     expect(disksSentence([{ host: "gone", via: "cyberdeck", disks: [], error: "x" }])).toBe("No disk could be read; gone did not answer.");
   });
 
+  const GB = 1024 ** 3, H = 3600_000, NOW = Date.UTC(2026, 10, 8, 5);
+  const sample = (hoursAgo: number, freeGb: number, totalGb = 500) => ({ at: NOW - hoursAgo * H, freeBytes: freeGb * GB, totalBytes: totalGb * GB });
+
+  test("diskTrend: a least-squares fill rate over the last week, restarted by a cleanup", () => {
+    // 3 GB a day, steady, over two days
+    const t = diskTrend([sample(48, 12), sample(24, 9), sample(0, 6)], NOW)!;
+    expect(t.lossPerDay).toBe(3 * GB);
+    expect(t.daysLeft).toBe(2);
+    expect(t.spanDays).toBe(2);
+    expect(trendWords(t)).toBe("losing 3 GB a day, full in about 2 days");
+    // too little history: nothing yet
+    expect(diskTrend([sample(6, 7), sample(0, 6)], NOW)).toBeNull();
+    expect(diskTrend([], NOW)).toBeNull();
+    // Eric freed 100 GB yesterday: only what came after counts
+    const after = diskTrend([sample(72, 50), sample(48, 2), sample(24, 102), sample(12, 101.5), sample(0, 101)], NOW)!;
+    expect(after.samples).toBe(3);
+    expect(after.lossPerDay).toBe(1 * GB);
+    expect(after.daysLeft).toBe(101);
+    expect(trendWords(after)).toBeNull(); // months away: not worth saying
+    // a resized volume: the old size's samples are ignored
+    expect(diskTrend([sample(48, 400, 1000), sample(24, 12), sample(0, 6)], NOW)!.lossPerDay).toBe(6 * GB);
+    // gaining space or steady: no fill date
+    expect(diskTrend([sample(24, 6), sample(0, 6.5)], NOW)!.daysLeft).toBeNull();
+    expect(diskTrend([sample(24, 6.1), sample(0, 6)], NOW)!.daysLeft).toBeNull();
+    // samples older than a week do not count
+    expect(diskTrend([sample(24 * 9, 100), sample(24 * 8, 90)], NOW)).toBeNull();
+    expect(trendWords({ lossPerDay: 3 * GB, daysLeft: 0.4, spanDays: 2, samples: 3 })).toBe("losing 3 GB a day, full within a day");
+    expect(trendWords({ lossPerDay: 512 * 1024 ** 2, daysLeft: 30, spanDays: 7, samples: 9 })).toBe("losing 512 MB a day, full in about 4 weeks");
+  });
+
+  test("disk_samples: one sample an hour per volume, trends read back per host", () => {
+    const db = new Database(":memory:");
+    ensureDiskSamples(db);
+    const disk = (freeGb: number) => ({ mount: "/", filesystem: "/dev/x", totalBytes: 500 * GB, usedBytes: (500 - freeGb) * GB, freeBytes: freeGb * GB, percent: Math.round(100 - freeGb / 5), paths: ["/"] });
+    recordDisks(db, "Clipper", [disk(12)], NOW - 24 * H);
+    recordDisks(db, "clipper", [disk(11.9)], NOW - 24 * H + 10 * 60_000); // ten minutes later: skipped
+    recordDisks(db, "clipper", [disk(9)], NOW);
+    expect((db.query("SELECT COUNT(*) AS n FROM disk_samples").get() as any).n).toBe(2);
+    const [d] = withTrends(db, "CLIPPER", [disk(9)], NOW);
+    expect(d.trend).toMatchObject({ lossPerDay: 3 * GB, daysLeft: 3, samples: 2 });
+    expect(withTrends(db, "yacht", [disk(9)], NOW)[0].trend).toBeNull();
+    // and the sentence says it: a nearly full disk with its rate, a roomy one filling fast on its own clause
+    const roomy = { ...disk(200), percent: 60, trend: { lossPerDay: 20 * GB, daysLeft: 10, spanDays: 3, samples: 30 } };
+    expect(disksSentence([{ host: "clipper", via: "cyberdeck", disks: [d] }, { host: "iris", via: "cyberdeck", disks: [roomy] }]))
+      .toBe("2 disks on 2 hosts; nearly full: clipper / at 98% (9 GB free, losing 3 GB a day, full in about 3 days); filling fast: iris / at 60% (200 GB free, losing 20 GB a day, full in about 10 days).");
+  });
+
   test("reads this node, every paired node, and df over ssh for manifest hosts without a node", async () => {
     const own = startTestServer(testConfig({ fleetDir: FLEET_STUB, nodeName: "test-node" }));
     own.db.query("INSERT INTO nodes (id, name, url, token, added_at) VALUES (?, ?, ?, ?, ?)").run("n-bare-d", "Bare", bare.base, TEST_TOKEN, Date.now());
+    // two days of history for agentic-like "other": 1 GB a day, now 2 GB left
+    const total = 50331648 * 1024;
+    for (const [h, free] of [[48, 4], [24, 3]]) own.db.query("INSERT INTO disk_samples (host, mount, at, free, total) VALUES ('other', '/', ?, ?, ?)").run(Date.now() - h * H, free * GB, total);
     const client = await connect(own.base);
     try {
       const r = await call(client, "disks", { brief: true });
       expect(r.isError).toBeFalsy();
-      expect(r.content[0]?.text).toContain("other / at 96% (2 GB free)");
+      expect(r.content[0]?.text).toContain("other / at 96% (2 GB free, losing 1 GB a day, full in about 2 days)");
       expect((r.structuredContent as any).nearlyFull).toContain("other /");
       expect((r.structuredContent as any).unreachable).toEqual([]);
       const full = parsed(await call(client, "disks"));
       expect(full.hosts.map((h: any) => `${h.host}:${h.via}`).sort()).toEqual(["Bare:cyberdeck", "other:ssh", "test-node:self"]);
       expect(full.hosts.find((h: any) => h.host === "Bare").disks.length).toBeGreaterThan(0);
+      // the peer answers with its own trend field (null: no history yet); the ssh host was sampled here
+      expect(full.hosts.find((h: any) => h.host === "Bare").disks[0]).toHaveProperty("trend");
+      expect(full.hosts.find((h: any) => h.host === "other").disks[0].trend).toMatchObject({ daysLeft: 2 });
       expect(readFileSync(SSH_LOG, "utf8")).toContain("df -Pk -l");
       const one = parsed(await call(client, "disks", { host: "OTHER" }));
       expect(one.hosts.map((h: any) => h.host)).toEqual(["other"]);
@@ -804,5 +858,6 @@ describe("disks", () => {
     expect(res.status).toBe(200);
     expect(body.disks.length).toBeGreaterThan(0);
     expect(body.disks[0]).toHaveProperty("percent");
+    expect(body.disks[0]).toHaveProperty("trend");
   });
 });
