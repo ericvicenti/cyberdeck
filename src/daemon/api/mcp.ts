@@ -27,6 +27,7 @@ import { matchRepo, repoDetail, type RepoDetail } from "../repodetail";
 import { registerNodeTools, resolveShellHost, runShell } from "./mcp-node";
 import { diskInfo, type DiskInfo } from "./dashboard";
 import { disksSentence, ensureDiskSamples, fillingFast, nearlyFull, remoteDisks, sampleDisks, recordDisks, sizeWords, FILLING_DAYS, FULL_PERCENT, LOW_FREE_BYTES, REMOTE_DF, type HostDisks } from "../disks";
+import { remoteSpace, spaceReport, spaceSentence, REMOTE_DU, SPACE_TTL_MS, type SpaceReport } from "../space";
 import { listDocuments, readDocument, ago as publishedAgo } from "./documents";
 import type { Kiosk } from "./kiosk";
 import { MEDIA_ACTIONS, mediaSentence, type MediaState } from "../screenmedia";
@@ -238,6 +239,51 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
       const full = hosts.flatMap((h) => h.disks.filter(nearlyFull).map((d) => `${h.host} ${d.mount}`));
       const filling = hosts.flatMap((h) => h.disks.filter(fillingFast).map((d) => `${h.host} ${d.mount}`));
       return spoken(disksSentence(hosts), { hosts }, brief, { disks: hosts.reduce((n, h) => n + h.disks.length, 0), nearlyFull: full, fillingFast: filling, unreachable: hosts.filter((h) => h.error).map((h) => h.host) });
+    }
+  );
+
+  server.tool(
+    "disk_usage",
+    `What is using the space on one machine, the follow-up to a nearly full disk ("what is filling yacht's disk?"). On a Cyberdeck node: the biggest folders in the home directory, each with its biggest subfolder (~/Library -> ~/Library/Developer), and the code roots sized from the repo index with how much of it is rebuildable build output (node_modules, build dirs) and which repos hold the most. On a manifest host without a node (agentic): a bounded read-only du of / two levels deep over ssh. A node walks its home in the background (minutes on a big disk) and keeps the result ${SPACE_TTL_MS / 3600_000} h, already done when its disk is nearly full; if it answers "measuring", say so and offer to ask again. Read-only: suggest what could go, never delete, and leave the decision to Eric.`,
+    {
+      host: z.string().max(64).optional().describe("The machine (a node or manifest host name); default this node"),
+      fresh: z.boolean().default(false).describe("Measure again even if the last walk is recent"),
+      brief: BRIEF,
+    },
+    async ({ host, fresh, brief }) => {
+      const me = cfg.nodeName;
+      const want = (host ?? me).toLowerCase();
+      let report: SpaceReport;
+      let name = me;
+      let via: "self" | "cyberdeck" | "ssh" = "self";
+      if (want === me.toLowerCase()) {
+        report = await spaceReport(db, cfg.roots, { waitMs: 20_000, fresh });
+      } else {
+        const node = peers().find((n) => n.name.toLowerCase() === want);
+        if (node) {
+          name = node.name; via = "cyberdeck";
+          try {
+            const res = await peerFetch(node, `/api/disks/usage?wait=15000${fresh ? "&fresh=1" : ""}`, { signal: AbortSignal.timeout(node.probe_device ? 30_000 : 25_000) });
+            if (res.status === 404) return fail(`${node.name} runs an older Cyberdeck without disk usage; it updates within the hour.`);
+            if (!res.ok) return fail(`${node.name} answered HTTP ${res.status}.`);
+            report = (await res.json()) as SpaceReport;
+          } catch (err) {
+            return fail(`${node.name} did not answer: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        } else {
+          const manifest = control.fleetDir() ? await control.cached<ManifestHost[]>("hosts", ["hosts", "--json"], []) : [];
+          const h = manifest.find((m) => m.name.toLowerCase() === want && m.ssh);
+          if (!h) return fail(`No node or manifest host named "${host}" with a way to measure it (it needs a paired Cyberdeck node or an ssh alias).`);
+          const t = resolveShellHost(manifest, me, h.name);
+          if ("error" in t) return fail(t.error);
+          name = h.name; via = "ssh";
+          const r = await runShell(t, REMOTE_DU, "~", 60);
+          if (r.timedOut) return fail(`du on ${h.name} did not finish in 60 s.`);
+          report = remoteSpace(r.stdout);
+          if (!report.entries.length) return fail(`du on ${h.name} returned nothing (${lastLine(r.stderr) || `exit ${r.code}`}).`);
+        }
+      }
+      return spoken(spaceSentence(name, report), { host: name, via, ...report }, brief, { host: name, via, state: report.state, measuredAt: report.measuredAt, biggest: report.entries.slice(0, 4).map((e) => e.path), reclaimableBytes: report.repos.junkBytes });
     }
   );
 

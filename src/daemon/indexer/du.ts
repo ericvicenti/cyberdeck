@@ -15,6 +15,35 @@ export function lowPriority(platform = process.platform, has = existsSync): stri
 const PREFIX = lowPriority();
 let tail: Promise<unknown> = Promise.resolve();
 
+/** Run `fn` after every `du` already queued daemon-wide (the indexer's and the space report's share one queue). */
+export function serialDu<T>(fn: () => Promise<T>): Promise<T> {
+  const result = tail.then(fn, fn);
+  tail = result.catch(() => {});
+  return result;
+}
+
+/** `du -xk -d 1 <dir>` at background priority, in the shared queue: the directory's total and its direct subdirectories, in bytes. Null when it took longer than `timeoutMs`. */
+export function duTree(dir: string, timeoutMs: number): Promise<{ bytes: number; children: Map<string, number> } | null> {
+  return serialDu(async () => {
+    const proc = Bun.spawn([...PREFIX, "du", "-xk", "-d", "1", dir], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+    const timer = setTimeout(() => proc.kill(), timeoutMs);
+    const text = await new Response(proc.stdout).text();
+    await proc.exited;
+    clearTimeout(timer);
+    if (proc.signalCode) return null;
+    const children = new Map<string, number>();
+    let bytes = 0;
+    for (const line of text.split("\n")) {
+      const m = line.match(/^(\d+)\s+(.+)$/);
+      if (!m) continue;
+      const b = parseInt(m[1], 10) * 1024;
+      if (m[2] === dir) bytes = b;
+      else children.set(m[2], b);
+    }
+    return { bytes, children };
+  });
+}
+
 /** `du -sk` sizes in bytes keyed by path, serialised daemon-wide. */
 export function duBytes(paths: string[]): Promise<Map<string, number>> {
   const run = async () => {
@@ -33,9 +62,7 @@ export function duBytes(paths: string[]): Promise<Map<string, number>> {
     return out;
   };
   if (paths.length === 0) return Promise.resolve(new Map());
-  const result = tail.then(run, run);
-  tail = result.catch(() => {});
-  return result;
+  return serialDu(run);
 }
 
 /** How long a repo's junk size stays good. Sizes are informational; a new or removed junk dir re-measures at once. */

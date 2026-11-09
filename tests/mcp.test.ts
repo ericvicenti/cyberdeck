@@ -9,6 +9,7 @@ import { homedir } from "os";
 import { startTestServer, testConfig, TEST_TOKEN, type TestServer } from "./helpers";
 import { expandPath } from "../src/daemon/api/mcp-node";
 import { Database } from "bun:sqlite";
+import { remoteSpace, repoSpace, spaceSentence, type SpaceReport } from "../src/daemon/space";
 import { diskTrend, disksSentence, ensureDiskSamples, recordDisks, remoteDisks, trendWords, withTrends } from "../src/daemon/disks";
 
 const FLEET_STUB = join(import.meta.dir, "fixtures", "fleet");
@@ -146,7 +147,7 @@ describe("mcp tools", () => {
     const client = await connect(srv.base);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["announce", "collab_add", "collab_run", "collab_tasks", "deck_context", "delegate", "delegate_result", "disks", "documents", "edit_file", "fleet_status", "grep", "handoff", "handoff_note", "hosts", "list_dir", "listen", "media", "note", "open_url", "projects", "read_document", "read_file", "repos", "repos_detail", "run_log", "scan", "service_logs", "services", "services_restart", "sessions", "sessions_search", "shell", "status", "todo", "todo_add", "todo_done", "write_file"]);
+    expect(names).toEqual(["announce", "collab_add", "collab_run", "collab_tasks", "deck_context", "delegate", "delegate_result", "disk_usage", "disks", "documents", "edit_file", "fleet_status", "grep", "handoff", "handoff_note", "hosts", "list_dir", "listen", "media", "note", "open_url", "projects", "read_document", "read_file", "repos", "repos_detail", "run_log", "scan", "service_logs", "services", "services_restart", "sessions", "sessions_search", "shell", "status", "todo", "todo_add", "todo_done", "write_file"]);
     for (const t of tools) {
       expect(t.name).toMatch(/^[a-z0-9_]{1,40}$/);
       expect(t.description?.length ?? 0).toBeGreaterThan(20);
@@ -760,6 +761,52 @@ test("delegate without a Seed bridge set up fails fast with the setup hint", asy
   expect(dr.isError).toBe(true);
   expect(dr.content[0]?.text).toMatch(/no delegated sessions yet/);
 }, 30_000);
+
+describe("disk_usage", () => {
+  const G = 1024 ** 3;
+  test("remoteSpace keeps the top-level dirs with their biggest children; spaceSentence names them", () => {
+    const r = remoteSpace("52428800 /\n41943040 /var\n36700160 /var/lib\n5242880 /home\n4194304 /home/eric\n1024 /etc\n", 1);
+    expect(r.entries.map((e) => [e.path, e.bytes / G, e.children.map((c) => c.path)])).toEqual([["/var", 40, ["/var/lib"]], ["/home", 5, ["/home/eric"]]]);
+    expect(spaceSentence("agentic", r)).toBe("agentic: the biggest are /var 40 GB (most in /var/lib, 35 GB), /home 5 GB (most in /home/eric, 4 GB).");
+  });
+
+  test("repos are counted once (nested worktrees belong to their parent) and build output is named", () => {
+    const db = new Database(":memory:");
+    db.run("CREATE TABLE repos (path TEXT, size_bytes INTEGER, junk_bytes INTEGER)");
+    for (const [p, size, junk] of [["/h/Code/Seed", 30, 12], ["/h/Code/Seed/.wt/a", 10, 8], ["/h/Code/Deck", 2, 0]] as const)
+      db.query("INSERT INTO repos VALUES (?, ?, ?)").run(p, size * G, junk * G);
+    const r = repoSpace(db);
+    expect([r.count, r.bytes / G, r.junkBytes / G]).toEqual([3, 32, 12]);
+    const report: SpaceReport = { measuredAt: null, state: "measuring", home: "~", entries: [], slow: [], repos: r };
+    expect(spaceSentence("yacht", report)).toBe("yacht: the home folder has not been measured yet; 12 GB of the 3 repos is rebuildable build output (most in /h/Code/Seed, 12 GB); measuring the home folder now, ask again in a few minutes.");
+  });
+
+  test("the tool measures this node's home, reads a peer over /api/disks/usage, and du over ssh for a host without a node", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "cd-space-"));
+    writeFileSync(join(scratch, "loose.txt"), "x");
+    process.env.CYBERDECK_SPACE_HOME = scratch;
+    const own = startTestServer(testConfig({ fleetDir: FLEET_STUB, nodeName: "test-node" }));
+    own.db.query("INSERT INTO nodes (id, name, url, token, added_at) VALUES (?, ?, ?, ?, ?)").run("n-bare-s", "Bare", bare.base, TEST_TOKEN, Date.now());
+    const client = await connect(own.base);
+    try {
+      const self = await call(client, "disk_usage", { brief: true });
+      expect(self.isError).toBeFalsy();
+      expect((self.structuredContent as any)).toMatchObject({ host: "test-node", via: "self", state: "ready" });
+      expect((self.structuredContent as any).measuredAt).toBeGreaterThan(0);
+      const peer = parsed(await call(client, "disk_usage", { host: "bare" }));
+      expect(peer).toMatchObject({ host: "Bare", via: "cyberdeck", state: "ready" });
+      const ssh = await call(client, "disk_usage", { host: "other", brief: true });
+      expect(ssh.content[0]?.text).toContain("other: the biggest are /var 40 GB (most in /var/lib, 35 GB)");
+      expect(readFileSync(SSH_LOG, "utf8")).toContain("du -xk -d 2 /");
+      const none = await call(client, "disk_usage", { host: "phone" });
+      expect(none.isError).toBe(true);
+    } finally {
+      await client.close();
+      own.stop();
+      delete process.env.CYBERDECK_SPACE_HOME;
+    }
+  }, 30_000);
+});
 
 describe("disks", () => {
   test("remoteDisks keeps block devices only and disksSentence names the nearly full ones first", () => {

@@ -66,7 +66,7 @@ beforeAll(async () => {
 
   daemon = Bun.spawn(["bun", "run", join(ROOT, "src/daemon/main.ts")], {
     // pty runner only: a tmux-backed session would outlive this sandboxed daemon
-    env: { ...process.env, CYBERDECK_HOME: cyberdeckHome, CYBERDECK_SESSIONS_TMUX: "0", CYBERDECK_USAGE_NET: "0" },
+    env: { ...process.env, CYBERDECK_HOME: cyberdeckHome, CYBERDECK_SESSIONS_TMUX: "0", CYBERDECK_USAGE_NET: "0", CYBERDECK_SPACE_AUTO: "0" },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -588,7 +588,7 @@ test("fleet: pair a second node via the UI and browse it", async () => {
     JSON.stringify({ nodeName: "second-box", port: 4796, bind: "127.0.0.1", roots: [], dataRoots: [], watch: false, autoUpdate: false, junkDirs: [], skipDirs: [], scanDepth: 1, fleetDir: join(ROOT, "tests", "fixtures", "fleet") })
   );
   daemon2 = Bun.spawn(["bun", "run", join(ROOT, "src/daemon/main.ts")], {
-    env: { ...process.env, CYBERDECK_HOME: home2, CYBERDECK_SESSIONS_TMUX: "0", CYBERDECK_USAGE_NET: "0", DECK_STUB_HOST: "second-box" },
+    env: { ...process.env, CYBERDECK_HOME: home2, CYBERDECK_SESSIONS_TMUX: "0", CYBERDECK_USAGE_NET: "0", CYBERDECK_SPACE_AUTO: "0", DECK_STUB_HOST: "second-box" },
     stdout: "pipe",
     stderr: "pipe",
   });

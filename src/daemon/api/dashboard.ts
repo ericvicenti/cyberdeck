@@ -1,6 +1,7 @@
 // Home dashboard: everything the widgets on the home page need in one call.
 //   GET /api/dashboard  -> { at, usage: {claude, codex}, disks, system, activity, redundancy, backup }
 //   GET /api/disks      -> { at, disks } (just this node's volumes, each with its fill `trend`; the `disks` MCP tool reads it from every peer)
+//   GET /api/disks/usage?wait=ms&fresh=1 -> SpaceReport (what is using the space: home entries and repos; `disk_usage` reads it from every peer)
 //   GET  /api/usage/codex/resets -> the Codex rate-limit reset credits (with expiry)
 //   POST /api/usage/codex/reset  -> spend one, through the official `codex app-server`
 //
@@ -19,7 +20,8 @@ import type { CyberdeckConfig } from "../config";
 import { CYBERDECK_HOME } from "../config";
 import { readCodexResets, consumeCodexReset, type CodexResetOutcome } from "../codexrpc";
 import { randomUUID } from "crypto";
-import { ensureDiskSamples, sampleDisks, SAMPLE_EVERY_MS, type DiskTrend } from "../disks";
+import { ensureDiskSamples, nearlyFull, sampleDisks, SAMPLE_EVERY_MS, type DiskTrend } from "../disks";
+import { spaceReport, startSpaceMeasure } from "../space";
 
 export const USAGE_CACHE_MS = 60_000;
 const FETCH_TIMEOUT_MS = 10_000;
@@ -472,11 +474,19 @@ export function registerDashboardRoutes(app: Hono, db: Database, cfg: CyberdeckC
   // hourly free-space samples of this node's own volumes, so every reading can carry its fill rate
   ensureDiskSamples(db);
   const ownDisks = async () => sampleDisks(db, cfg.nodeName, await diskInfo(cfg));
-  const sampler = setInterval(() => ownDisks().catch(() => {}), SAMPLE_EVERY_MS + 60_000);
-  const firstSample = setTimeout(() => ownDisks().catch(() => {}), 60_000);
+  // a nearly full disk gets its "what is using the space" report measured ahead of the question
+  const sample = () => ownDisks().then((disks) => {
+    if (process.env.CYBERDECK_SPACE_AUTO !== "0" && disks.some(nearlyFull)) startSpaceMeasure(db, cfg.roots).catch(() => {});
+  }).catch(() => {});
+  const sampler = setInterval(sample, SAMPLE_EVERY_MS + 60_000);
+  const firstSample = setTimeout(sample, 60_000);
   sampler.unref?.(); firstSample.unref?.();
 
   app.get("/api/disks", async (c) => c.json({ at: Date.now(), disks: await ownDisks() }));
+  app.get("/api/disks/usage", async (c) => {
+    const waitMs = Math.min(Math.max(Number(c.req.query("wait")) || 0, 0), 30_000);
+    return c.json(await spaceReport(db, cfg.roots, { waitMs, fresh: Boolean(c.req.query("fresh")) }));
+  });
 
   app.get("/api/dashboard", async (c) => {
     const fresh = Boolean(c.req.query("fresh"));
