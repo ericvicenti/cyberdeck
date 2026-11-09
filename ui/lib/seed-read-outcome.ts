@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { seedAgentTitle, seedReadFailureTitle as failure } from "./seed-route-title";
+import { seedAgentTitle, seedListTitle, seedReadFailureTitle as failure } from "./seed-route-title";
 import { type SeedAgentsHost, type SeedAgentsRoute } from "@seed-hypermedia/agents-ui";
 
 const serverKey = (value: string) => value.replace(/\/+$/, "");
@@ -11,7 +11,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
   const current = useRef({ host, route });
   const mounted = useRef(true);
   current.current = { host, route };
-  const [results, setResults] = useState<{ host: SeedAgentsHost; values: Partial<Record<Outcome["kind"], Outcome>> }>();
+  const [results, setResults] = useState<{ host: SeedAgentsHost; values: Partial<Record<string, Outcome>> }>();
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
@@ -20,6 +20,8 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
     if (!host || host.signer?.accountUid !== outcome.accountUid ||
       serverKey("serverUrl" in selected && selected.serverUrl || host.serverUrl) !== serverKey(outcome.serverUrl)) return false;
     switch (outcome.kind) {
+      case "child-session-list": return (selected.key === "agents" || selected.key === "agent-server" || selected.key === "agent" && (!selected.tab || selected.tab === "sessions")) && !!selected.expandedSessions?.includes(outcome.path) && outcome.listOwner === JSON.stringify([selected.key, selected.key === "agent" ? selected.agentId : "", selected.sessionPages || 1]);
+      case "global-session-list": return selected.key === outcome.routeKey && (selected.key === "agents" || selected.key === "agent-server") && String(selected.sessionPages || 1) === outcome.path;
       case "memory-selection":
       case "memory-file": return selected.key === "agent" && selected.agentId === outcome.agentId && selected.memoryPath === outcome.path;
       case "session-list": return selected.key === "agent" && selected.agentId === outcome.agentId && (!selected.tab || selected.tab === "sessions") && String(selected.sessionPages || 1) === outcome.path;
@@ -38,13 +40,14 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       if (!mounted.current || owner.host !== host || !owns(owner.route, outcome)) return;
       setResults(previous => {
         const values = previous?.host === host ? previous.values : {};
-        const old = values[outcome.kind];
+        const key = outcome.kind === "child-session-list" ? `${outcome.kind}:${outcome.listOwner}:${outcome.path}` : outcome.kind;
+        const old = values[key];
         if (old && old.error === outcome.error) {
           const { error: _oldError, ...oldValue } = old;
           const { error: _error, ...value } = outcome;
           if (JSON.stringify(oldValue) === JSON.stringify(value)) return previous;
         }
-        return { host, values: { ...values, [outcome.kind]: outcome } };
+        return { host, values: { ...values, [key]: outcome } };
       });
     },
   } satisfies SeedAgentsHost), [host]);
@@ -52,12 +55,18 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
     const value = results?.host === host ? results.values[kind] : undefined;
     return value && owns(route, value) ? value : undefined;
   };
-  let title: string | undefined;
+  let title: string | undefined = route.key === "agents" || route.key === "agent-server" ? "Loading sessions · Seed" : undefined;
   const memory = get("memory-file"), agent = get("agent"), session = get("session"), run = get("run"), event = get("session-event");
   const list = get("session-list"), selection = get("memory-selection"), trigger = get("trigger");
-  const tool = get("session-tool");
-  if (agent?.error && route.key === "agent") title = failure(agent.error, "Agent");
+  const tool = get("session-tool"), globalList = get("global-session-list");
+  const children = results?.host === host ? Object.values(results.values).filter((value): value is Outcome => !!value && value.kind === "child-session-list" && owns(route, value)) : [];
+  const child = children.find(value => value.error) || children.find(value => value.pending);
+  if (globalList?.error) title = failure(globalList.error, "Sessions");
+  else if (agent?.error && route.key === "agent") title = failure(agent.error, "Agent");
   else if (list?.error) title = failure(list.error, "Sessions");
+  else if (child?.error) title = failure(child.error, (child.error as { missingEntry?: boolean }).missingEntry ? "Sub-session parent" : "Sub-sessions");
+  else if (child?.pending) title = "Loading sub-sessions · Seed";
+  else if (globalList && (route.key === "agents" || route.key === "agent-server")) title = globalList.pending ? "Loading sessions · Seed" : seedListTitle(route);
   else if (memory?.error) {
     const status = (memory.error as { status?: number })?.status;
     title = `Memory file ${status === 401 || status === 403 ? "access denied" : status === 404 ? "not found" : "unavailable"} · Seed`;

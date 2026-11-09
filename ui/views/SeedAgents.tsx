@@ -3,6 +3,7 @@
 // (ui/lib/seed-agents.ts) and keeps the route in its hash URL (#/seed?r=<path>). The published
 // package keeps this view aligned with the UI Seed ships without copying that UI into Cyberdeck.
 import { useEffect, useMemo } from "react";
+import { seedListTitle } from "../lib/seed-route-title";
 import { useSeedReadOutcome } from "../lib/seed-read-outcome";
 import { updateParams, useRouteTitle, nodeName } from "../lib/navigation";
 import { SeedAgentsProvider, SeedAgentsView, seedAgentsRouteFromPath, seedAgentsRouteToPath, type SeedAgentsRoute } from "@seed-hypermedia/agents-ui";
@@ -24,7 +25,7 @@ export default function SeedAgents({ params }: { params: URLSearchParams }) {
     try {
       const route = seedAgentsRouteFromPath(path);
       const canonical = seedAgentsRouteToPath(route);
-      if (path.replace(/^\/+/, "") && !canonical) return null;
+      if (path.replace(/^\/+/, "").split("?")[0] && route.key === "agents") return null;
       return { route, canonical };
     } catch { return null; }
   }, [path]);
@@ -57,8 +58,8 @@ export default function SeedAgents({ params }: { params: URLSearchParams }) {
 
 function seedRouteTitle(route: SeedAgentsRoute): string {
   switch (route.key) {
-    case "agents": return "Seed";
-    case "agent-server": return `${route.serverUrl} · Seed server`;
+    case "agents":
+    case "agent-server": return seedListTitle(route);
     case "agent-session": return `${route.sessionId} · Seed session`;
     case "agent-run": return `${route.runId} · Seed run`;
     case "agent": return `${route.memoryPath || route.triggerId || route.tab || "sessions"} · ${route.agentId} · Seed`;

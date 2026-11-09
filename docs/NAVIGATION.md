@@ -69,7 +69,7 @@ credentials should not be replayed from a link.
 | GamesSection / Games | installed native games and import form | Part of Applications. Play/import are actions; no automatic execution from links. |
 | CaseworkConsole | selected device, events, camera/media/QR, calls, native scene actions | Selected device is covered by `device=<id>`, including canonical default, reload/history, missing-device error/title and no action replay. Visited consoles retain their socket, calls and previews across apps, primary views, node URLs and history; lock tears them down. `media=<stored-name>` fetches only an existing authenticated upload: fresh open, reload and history never capture, upload or autoplay. Invalid, missing and denied previews have matching errors/titles. Tests use synthetic devices/tracks only. |
 | `applications?app=afterglow&tab=music` / Spotify (the listening room), SpotifyRecordings, SpotifyVisualizer | shelves, entities, query, pagination, recordings, immersive mode | One player everywhere, inside Afterglow: `shelf`, `id`, `q`, `radio`, `page`, `immersive` and `shelf=history&recording=<id>` restore through direct links, reload and history; OAuth returns to the requested content, including saved recordings; read failures and unavailable pages retain the link with an honest title and read-only retry. Late or hidden reads cannot replace another view; no link starts playback; the SDK/player stays mounted through URL and primary-view changes. Legacy `#/spotify` links are rewritten. |
-| `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session/message/tool/prompt, list pages, run, server, node | Nested paths, canonical defaults/errors, Back/Forward and node-preserving new-window links covered. Titles observe the displayed authenticated reads, including external servers; late responses are bound to the signing host/account, server and entity. Session message/prompt/tool inspectors and full tool input/output restore without replacing the transcript or composer. Agent session-list page counts restore and retry. Other global/server list/search/disclosure and attachment state, plus older-message history outside returned events, remain. See November 7–8 below. |
+| `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session/message/tool/prompt, list pages, run, server, node | Nested paths, canonical defaults/errors, Back/Forward and node-preserving new-window links covered. Titles observe the displayed authenticated reads, including external servers; late responses are bound to the signing host/account, server and entity. Session message/prompt/tool inspectors and full tool input/output restore without replacing the transcript or composer. Agent session-list page counts restore and retry. Global/server list rounds and sub-session disclosures also restore (November 9). Other transcript disclosures and attachment state, plus older-message history outside returned events, remain. |
 | `desktop` / Desktop | selected node and connection | Primary route/title and URL-selected node covered; connect/input/credentials remain explicit runtime actions. |
 | `desk` / Desk + voice | Fleet/Services/Agents glance tab, voice call, transcript, setup, mute | `tab=services` / `tab=agents` restore from fresh links and history; default fleet ignores stale local preferences, invalid tabs replace to the default, and titles match. Tab transitions retain the voice subtree without reconnecting. Calls and permissions stay explicit. The call owner now stays mounted across primary views, node changes and screen-remote navigation. Voice requests stay on the serving daemon’s hub relay; idle configuration refreshes on return. Simulated live-room tests prove no disconnect/reconnect during navigation, release of push-to-talk when hidden, and disconnect on authentication lock. Real calls/microphones are not used by tests. |
 | `projects` / Projects | selected project, nested slug, unassigned repos, query | URL selection, canonical default, filter, title, missing project covered. Nested slugs use the same `p` key. Editing launches Files/Editor. |
@@ -692,3 +692,48 @@ read/detail state and older-message history; Commander's deeper malformed/match/
 decision retry and remote-seat matrix; native/device and original-file viewer
 boundaries. This slice does not complete the routine. Fleet receipts, rollback
 paths and any pending hosts are in today's Deck report.
+
+
+## 2026-11-09: Global/server session lists and expanded parents
+
+The global Seed list and individual server lists now use `pages=<2..100>` for
+loaded cursor rounds. Each round reads every server that still has another page,
+waits for those displayed reads, and deduplicates session identities per server.
+“Load more sessions” pushes one entry; Back hides later cached rounds and Forward
+restores them. Fresh links and refresh reconstruct the cursors in order. Invalid
+or default counts normalize with replace; exhausted lists replace with the actual
+last round. Failed later pages retain earlier rows and retry in place. Malformed
+responses and repeated cursors produce a visible, retryable failure.
+
+Global, server and agent session lists accept repeated `child=` selections,
+encoded JSON `[server, parent-session-id]` pairs. `@host` identifies the selected
+node's configured server without storing the browser's current proxy origin.
+Selections are bounded, sorted and deduplicated. Only matching rendered parent
+rows can expand or read child sessions; a link cannot introduce another server
+or fetch an arbitrary parent. Missing parents keep their URLs and show an honest
+error. A known parent whose child count has become zero still restores its selected
+empty disclosure. Expanded children do not send a message, create a session or follow a run.
+
+Titles observe the displayed lists and child reads, including loading, denied,
+missing, unavailable and malformed outcomes. Independent expanded parents retain
+independent failures. Ownership includes the signing host/account, server,
+list/agent, page count and parent selection, so a delayed response cannot rename
+Back, another page/node/view or the authentication screen. Child-list retries are
+explicit; a swallowed published-package retry option is corrected. The list and
+composer remain mounted during URL/history changes.
+
+There is no dedicated search field on the published global/server lists. Model
+and account/resource pickers are editable form controls; this change adds no new
+search feature. Server account/provider read dialogs and their nested selections
+need separate route ownership. Remaining Seed navigation also includes transcript/
+thinking-group and other read disclosures, attachment details/errors, and selected messages
+outside the returned event window. Commander deep read/decision failures and
+remote seats, plus native/device/original-file boundaries, remain separate.
+
+Repeat `bun run typecheck`, `bun run build`, then
+`bun test tests/seed-titles-browser.test.ts tests/seed-navigation.test.ts tests/term-navigation.test.ts --timeout 30000`.
+The actual pinned package and production UI run against synthetic signed reads;
+`CYBERDECK_TEST_UI` selects an exact build and `CYBERDECK_TEST_ORIGIN` loads installed
+assets through loopback. API/signature data stays synthetic. Keep the Bun patch
+until the upstream route and host APIs provide this behavior. Today's Deck report
+records exact artifacts, fleet backups, preservation checks and pending hosts.

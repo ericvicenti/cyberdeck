@@ -16,6 +16,9 @@ let memoryRemoved = false;
 let memoryReadStatus = 200, holdMemoryRead = false;
 let sessionReadStatus = 200, runReadStatus = 200, listReadStatus = 200, holdListRead = false;
 let payloadStatus = 200, holdPayload = false, malformedPayload = "";
+let emptySeedLists = false, childEmpty = false;
+let childLists = false, childReadStatus = 200, holdChildRead = false, malformedChild = false;
+let globalPaged = false, globalListStatus = 200, globalFailCursor = "", holdGlobalList = false, malformedList = "";
 const reads: { node: string; action: any }[] = [];
 const toolId = "call two/?&";
 const toolEvents = [
@@ -39,7 +42,7 @@ const readActions = new Set(["ListAgents","GetAgent","GetSession","GetSessionEve
 const ok = (value: unknown) => new Response(cbor.encode(value) as unknown as BodyInit,{headers:{"content-type":"application/cbor"}});
 const fail = (status: number, message: string) => new Response(cbor.encode({_:"Error",message}) as unknown as BodyInit,{status,headers:{"content-type":"application/cbor"}});
 const agent = (id: string, node: string) => ({id,account,definition:{name:renamed || `${node} ${id === "beta" ? "Beta assistant" : "Alpha assistant"}`,systemPrompt:"Fixture",model:"fixture",modelProvider:"fixture",mcpServers:[]},stateDir:"",status:"idle",createdAt:1,updatedAt:2});
-const session = (id: string, node: string) => ({id,account,agentId:"alpha",title:id === "untitled" ? "" : `${node} ${id === "two" ? "Second conversation" : id === "older" ? "Older conversation" : "First conversation"}`,status:"idle",createdAt:1,updatedAt:2});
+const session = (id: string, node: string) => ({id,account,agentId:"alpha",title:id === "untitled" ? "" : `${node} ${id === "two" ? "Second conversation" : id === "older" ? "Older conversation" : "First conversation"}`,status:"idle",createdAt:1,updatedAt:2,...(childLists && ["one", "two"].includes(id) ? { childSessionCount: id === "one" ? 2 : 1 } : {})});
 const run = (id: string, node: string) => ({id,account,rootRunId:id,depth:0,kind:"workflow",origin:"user",title:`${node} Review navigation`,status:"succeeded",createdAt:1,updatedAt:2,finishedAt:2});
 const server = Bun.serve({hostname:"127.0.0.1",port:0,async fetch(req,server) {
   const url=new URL(req.url),path=url.pathname;
@@ -61,6 +64,26 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,async fetch(req,server) {
       const status = listReadStatus;
       if (holdListRead) await new Promise<void>(r => pending.add(r));
       if (status !== 200) return fail(status, "Session list read failed");
+    }
+    if (action._ === "ListSessions" && !action.parentSessionId && emptySeedLists) return ok({ _: "ListSessionsResponse", sessions: [], agents: [] });
+    if (action._ === "ListSessions" && action.parentSessionId) {
+      const status = childReadStatus, malformed = malformedChild;
+      if (holdChildRead) await new Promise<void>(r => pending.add(r));
+      if (status !== 200) return fail(status, "Sub-session list read failed");
+      return ok({ _: "ListSessionsResponse", sessions: childEmpty ? [] : [{ ...session(`child-${action.parentSessionId}`, node), parentSessionId: malformed ? "different-parent" : action.parentSessionId, title: `${node} Child of ${action.parentSessionId}` }] });
+    }
+    if (action._ === "ListSessions" && !action.agentId && !action.parentSessionId) {
+      const status = globalListStatus, malformed = malformedList;
+      const applies = !globalFailCursor || action.cursor === globalFailCursor;
+      if (holdGlobalList && applies) await new Promise<void>(r => pending.add(r));
+      if (applies && status !== 200) return fail(status, "Global session list read failed");
+      if (applies && malformed) return ok(malformed === "response" ? { _: "GetSessionResponse" }
+        : { _: "ListSessionsResponse", sessions: malformed === "sessions" ? {} : [session("one", node)],
+            agents: malformed === "agents" ? null : [agent("alpha", node)],
+            nextCursor: malformed === "cursor" ? 42 : action.cursor || "page-2" });
+      if (globalPaged) return ok({ _: "ListSessionsResponse", agents: [agent("alpha", node)],
+        sessions: [session(action.cursor === "page-3" ? "older" : action.cursor === "page-2" ? "two" : "one", node)],
+        nextCursor: action.cursor === "page-3" || node === "external" && action.cursor === "page-2" ? undefined : action.cursor === "page-2" ? "page-3" : "page-2" });
     }
     if (action._ === "GetRun" && id === "review" && runReadStatus !== 200) return fail(runReadStatus, "Run read failed");
     if (action._ === "GetSessionEvent") {
@@ -92,10 +115,10 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,async fetch(req,server) {
       case "GetSession":return ok({_:"GetSessionResponse",session:session(id,node),events:transcriptEvents(id),systemPromptMarkdown:"Fixture system prompt — read only"});
       case "GetRun":return ok({_:"GetRunResponse",run:run(id,node)});
       case "GetAgentTrigger":return ok({_:"GetAgentTriggerResponse",trigger:{id,agentId:"alpha",account,name:"Morning review",enabled:true,source:{type:"schedule",schedule:{kind:"weekly",daysOfWeek:[1],timeOfDay:"09:00",timezone:"UTC"}},prompt:"Fixture",createdAt:1,updatedAt:2},sessions:[],firings:[]});
-      case "ListAgents":return ok({_:"ListAgentsResponse",agents:[agent("alpha",node),agent("beta",node)]});
+      case "ListAgents":return ok({_:"ListAgentsResponse",agents:emptySeedLists ? [] : [agent("alpha",node),agent("beta",node)]});
       case "ListSessions":return action.agentId === "paged"
         ? ok({_:"ListSessionsResponse",sessions:[session(action.cursor === "page-3" ? "older" : action.cursor === "page-2" ? "two" : "one",node)],nextCursor:action.cursor === "page-3" ? undefined : action.cursor === "page-2" ? "page-3" : "page-2"})
-        : ok({_:"ListSessionsResponse",sessions:[session("one",node),session("two",node)]});
+        : ok({_:"ListSessionsResponse",sessions:[session("one",node),session("two",node)],agents:[agent("alpha",node)]});
       case "ListRuns":return ok({_:"ListRunsResponse",runs:[]});
       case "ListAgentTriggers":return ok({_:"ListAgentTriggersResponse",triggers:[]});
       case "ListAgentMemoryDir":return ok({_:"ListAgentMemoryDirResponse",agentId:action.agentId,path:action.path||"",entries:memoryRemoved ? [] : [{path:"notes/today.md",type:"file",size:12,updatedAt:1},{path:"notes/later.md",type:"file",size:12,updatedAt:1},{path:"notes/folder",type:"dir",size:0,updatedAt:1}],totalBytes:24});
@@ -142,7 +165,7 @@ async function fresh(fn:(page:Page)=>Promise<void>){
  page.setDefaultNavigationTimeout(process.env.CYBERDECK_TEST_ORIGIN ? 30000 : 12000);
  await page.route("**/*",route=>new URL(route.request().url()).origin===server.url.origin?route.continue():route.abort());
  try{await fn(page);}catch(e){console.error(JSON.stringify({title:await page.title(),body:(await page.locator("body").innerText()).slice(0,1800),errors,actions:actions.slice(-15)}));throw e;}
- finally{hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
+ finally{emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
 }
 const href=(path:string,node="")=>`${server.url}#/seed?${new URLSearchParams({r:path,...(node?{node}:{})})}`;
 const title=(page:Page,value:string)=>page.waitForFunction(value=>document.title===value,value);
@@ -675,4 +698,300 @@ test("Seed external-server tool details retain the signer and late reads cannot 
  await page.waitForTimeout(100);
  expect(await page.title()).toBe("Locked · Cyberdeck");
  await page.getByRole("dialog").waitFor({ state: "hidden" });
+}), browserBudget);
+
+const listReads = (start = 0) => reads.slice(start).filter(({ action }) => action._ === "ListSessions" && !action.agentId && !action.parentSessionId);
+const listRoute = (pages = 1, remote = "") => (remote ? `server?url=${encodeURIComponent(remote)}` : "") + (pages > 1 ? `${remote ? "&" : "?"}pages=${pages}` : "");
+const listTitle = (pages = 1, remote = "", suffix = "") => (remote ? `Sessions${pages > 1 ? ` · ${pages} pages` : ""} · ${remote} · Seed server` : pages > 1 ? `Sessions · ${pages} pages · Seed` : "Seed") + suffix + " · Cyberdeck";
+
+test("Seed global session pages restore direct, reload and new-tab links and undo explicit Load more", () => fresh(async page => {
+ globalPaged = true;
+ await page.goto(href("")); await title(page, listTitle());
+ const length = await page.evaluate(() => history.length);
+ await page.getByRole("button", { name: "Load more sessions", exact: true }).click();
+ await title(page, listTitle(2)); await page.getByText("local Second conversation", { exact: true }).waitFor();
+ expect(await page.evaluate(() => history.length)).toBe(length + 1);
+ await page.getByRole("button", { name: "Load more sessions", exact: true }).click();
+ await title(page, listTitle(3)); await page.getByText("local Older conversation", { exact: true }).waitFor();
+ const link = page.url();
+ await page.goBack(); await title(page, listTitle(2));
+ expect(await page.getByText("local Older conversation", { exact: true }).count()).toBe(0);
+ await page.goForward(); await title(page, listTitle(3));
+ expect(page.url()).toBe(link);
+ await page.reload(); await title(page, listTitle(3));
+ await fresh(async tab => { globalPaged = true; await tab.goto(link); await title(tab, listTitle(3)); await tab.getByText("local Older conversation", { exact: true }).waitFor(); });
+}), browserBudget);
+
+test("Seed server pages retain explicit server and signer node across history and fresh links", () => fresh(async page => {
+ globalPaged = true;
+ const remote = `${server.url}seed-fixture/external`;
+ const link = href(listRoute(2, remote), "peer-b");
+ const start = reads.length;
+ await page.goto(link); await title(page, listTitle(2, remote, " · Peer B"));
+ await page.getByText("external Second conversation", { exact: true }).waitFor();
+ expect(listReads(start).map(({ node, action }) => [node, action.cursor || "first"])).toEqual([["external", "first"], ["external", "page-2"]]);
+ await page.reload(); await title(page, listTitle(2, remote, " · Peer B"));
+ await fresh(async tab => { globalPaged = true; await tab.goto(page.url()); await title(tab, listTitle(2, remote, " · Peer B")); });
+ await page.getByTestId("seed-node").selectOption("peer-a"); await title(page, "Seed · Peer A · Cyberdeck");
+ await page.goBack(); globalPaged = true; await title(page, listTitle(2, remote, " · Peer B"));
+}), browserBudget);
+
+test("Seed global list rounds restore unequal per-server cursors without duplicates or extra entries", () => fresh(async page => {
+ globalPaged = true;
+ await page.addInitScript(urls => localStorage.setItem("seed.agents.setting.agent-server-urls", JSON.stringify(urls)), [`${server.url}seed-fixture/local`, `${server.url}seed-fixture/external`]);
+ const start = reads.length;
+ await page.goto(href(listRoute(3))); await title(page, listTitle(3));
+ for (const name of ["local First conversation", "local Second conversation", "local Older conversation", "external First conversation", "external Second conversation"]) {
+  expect(await page.getByText(name, { exact: true }).count()).toBe(1);
+ }
+ expect(await page.getByText("external Older conversation", { exact: true }).count()).toBe(0);
+ expect(listReads(start).map(({ node, action }) => `${node}:${action.cursor || "first"}`).sort()).toEqual(["local:first", "local:page-2", "local:page-3", "external:first", "external:page-2"].sort());
+ const length = await page.evaluate(() => history.length);
+ await page.reload(); await title(page, listTitle(3));
+ expect(await page.evaluate(() => history.length)).toBe(length);
+}), browserBudget);
+
+test("Seed invalid/default and exhausted global/server page counts canonicalize with replace", () => fresh(async page => {
+ globalPaged = true;
+ const remote = `${server.url}seed-fixture/external`;
+ for (const value of ["1", "0", "-1", "101", "NaN", "2.5", "02", "2%26junk"]) {
+  await page.goto(href(`?pages=${value}`)); await title(page, listTitle());
+  await page.waitForFunction(() => !new URLSearchParams(location.hash.slice(7)).has("r"));
+  await page.goto(href(`server?url=${encodeURIComponent(remote)}&pages=${value}`)); await title(page, listTitle(1, remote));
+  await page.waitForFunction(remote => new URLSearchParams(location.hash.slice(7)).get("r") === `server?url=${encodeURIComponent(remote)}`, remote);
+ }
+ const length = await page.evaluate(() => history.length);
+ await page.evaluate(() => { location.hash = "#/seed?r=" + encodeURIComponent("?pages=100"); });
+ await title(page, listTitle(3));
+ expect(await page.evaluate(() => history.length)).toBe(length + 1);
+ await page.waitForFunction(() => new URLSearchParams(location.hash.slice(7)).get("r") === "?pages=3");
+ await page.goto(href(listRoute(100, remote))); await title(page, listTitle(2, remote));
+ expect(new URLSearchParams(new URL(page.url()).hash.slice(7)).get("r")).toBe(listRoute(2, remote));
+}), browserBudget);
+
+test("Seed later global-list failures retain earlier rows, honest titles and retry without URL/history changes", () => fresh(async page => {
+ globalPaged = true; globalFailCursor = "page-2";
+ for (const [status, expected] of [[401, "Access denied"], [403, "Access denied"], [404, "Sessions not found"], [503, "Sessions unavailable"]] as const) {
+  globalListStatus = status;
+  await page.goto(href(listRoute(2))); await page.reload(); await title(page, `${expected} · Seed · Cyberdeck`);
+  await page.getByText("local First conversation", { exact: true }).waitFor();
+  const url = page.url(), length = await page.evaluate(() => history.length);
+  globalListStatus = 200;
+  await page.getByRole("button", { name: "Retry", exact: true }).click(); await title(page, listTitle(2));
+  await page.getByText("local Second conversation", { exact: true }).waitFor();
+  expect(page.url()).toBe(url); expect(await page.evaluate(() => history.length)).toBe(length);
+ }
+}), browserBudget);
+
+test("Seed malformed lists and repeated cursors stop safely and retry the displayed read", () => fresh(async page => {
+ globalPaged = true; globalFailCursor = "page-2";
+ for (const malformed of ["response", "sessions", "agents", "cursor", "repeat"]) {
+  malformedList = malformed;
+  await page.goto(href(listRoute(3))); await page.reload(); await title(page, "Sessions unavailable · Seed · Cyberdeck");
+  await page.getByText("local First conversation", { exact: true }).waitFor();
+  const url = page.url(), length = await page.evaluate(() => history.length);
+  malformedList = "";
+  await page.getByRole("button", { name: "Retry", exact: true }).click(); await title(page, listTitle(3));
+  await page.getByText("local Older conversation", { exact: true }).waitFor();
+  expect(page.url()).toBe(url); expect(await page.evaluate(() => history.length)).toBe(length);
+ }
+}), browserBudget);
+
+test("Seed delayed global pages cannot repopulate Back or rename another node, server or locked screen", () => fresh(async page => {
+ globalPaged = true; globalFailCursor = "page-2"; holdGlobalList = true;
+ await page.goto(href("")); await title(page, listTitle());
+ await page.getByRole("button", { name: "Load more sessions", exact: true }).click();
+ while (!pending.size) await page.waitForTimeout(10);
+ await title(page, "Loading sessions · Seed · Cyberdeck");
+ await page.goBack(); await title(page, listTitle());
+ for (const release of pending) release(); pending.clear(); holdGlobalList = false;
+ await page.waitForTimeout(100);
+ expect(await page.getByText("local Second conversation", { exact: true }).count()).toBe(0);
+ expect(await page.title()).toBe(listTitle());
+ holdGlobalList = true; globalListStatus = 403;
+ await page.goto(href(listRoute(2), "peer-a")); while (!pending.size) await page.waitForTimeout(10);
+ await page.evaluate(() => location.hash = "#/seed?node=peer-b&r=session%2Ftwo");
+ await title(page, "peer-b Second conversation · Seed session · Peer B · Cyberdeck");
+ for (const release of pending) release(); pending.clear(); holdGlobalList = false;
+ await page.waitForTimeout(100); expect(await page.title()).toBe("peer-b Second conversation · Seed session · Peer B · Cyberdeck");
+ holdGlobalList = true;
+ await page.goto(href(listRoute(2))); while (!pending.size) await page.waitForTimeout(10);
+ await page.route("**/api/fs/list**", route => route.fulfill({ status: 401, json: { error: "Locked" } }));
+ await page.getByTestId("nav-files").click(); await page.getByPlaceholder("access token").waitFor(); await title(page, "Locked · Cyberdeck");
+ for (const release of pending) release(); pending.clear(); holdGlobalList = false;
+ await page.waitForTimeout(100); expect(await page.title()).toBe("Locked · Cyberdeck");
+}), browserBudget);
+
+const childToken = (id: string, node = "local") => JSON.stringify([node === "external" ? `${server.url}seed-fixture/external` : "@host", id]);
+const withChildren = (path: string, ids: string[], node = "local") => path + ids.map((id, index) => `${path.includes("?") || index ? "&" : "?"}child=${encodeURIComponent(childToken(id, node))}`).join("");
+const childReads = (start = 0) => reads.slice(start).filter(({ action }) => action._ === "ListSessions" && !!action.parentSessionId);
+
+test("Seed sub-session disclosures restore multiple parents and preserve the list/composer owner through history", () => fresh(async page => {
+ childLists = true;
+ await page.goto(href("")); await title(page, listTitle());
+ await page.getByTestId("seed-agents").evaluate(el => el.setAttribute("data-list-owner", "kept"));
+ const length = await page.evaluate(() => history.length);
+ await page.getByRole("button", { name: "2 sub-sessions", exact: true }).click();
+ await page.getByText("local Child of one", { exact: true }).waitFor();
+ await title(page, "Sessions · Sub-sessions · Seed · Cyberdeck");
+ expect(await page.evaluate(() => history.length)).toBe(length + 1);
+ await page.getByRole("button", { name: "1 sub-session", exact: true }).click();
+ await page.getByText("local Child of two", { exact: true }).waitFor();
+ await title(page, "Sessions · 2 sub-session lists · Seed · Cyberdeck");
+ const url = page.url();
+ await page.goBack(); await title(page, "Sessions · Sub-sessions · Seed · Cyberdeck");
+ expect(await page.getByText("local Child of two", { exact: true }).count()).toBe(0);
+ await page.goForward(); await title(page, "Sessions · 2 sub-session lists · Seed · Cyberdeck");
+ expect(await page.getByTestId("seed-agents").getAttribute("data-list-owner")).toBe("kept");
+ expect(page.url()).toBe(url);
+ await page.reload(); await title(page, "Sessions · 2 sub-session lists · Seed · Cyberdeck");
+ await page.getByText("local Child of one", { exact: true }).waitFor(); await page.getByText("local Child of two", { exact: true }).waitFor();
+ await fresh(async tab => { childLists = true; await tab.goto(url); await title(tab, "Sessions · 2 sub-session lists · Seed · Cyberdeck"); await tab.getByText("local Child of two", { exact: true }).waitFor(); });
+}), browserBudget);
+
+test("Seed agent and server sub-session links retain their owner, node and pages on direct open/reload", () => fresh(async page => {
+ childLists = true; globalPaged = true;
+ await page.goto(href(withChildren("agent/alpha", ["one"], "peer-b"), "peer-b"));
+ await page.getByText("peer-b Child of one", { exact: true }).waitFor();
+ await title(page, "Sessions · Sub-sessions · peer-b Alpha assistant · Seed · Peer B · Cyberdeck");
+ await page.reload(); await title(page, "Sessions · Sub-sessions · peer-b Alpha assistant · Seed · Peer B · Cyberdeck");
+ const remote = `${server.url}seed-fixture/external`;
+ await page.goto(href(withChildren(listRoute(2, remote), ["two"], "external"), "peer-a"));
+ await page.getByText("external Child of two", { exact: true }).waitFor();
+ await title(page, `Sessions · 2 pages · Sub-sessions · ${remote} · Seed server · Peer A · Cyberdeck`);
+ const link = page.url();
+ await page.reload(); await title(page, `Sessions · 2 pages · Sub-sessions · ${remote} · Seed server · Peer A · Cyberdeck`);
+ expect(page.url()).toBe(link);
+}), browserBudget);
+
+test("Seed sub-session selection never reads an absent parent or a URL-injected server", () => fresh(async page => {
+ childLists = true;
+ const start = reads.length;
+ for (const path of [withChildren("", ["absent"]), withChildren("agent/alpha", ["absent"]), withChildren("", ["one"], "external")]) {
+  await page.goto(href(path));
+  await title(page, "Sub-session parent not found · Seed · Cyberdeck");
+  await page.getByText("A selected parent session is not in this list. The link has been kept.", { exact: true }).waitFor();
+  const link = page.url(); await page.reload(); await title(page, "Sub-session parent not found · Seed · Cyberdeck"); expect(page.url()).toBe(link);
+ }
+ expect(childReads(start)).toEqual([]);
+}), browserBudget);
+
+test("Seed malformed/duplicate child selections canonicalize once, and unrelated tabs remove list-only state", () => fresh(async page => {
+ childLists = true;
+ const token = childToken("one");
+ await page.goto(href(`?child=invalid&child=${encodeURIComponent(token)}&child=${encodeURIComponent(token)}&child=${encodeURIComponent('["", "bad"]')}`));
+ await page.getByText("local Child of one", { exact: true }).waitFor();
+ await title(page, "Sessions · Sub-sessions · Seed · Cyberdeck");
+ const expected = withChildren("", ["one"]);
+ await page.waitForFunction(expected => new URLSearchParams(location.hash.slice(7)).get("r") === expected, expected);
+ const length = await page.evaluate(() => history.length);
+ await page.reload(); await title(page, "Sessions · Sub-sessions · Seed · Cyberdeck"); expect(await page.evaluate(() => history.length)).toBe(length);
+ await page.goto(href(withChildren("agent/alpha?tab=settings&pages=3", ["one"])));
+ await title(page, "Settings · local Alpha assistant · Seed · Cyberdeck");
+ await page.waitForFunction(() => new URLSearchParams(location.hash.slice(7)).get("r") === "agent/alpha?tab=settings");
+ await page.goto(href("unknown?pages=2")); await title(page, "Page not found · Seed · Cyberdeck");
+}), browserBudget);
+
+test("Seed failed and malformed sub-session reads retry without changing URL, history or the parent list", () => fresh(async page => {
+ childLists = true;
+ const path = withChildren("", ["one"]);
+ for (const [status, malformed, expected] of [[401, false, "Access denied"], [403, false, "Access denied"], [404, false, "Sub-sessions not found"], [503, false, "Sub-sessions unavailable"], [200, true, "Sub-sessions unavailable"]] as const) {
+  childReadStatus = status; malformedChild = malformed;
+  const start = reads.length;
+  await page.goto(href(path)); await page.reload(); await title(page, `${expected} · Seed · Cyberdeck`);
+  await page.getByText("local First conversation", { exact: true }).waitFor();
+  expect(childReads(start).length).toBeLessThanOrEqual(2);
+  const url = page.url(), length = await page.evaluate(() => history.length);
+  childReadStatus = 200; malformedChild = false;
+  await page.getByRole("button", { name: "Retry", exact: true }).click(); await title(page, "Sessions · Sub-sessions · Seed · Cyberdeck");
+  await page.getByText("local Child of one", { exact: true }).waitFor();
+  expect(page.url()).toBe(url); expect(await page.evaluate(() => history.length)).toBe(length);
+ }
+}), browserBudget);
+
+test("Seed delayed sub-session reads cannot reopen a closed disclosure or rename a later page, node or locked view", () => fresh(async page => {
+ childLists = true; holdChildRead = true;
+ await page.goto(href("")); await title(page, listTitle());
+ await page.getByRole("button", { name: "2 sub-sessions", exact: true }).click();
+ while (!pending.size) await page.waitForTimeout(10);
+ await title(page, "Loading sub-sessions · Seed · Cyberdeck");
+ await page.goBack(); await title(page, listTitle());
+ for (const release of pending) release(); pending.clear(); holdChildRead = false;
+ await page.waitForTimeout(100); expect(await page.getByText("local Child of one", { exact: true }).count()).toBe(0); expect(await page.title()).toBe(listTitle());
+ holdChildRead = true; childReadStatus = 403;
+ await page.goto(href(withChildren("agent/alpha", ["one"], "peer-a"), "peer-a")); while (!pending.size) await page.waitForTimeout(10);
+ await page.evaluate(() => location.hash = "#/seed?node=peer-b&r=session%2Ftwo"); await title(page, "peer-b Second conversation · Seed session · Peer B · Cyberdeck");
+ for (const release of pending) release(); pending.clear(); holdChildRead = false;
+ await page.waitForTimeout(100); expect(await page.title()).toBe("peer-b Second conversation · Seed session · Peer B · Cyberdeck");
+ holdChildRead = true;
+ await page.goto(href(withChildren("", ["one"]))); while (!pending.size) await page.waitForTimeout(10);
+ await page.route("**/api/fs/list**", route => route.fulfill({ status: 401, json: { error: "Locked" } }));
+ await page.getByTestId("nav-files").click(); await page.getByPlaceholder("access token").waitFor(); await title(page, "Locked · Cyberdeck");
+ for (const release of pending) release(); pending.clear(); holdChildRead = false;
+ await page.waitForTimeout(100); expect(await page.title()).toBe("Locked · Cyberdeck");
+}), browserBudget);
+
+test("Seed one failed expanded parent stays visible in the title while another succeeds", () => fresh(async page => {
+ childLists = true; childReadStatus = 403;
+ await page.goto(href(withChildren("", ["one"]))); await title(page, "Access denied · Seed · Cyberdeck");
+ childReadStatus = 200;
+ await page.getByRole("button", { name: "1 sub-session", exact: true }).click();
+ await page.getByText("local Child of two", { exact: true }).waitFor();
+ expect(await page.title()).toBe("Access denied · Seed · Cyberdeck");
+ await page.getByRole("button", { name: "2 sub-sessions", exact: true }).click();
+ await title(page, "Sessions · Sub-sessions · Seed · Cyberdeck");
+ expect(await page.getByText("Couldn’t load sub-sessions", { exact: true }).count()).toBe(0);
+}), browserBudget);
+
+test("Seed a missing expanded parent on page one becomes a loading selection on its correct page", () => fresh(async page => {
+ childLists = true; globalPaged = true;
+ await page.goto(href(withChildren("", ["two"]))); await title(page, "Sub-session parent not found · Seed · Cyberdeck");
+ holdGlobalList = true; globalFailCursor = "page-2";
+ const next = withChildren(listRoute(2), ["two"]);
+ await page.evaluate(next => location.hash = "#/seed?" + new URLSearchParams({ r: next }), next);
+ while (!pending.size) await page.waitForTimeout(10);
+ await title(page, "Loading sessions · Seed · Cyberdeck");
+ for (const release of pending) release(); pending.clear(); holdGlobalList = false;
+ await page.getByText("local Child of two", { exact: true }).waitFor();
+ await title(page, "Sessions · 2 pages · Sub-sessions · Seed · Cyberdeck");
+ expect(new URLSearchParams(new URL(page.url()).hash.slice(7)).get("r")).toBe(next);
+}), browserBudget);
+
+test("Seed first-page list failures are visible, retry in place and never unlock or lock the host", () => fresh(async page => {
+ globalListStatus = 401;
+ await page.goto(href("")); await title(page, "Access denied · Seed · Cyberdeck");
+ await page.getByRole("button", { name: "Retry", exact: true }).waitFor();
+ expect(await page.getByPlaceholder("access token").count()).toBe(0);
+ const url = page.url(), length = await page.evaluate(() => history.length);
+ globalListStatus = 200;
+ await page.getByRole("button", { name: "Retry", exact: true }).click(); await title(page, listTitle());
+ await page.getByText("local First conversation", { exact: true }).waitFor();
+ expect(page.url()).toBe(url); expect(await page.evaluate(() => history.length)).toBe(length);
+}), browserBudget);
+
+test("Seed links restore an expanded empty parent after its child count disappears", () => fresh(async page => {
+ childEmpty = true;
+ await page.goto(href(withChildren("", ["one"])));
+ await page.getByText("No sub-sessions", { exact: true }).waitFor();
+ await title(page, "Sessions · Sub-sessions · Seed · Cyberdeck");
+ const link = page.url();
+ await page.reload(); await page.getByText("No sub-sessions", { exact: true }).waitFor();
+ await title(page, "Sessions · Sub-sessions · Seed · Cyberdeck");
+ expect(page.url()).toBe(link);
+ await page.getByRole("button", { name: "0 sub-sessions", exact: true }).click(); await title(page, listTitle());
+ expect(await page.getByText("No sub-sessions", { exact: true }).count()).toBe(0);
+ await page.goBack(); await page.getByText("No sub-sessions", { exact: true }).waitFor();
+ await title(page, "Sessions · Sub-sessions · Seed · Cyberdeck");
+}), browserBudget);
+
+test("Seed an expanded-parent link stays honest on the empty first-agent view", () => fresh(async page => {
+ emptySeedLists = true;
+ await page.goto(href(withChildren(listRoute(8), ["one"])));
+ await title(page, "Sub-session parent not found · Seed · Cyberdeck");
+ await page.getByText("Create your first agent", { exact: true }).first().waitFor();
+ await page.getByText("A selected parent session is not in this list. The link has been kept.", { exact: true }).waitFor();
+ await page.waitForFunction(expected => new URLSearchParams(location.hash.slice(7)).get("r") === expected, withChildren("", ["one"]));
+ const url = page.url(), length = await page.evaluate(() => history.length);
+ await page.reload(); await title(page, "Sub-session parent not found · Seed · Cyberdeck");
+ expect(page.url()).toBe(url); expect(await page.evaluate(() => history.length)).toBe(length);
 }), browserBudget);
