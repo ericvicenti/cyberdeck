@@ -1263,3 +1263,22 @@ test("Delayed Seed Context reads cannot reopen a previous message, node or locke
  await page.route("**/api/fs/list**", route => route.fulfill({ status: 401, json: { error: "Locked" } }));
  await page.evaluate(() => location.hash = "#/files"); await title(page, "Locked · Cyberdeck"); expect(await page.getByRole("dialog").count()).toBe(0);
 }), browserBudget);
+
+for (const view of ["seed", "term"] as const) test(`${view} a primary-view click from Context makes one history entry and Back restores the popover`, () => fresh(async page => {
+ await page.goto(contextHref(view)); await title(page, contextTitle()); await page.getByRole("dialog").waitFor();
+ const length = await page.evaluate(() => history.length);
+ await page.getByTestId("nav-data").click(); await title(page, "Data · Cyberdeck");
+ expect(await page.evaluate(() => history.length)).toBe(length + 1);
+ await page.goBack(); await title(page, contextTitle()); await page.getByRole("dialog").waitFor();
+ await page.getByRole("dialog").getByText("Recorded window 1", { exact: false }).waitFor();
+}), browserBudget);
+
+for (const view of ["seed", "term"] as const) test(`${view} Context plain outside clicks close once and switching messages cannot dismiss the new context`, () => fresh(async page => {
+ await page.goto(contextHref(view, "context two/?&")); await title(page, contextTitle()); await page.getByRole("dialog").waitFor();
+ const length = await page.evaluate(() => history.length);
+ await page.locator("header").first().getByText("Cyberdeck", { exact: true }).click(); await page.getByRole("dialog").waitFor({ state: "hidden" });
+ await title(page, "Message · local First conversation · Seed session · Cyberdeck"); expect(await page.evaluate(() => history.length)).toBe(length + 1);
+ await page.goBack(); await title(page, contextTitle()); await page.getByRole("dialog").getByText("Recorded window 2", { exact: false }).waitFor();
+ await page.getByRole("button", { name: "Context", exact: true }).first().click();
+ await page.getByRole("dialog").getByText("Recorded window 1", { exact: false }).waitFor(); await title(page, contextTitle());
+}), browserBudget);

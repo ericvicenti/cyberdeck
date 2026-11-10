@@ -10,6 +10,9 @@ index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2
 diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-31cae14f4ee4ac5d b/.bun-tag-31cae14f4ee4ac5d
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-32ed8211bf92219e b/.bun-tag-32ed8211bf92219e
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-366d721dc707f004 b/.bun-tag-366d721dc707f004
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
@@ -65,7 +68,7 @@ diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-f9f119ea13884e4d b
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/chunks/index-ZHWGA37c.js b/chunks/index-ZHWGA37c.js
-index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139ad0d70a24 100644
+index 46d2a63607a75cc74548b660fb72e79cb665942f..32f75af6b3f5a7c1629cf279746a97ebee164525 100644
 --- a/chunks/index-ZHWGA37c.js
 +++ b/chunks/index-ZHWGA37c.js
 @@ -21335,10 +21335,15 @@ const hue = [
@@ -839,7 +842,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
        ] })
      ] })
    ] }) });
-@@ -75497,7 +75673,13 @@ function dK(e, t) {
+@@ -75497,7 +75673,36 @@ function dK(e, t) {
    });
  }
  function LBe({ lines: e }) {
@@ -847,6 +850,29 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
 +  const route = Xye(), navigate = N8e(), scope = pe.useContext(CP);
 +  const owned = route.key === "agent-session" && route.sessionId === scope?.sessionId;
 +  const open = owned && route.panel === "context" && route.eventId === scope?.eventId;
++  const outsideClick = ge(null);
++  xe(() => () => {
++    if (outsideClick.current) window.removeEventListener("click", outsideClick.current);
++    outsideClick.current = null;
++  }, [owned, open, route.eventId, scope?.sessionId]);
++  // A pointer dismissal and a host navigation can belong to the same click.
++  // Let the router handle that click before deciding whether to write a close.
++  const interactOutside = event => {
++    if (!owned || !open) return;
++    if (event.detail.originalEvent.type !== "pointerdown") {
++      if (outsideClick.current) event.preventDefault();
++      return;
++    }
++    event.preventDefault();
++    if (outsideClick.current) window.removeEventListener("click", outsideClick.current);
++    const hash = location.hash;
++    const finish = () => {
++      outsideClick.current = null;
++      if (location.hash === hash) navigate({ ...route, panel: undefined, eventId: scope.eventId });
++    };
++    outsideClick.current = finish;
++    window.addEventListener("click", finish, { once: true });
++  };
 +  return /* @__PURE__ */ A(Nd, { ...(owned ? { open, onOpenChange: next => {
 +    if (next === open) return;
 +    navigate({ ...route, panel: next ? "context" : undefined, eventId: scope.eventId });
@@ -854,7 +880,16 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
      /* @__PURE__ */ f(Pd, { asChild: !0, children: /* @__PURE__ */ A(
        "button",
        {
-@@ -75688,12 +75870,88 @@ function qBe({ args: e }) {
+@@ -75510,7 +75715,7 @@ function LBe({ lines: e }) {
+         ]
+       }
+     ) }),
+-    /* @__PURE__ */ A(_d, { align: "start", className: "w-96 max-w-[90vw] p-3", children: [
++    /* @__PURE__ */ A(_d, { align: "start", onInteractOutside: interactOutside, className: "w-96 max-w-[90vw] p-3", children: [
+       /* @__PURE__ */ f("div", { className: "text-muted-foreground mb-2 text-xs font-medium", children: "Context shared with the agent" }),
+       /* @__PURE__ */ f("pre", { className: "bg-muted max-h-64 overflow-auto rounded-md p-2 font-mono text-[11px] whitespace-pre-wrap", children: e.join(`
+ `) })
+@@ -75688,12 +75893,88 @@ function qBe({ args: e }) {
      ] }, s.label)) })
    ] });
  }
@@ -945,7 +980,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
    return /* @__PURE__ */ f(ya, { open: t, onOpenChange: n, children: /* @__PURE__ */ A(va, { className: "max-h-[85vh] w-[min(44rem,calc(100vw-2rem))]", children: [
      /* @__PURE__ */ A(Ad, { children: [
        /* @__PURE__ */ f(Ut, { children: e.name }),
-@@ -75715,12 +75973,12 @@ function hK({
+@@ -75715,12 +75996,12 @@ function hK({
        /* @__PURE__ */ A("div", { className: "min-h-0 space-y-1", children: [
          /* @__PURE__ */ f("div", { className: "text-muted-foreground text-[10px] font-medium tracking-[0.18em] uppercase", children: "Input" }),
          /* @__PURE__ */ f("pre", { className: "bg-muted max-h-48 overflow-auto rounded-xl p-3 text-[11px] whitespace-pre-wrap", children: ca(a) }),
@@ -960,7 +995,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
        ] })
      ] })
    ] }) });
-@@ -76389,7 +76647,7 @@ function Lg({
+@@ -76389,7 +76670,7 @@ function Lg({
    agentId: i,
    sessionId: s
  }) {
@@ -969,7 +1004,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
      n,
      r,
      s,
-@@ -78400,8 +78658,11 @@ function jK({
+@@ -78400,8 +78681,11 @@ function jK({
    onOpenTrigger: s,
    agentName: o,
    activity: a,
@@ -982,7 +1017,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
    const c = e.title || "Untitled session", d = ga(new Date(e.updatedAt)), u = a ? /* @__PURE__ */ f(pw, { tone: a.tone, label: a.label, className: l ? "size-2" : void 0 }) : /* @__PURE__ */ f(gw, { status: e.status, className: l ? "size-2" : void 0 }), h = e.startedByTrigger ? /* @__PURE__ */ A(
      "button",
      {
-@@ -78415,13 +78676,14 @@ function jK({
+@@ -78415,13 +78699,14 @@ function jK({
          e.startedByTrigger.triggerName
        ]
      }
@@ -999,7 +1034,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
        onOpenSession: i
      }
    ) }) : null;
-@@ -78507,13 +78769,18 @@ function x_({
+@@ -78507,13 +78792,18 @@ function x_({
    compact: l = !1,
    showAgentName: c = !0,
    readState: d,
@@ -1020,7 +1055,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
      y ? /* @__PURE__ */ f(W, { size: l ? "sm" : void 0, color: "muted", className: l ? "px-2 py-1" : void 0, children: "Loading sessions…" }) : null,
      o.map((v) => /* @__PURE__ */ f(
        On,
-@@ -78535,6 +78802,7 @@ function x_({
+@@ -78535,6 +78825,7 @@ function x_({
          serverUrl: v,
          accountUid: t,
          compact: l,
@@ -1028,7 +1063,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
          agentName: c ? w?.definition.name || x.agentId : void 0,
          activity: d ? LMe(x, v, d, w?.activity) : void 0,
          onOpen: (I) => g({ serverUrl: v, agentId: x.agentId, sessionId: x.id }, I),
-@@ -78549,6 +78817,7 @@ function x_({
+@@ -78549,6 +78840,7 @@ function x_({
        },
        `${v}:${x.id}`
      )) }),
@@ -1036,7 +1071,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
      /* @__PURE__ */ f("div", { ref: p, "aria-hidden": "true", className: "h-px" }),
      i && e.length ? /* @__PURE__ */ f(W, { size: "sm", color: "muted", className: "text-center", children: "Loading more…" }) : null
    ] });
-@@ -85436,6 +85705,14 @@ function z5e({
+@@ -85436,6 +85728,14 @@ function z5e({
      G ? void 0 : k ?? void 0
    ), ye = m?.data?.totals, Ne = Ot(J5e), de = Ot(V5e), ce = ge(null), ae = ge(null), Pe = ge({ tree: l?.treeScrollTop ?? 0, file: l?.fileScrollTop ?? 0 }), He = ge(null), q = ge({ selectedPath: k, expandedDirs: c });
    q.current = { selectedPath: k, expandedDirs: c };
@@ -1051,7 +1086,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
    function N() {
      U5e(e, n, {
        selectedPath: q.current.selectedPath,
-@@ -86747,11 +87024,23 @@ function a$e({
+@@ -86747,11 +87047,23 @@ function a$e({
    triggerId: r,
    memoryPath: i
  }) {
@@ -1077,7 +1112,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
    const F = m.data?.agent.accessRole ?? "owner", B = tx(F), z = Ly(F), Y = F === "owner", [J, Q] = ee(""), [R, X] = ee(""), [re, L] = ee(""), [ie, ue] = ee(void 0), [le, G] = ee(void 0), [te, ye] = ee([]), Ne = FP(u, s, R, e), de = T.data?.find((Se) => Se.name === R)?.type, [ce, ae] = ee([]), [Pe, He] = ee(0), [q, N] = ee(!1), [_, H] = ee(!1), [V, se] = ee("idle"), [Z, De] = ee("idle"), rt = ge(0), ut = ge(0), oe = ge(null), be = ge(null), We = ge(null);
    xe(() => {
      n !== "sessions" || !u || _K(u, e, null);
-@@ -86947,11 +87236,14 @@ function a$e({
+@@ -86947,11 +87259,14 @@ function a$e({
              U.content,
              D.content,
              n === "sessions" ? /* @__PURE__ */ f("section", { className: "flex min-h-0 flex-1 flex-col", children: /* @__PURE__ */ A("div", { className: "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1", children: [
@@ -1093,7 +1128,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
                    serverUrl: u,
                    accountUid: s,
                    onOpen: (at) => l({ key: "agent-session", agentId: e, sessionId: Se.id, serverUrl: u }, at),
-@@ -86969,14 +87261,14 @@ function a$e({
+@@ -86969,14 +87284,14 @@ function a$e({
                  },
                  Se.id
                )),
@@ -1110,7 +1145,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
                    },
                    children: p.isFetchingNextPage ? "Loading…" : "Load more"
                  }
-@@ -88824,7 +89116,7 @@ function O$e() {
+@@ -88824,7 +89139,7 @@ function O$e() {
  }
  function R$e({ selectedAccountId: e }) {
    V0();
@@ -1119,7 +1154,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
      () => r.flatMap(
        (O, M) => (s[M]?.data || []).map((U) => ({ ...U, serverUrl: O }))
      ),
-@@ -88839,7 +89131,7 @@ function R$e({ selectedAccountId: e }) {
+@@ -88839,7 +89154,7 @@ function R$e({ selectedAccountId: e }) {
        (O) => !m.some((M) => M.serverUrl === O.serverUrl && M.id === O.agent.id)
      ),
      [m, g.agents]
@@ -1128,7 +1163,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
      const O = new Set(v.entries.map((U) => `${U.serverUrl}:${U.session.id}`)), M = g.sessions.filter((U) => !O.has(`${U.serverUrl}:${U.session.id}`));
      return M.length ? [...v.entries, ...M].sort((U, F) => F.session.updatedAt - U.session.updatedAt) : v.entries;
    }, [v.entries, g.sessions]), w = v.isLoading || g.isLoading && !x.length, I = Ce(
-@@ -88904,11 +89196,11 @@ function R$e({ selectedAccountId: e }) {
+@@ -88904,11 +89219,11 @@ function R$e({ selectedAccountId: e }) {
                            /* @__PURE__ */ f(u2, {}),
                            "Open Server"
                          ] }),
@@ -1142,7 +1177,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
                            /* @__PURE__ */ f(p2, {}),
                            "Providers"
                          ] })
-@@ -88944,8 +89236,6 @@ function R$e({ selectedAccountId: e }) {
+@@ -88944,8 +89259,6 @@ function R$e({ selectedAccountId: e }) {
              ] })
            ] }),
            r.map((O) => /* @__PURE__ */ f(B$e, { serverUrl: O, selectedAccountId: e }, O)),
@@ -1151,7 +1186,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
            d.content,
            u.content,
            p.length ? /* @__PURE__ */ A("section", { className: "flex flex-col gap-3", children: [
-@@ -88963,6 +89253,7 @@ function R$e({ selectedAccountId: e }) {
+@@ -88963,6 +89276,7 @@ function R$e({ selectedAccountId: e }) {
                `${O.serverUrl}:${O.agentId}`
              )) })
            ] }) : null,
@@ -1159,7 +1194,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
            D ? (
              // Nothing to list and nobody to talk to yet: the page's one job is getting a first agent.
              /* @__PURE__ */ f(
-@@ -88997,6 +89288,9 @@ function R$e({ selectedAccountId: e }) {
+@@ -88997,6 +89311,9 @@ function R$e({ selectedAccountId: e }) {
                  hasNextPage: v.hasNextPage,
                  isFetchingNextPage: v.isFetchingNextPage,
                  fetchNextPage: v.fetchNextPage,
@@ -1169,7 +1204,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
                  problems: E,
                  emptyText: r.length ? "No sessions yet. Start one below." : "No sessions yet."
                }
-@@ -89222,9 +89516,10 @@ function J$e() {
+@@ -89222,9 +89539,10 @@ function J$e() {
  }
  function H$e({ routeServerUrl: e, selectedAccountId: t }) {
    V0();
@@ -1182,7 +1217,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
      serverUrl: g.serverUrl,
      notice: si(g.error, { failed: "Couldn’t load sessions" }),
      refetch: g.refetch,
-@@ -89264,7 +89559,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
+@@ -89264,7 +89582,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
              {
                variant: "outline",
                className: "max-sm:min-h-10",
@@ -1191,7 +1226,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
                children: [
                  /* @__PURE__ */ f(Bz, { className: "size-4" }),
                  "Accounts"
-@@ -89276,7 +89571,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
+@@ -89276,7 +89594,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
              {
                variant: "outline",
                className: "max-sm:min-h-10",
@@ -1200,7 +1235,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
                children: [
                  /* @__PURE__ */ f(p2, { className: "size-4" }),
                  "Providers"
-@@ -89285,8 +89580,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
+@@ -89285,8 +89603,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
            )
          ] })
        ] }),
@@ -1210,7 +1245,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
        l.content,
        s.isError ? /* @__PURE__ */ f(
          z$e,
-@@ -89308,6 +89602,9 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
+@@ -89308,6 +89625,9 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
            hasNextPage: d.hasNextPage,
            isFetchingNextPage: d.isFetchingNextPage,
            fetchNextPage: d.fetchNextPage,
@@ -1220,7 +1255,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
            problems: u,
            emptyText: s.data?.length ? "No sessions on this server yet. Start one below." : "No sessions on this server yet."
          }
-@@ -89330,9 +89627,11 @@ function j$e({
+@@ -89330,9 +89650,11 @@ function j$e({
    routeServerUrl: t,
    routeAgentId: n
  }) {
@@ -1235,7 +1270,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
    UQ(o, e, qQ(a.data?.events));
    const v = Zu(
      o,
-@@ -89353,6 +89652,8 @@ function j$e({
+@@ -89353,6 +89675,8 @@ function j$e({
            agentId: l,
            sessionId: e,
            triggerContext: a.data?.triggerContext ?? null,
@@ -1244,7 +1279,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
            runs: O.data
          }),
          O.data || [],
-@@ -89367,6 +89668,8 @@ function j$e({
+@@ -89367,6 +89691,8 @@ function j$e({
        a.data?.events,
        a.data?.session.plan,
        a.data?.triggerContext,
@@ -1253,7 +1288,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
        e,
        O.data
      ]
-@@ -89416,9 +89719,14 @@ function j$e({
+@@ -89416,9 +89742,14 @@ function j$e({
    }, [D, T, w]), xe(() => {
      E.resetToBottom();
    }, [e]), xe(() => {
@@ -1271,7 +1306,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
    function N() {
      if (!a.data) return;
      const Z = a.data.session;
-@@ -89537,7 +89845,7 @@ function j$e({
+@@ -89537,7 +89868,7 @@ function j$e({
                    label: "Copy session URL",
                    disabled: !l,
                    onClick: () => {
@@ -1280,7 +1315,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..1c18b67eb66ade236b126bd075f6139a
                      Z && (navigator.clipboard?.writeText(Z), we.success("Session URL copied"));
                    }
                  },
-@@ -89596,12 +89904,17 @@ function j$e({
+@@ -89596,12 +89927,17 @@ function j$e({
              onScroll: E.handleScroll,
              className: "min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-1",
              children: /* @__PURE__ */ A("div", { ref: E.contentRef, className: "flex min-h-full flex-col gap-3 pt-4", children: [
