@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import type { SeedAgentsRoute } from "@seed-hypermedia/agents-ui";
-import { updateParams, useRouteTitle, routeHash } from "../lib/navigation";
+import { updateParams, useRouteTitle, routeHash, writeRoute } from "../lib/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -97,36 +97,49 @@ function TermPane({ session, onStatus, onRemove }: { session: LiveSession; onSta
   );
 }
 /** A Seed session in Seed's UI: tool calls, runs, plan, sub-sessions, model and stop/retry. */
+const transcriptKeys = ["panel", "event", "tool", "full", "thinking"];
+function transcriptParams(params: URLSearchParams, next: Extract<SeedAgentsRoute, { key: "agent-session" }>) {
+  const result = new URLSearchParams(params);
+  for (const key of transcriptKeys) result.delete(key);
+  if (next.panel) result.set("panel", next.panel);
+  if (next.eventId) result.set("event", next.eventId);
+  if (next.panel === "tool" && next.toolId) result.set("tool", next.toolId);
+  if (next.panel === "tool" && next.fullPayload) result.set("full", next.fullPayload);
+  for (const id of next.expandedThinking || []) result.append("thinking", id);
+  return result;
+}
 function NativeSeedSession({ id, node, params }: { id: string; node: string; params: URLSearchParams }) {
   const sessionId = id.replace(/^seed-/, "");
-  const eventId = params.get("event") || undefined;
-  const toolId = params.get("tool") || undefined;
-  const full = params.get("full");
   const filter = params.get("filter") || undefined;
   const routeUrl = useMemo(() => (next: SeedAgentsRoute) => next.key === "agent-session" && next.sessionId === sessionId
-    ? new URL(routeHash("term", { session: id, ...(node ? { node } : {}), ...(filter ? { filter } : {}), ...(next.panel ? { panel: next.panel } : {}), ...(next.eventId ? { event: next.eventId } : {}), ...(next.panel === "tool" && next.toolId ? { tool: next.toolId } : {}), ...(next.panel === "tool" && next.fullPayload ? { full: next.fullPayload } : {}) }), location.href).href
+    ? new URL(routeHash("term", transcriptParams(new URLSearchParams({ session: id, ...(node ? { node } : {}), ...(filter ? { filter } : {}) }), next)), location.href).href
     : undefined, [id, sessionId, node, filter]);
-  const selectedPanel = params.get("panel");
+  const eventId = params.get("event") || undefined, toolId = params.get("tool") || undefined;
+  const selectedPanel = params.get("panel"), full = params.get("full");
   const panel = selectedPanel === "prompt" ? "prompt" : selectedPanel === "message" && eventId ? "message" : selectedPanel === "tool" && toolId ? "tool" : undefined;
-  const selectedTool = panel === "tool" ? toolId : undefined;
-  const fullPayload = panel === "tool" && (full === "input" || full === "output" || full === "both") ? full : undefined;
+  // Match the pinned Seed route contract without eagerly loading the full UI in
+  // ordinary terminal tabs. Browser cases exercise both adapters together.
+  const expandedThinking = [...new Set(params.getAll("thinking").filter(value => value.length > 0 && value.length <= 512 && !/[\u0000-\u001f]/.test(value)))].sort().slice(0, 100);
+  const route: Extract<SeedAgentsRoute, { key: "agent-session" }> = {
+    key: "agent-session", sessionId, eventId, panel, expandedThinking,
+    toolId: panel === "tool" ? toolId : undefined,
+    fullPayload: panel === "tool" && (full === "input" || full === "output" || full === "both") ? full : undefined,
+  };
+  const canonical = transcriptParams(params, route);
   useEffect(() => {
-    if (params.has("panel") && selectedPanel !== panel) updateParams({ panel: panel || null }, "replace");
-    if (params.has("event") && !eventId) updateParams({ event: null }, "replace");
-    if (params.has("tool") && selectedTool !== params.get("tool")) updateParams({ tool: selectedTool || null }, "replace");
-    if (params.has("full") && fullPayload !== full) updateParams({ full: fullPayload || null }, "replace");
-  }, [selectedPanel, panel, eventId, selectedTool, fullPayload, full]);
+    if (transcriptKeys.some(key => JSON.stringify(params.getAll(key)) !== JSON.stringify(canonical.getAll(key)))) writeRoute("term", canonical, "replace");
+  }, [params.toString(), canonical.toString()]);
   return (
     <Suspense fallback={<div className="p-6 text-xs text-zinc-500">Loading Seed agents…</div>}>
       <SeedAgentsEmbed
         node={node}
         title={`${sessionId} · Seed session`}
-        route={{ key: "agent-session", sessionId, panel, eventId, toolId: selectedTool, fullPayload }}
+        route={route}
         routeUrl={routeUrl}
         onRouteChange={(next, mode, path) => {
           // Stay in Sessions for this session; anything else (the agent, a run, another session) opens the Seed view on the same machine.
           if (next.key === "agent-session" && next.sessionId === sessionId) {
-            updateParams({ panel: next.panel || null, event: next.eventId || null, tool: next.panel === "tool" ? next.toolId || null : null, full: next.panel === "tool" ? next.fullPayload || null : null }, mode);
+            writeRoute("term", transcriptParams(params, next), mode);
             return;
           }
           navigate("seed", { r: path, node: node || undefined }, mode);

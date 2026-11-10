@@ -22,6 +22,16 @@ let globalPaged = false, globalListStatus = 200, globalFailCursor = "", holdGlob
 let serverDialogStatus = 200, holdServerDialog = false, malformedServerDialog = "", populatedServerDialog = false;
 const reads: { node: string; action: any }[] = [];
 const toolId = "call two/?&";
+const thinkingIds = ["first /?&", "second group"];
+const thinkingEvents = [
+ { type: "message", role: "user", content: "Inspect the recorded groups" },
+ { type: "tool_call", id: thinkingIds[0], name: "read", input: { path: "first fixture" } },
+ { type: "tool_result", toolCallId: thinkingIds[0], name: "read", output: { content: "first result" } },
+ { type: "message", role: "assistant", content: "Between the recorded groups" },
+ { type: "tool_call", id: thinkingIds[1], name: "read", input: { path: "second fixture" } },
+ { type: "tool_result", toolCallId: thinkingIds[1], name: "read", output: { content: "second result" } },
+ { type: "message", role: "assistant", content: "After the recorded groups" },
+];
 const toolEvents = [
  { type: "message", role: "user", content: "Inspect these recorded tools" },
  { type: "tool_call", id: toolId, name: "read", input: { path: "Truncated fixture input" } },
@@ -32,7 +42,7 @@ const toolEvents = [
  { type: "tool_result", toolCallId: "continued-call", name: "continue_session", output: { sessionId: "two", title: "Recorded successor" } },
  { type: "message", role: "assistant", content: "These are recorded tool results" },
 ];
-const transcriptEvents = (id: string) => id === "tools" ? toolEvents.map((event, index) => ({
+const transcriptEvents = (id: string) => id === "thinking" ? thinkingEvents.map((event, index) => ({ id: `thinking-event-${index + 1}`, sessionId: id, seq: index + 1, createdAt: index + 1, event })) : id === "tools" ? toolEvents.map((event, index) => ({
  id: `tool-event-${index + 1}`, sessionId: id, seq: index + 1, createdAt: index + 1, event,
  ...([1, 2].includes(index) ? { truncated: true } : {}),
 })) : id === "transcript" ? ["message-one", "message two/?&"].map((eventId, index) => ({
@@ -645,9 +655,9 @@ test("Seed tool inspectors restore collapsed tools on direct links, reload, new 
  const link = page.url();
  const nested = new URLSearchParams(new URL(link).hash.slice(7)).get("r")!;
  expect(new URLSearchParams(nested.split("?")[1]).get("tool")).toBe(toolId);
- expect(await page.evaluate(() => history.length)).toBe(length + 1);
+ expect(await page.evaluate(() => history.length)).toBe(length + 2);
  expect(reads.slice(start).filter(({ action }) => ["GetSession", "GetSessionEvent"].includes(action._)).length).toBe(0);
- await page.goBack(); await title(page, "peer-b First conversation · Seed session · Peer B · Cyberdeck");
+ await page.goBack(); await title(page, "1 expanded tool group · peer-b First conversation · Seed session · Peer B · Cyberdeck");
  await page.getByRole("dialog").waitFor({ state: "hidden" });
  expect(await page.getByPlaceholder("Untitled session").getAttribute("data-tool-owner")).toBe("retained");
  await page.goForward(); await page.getByRole("dialog").waitFor();
@@ -655,7 +665,7 @@ test("Seed tool inspectors restore collapsed tools on direct links, reload, new 
  expect(await page.getByRole("dialog").innerText()).toContain("Truncated fixture input");
  await fresh(async tab => { await tab.goto(link); await title(tab, toolTitle("peer-b", "Tool input/output", " · Peer B")); await tab.getByRole("dialog").waitFor(); });
  await page.keyboard.press("Escape");
- await title(page, "Message · peer-b First conversation · Seed session · Peer B · Cyberdeck");
+ await title(page, "Message · 1 expanded tool group · peer-b First conversation · Seed session · Peer B · Cyberdeck");
  await page.goBack(); await page.getByRole("dialog").waitFor();
 }), browserBudget);
 
@@ -1108,4 +1118,91 @@ test("Seed an expanded-parent link stays honest on the empty first-agent view", 
  const url = page.url(), length = await page.evaluate(() => history.length);
  await page.reload(); await title(page, "Sub-session parent not found · Seed · Cyberdeck");
  expect(page.url()).toBe(url); expect(await page.evaluate(() => history.length)).toBe(length);
+}), browserBudget);
+
+const thinkingHref = (view: "seed" | "term", ids: string[], node = "") => {
+ const selected = new URLSearchParams(); for (const id of ids) selected.append("thinking", id);
+ return view === "seed" ? href(`session/thinking${selected.size ? `?${selected}` : ""}`, node)
+  : `${server.url}#/term?${new URLSearchParams({ session: "seed-thinking", filter: "retained", ...(node ? { node } : {}) })}${selected.size ? `&${selected}` : ""}`;
+};
+const thinkingTitle = (count: number, node = "local") => `${count ? `${count} expanded tool group${count === 1 ? "" : "s"} · ` : ""}${node} First conversation · Seed session${node === "peer-b" ? " · Peer B" : ""} · Cyberdeck`;
+for (const view of ["seed", "term"] as const) {
+ test(`${view} transcript expansion limit never drops another selection or adds unusable history`, () => fresh(async page => {
+  const missing = Array.from({ length: 99 }, (_, index) => `missing-${String(index).padStart(2, "0")}`);
+  await page.goto(thinkingHref(view, [thinkingIds[0], ...missing])); await title(page, "Tool group not found · Seed · Cyberdeck");
+  const groups = page.locator('[data-thinking-group]');
+  expect(await groups.nth(1).getByRole("button", { name: /Thought|Finished|Thinking/ }).isDisabled()).toBe(true);
+  await groups.nth(0).getByRole("button", { name: /Thought|Finished|Thinking/ }).click();
+  await groups.nth(1).getByRole("button", { name: /Thought|Finished|Thinking/ }).click();
+  const selected = await page.evaluate(view => {
+   const params = new URLSearchParams(location.hash.slice(location.hash.indexOf("?") + 1));
+   return view === "seed" ? new URLSearchParams(params.get("r")!.split("?")[1]).getAll("thinking") : params.getAll("thinking");
+  }, view);
+  expect(selected).toEqual([...missing, thinkingIds[1]].sort());
+ }), browserBudget);
+
+ test(`${view} transcript tool groups restore direct links, reload, fresh tabs and history without remounting`, () => fresh(async page => {
+  await page.goto(thinkingHref(view, thinkingIds, "peer-b")); await title(page, thinkingTitle(2, "peer-b"));
+  expect(await page.locator('[data-thinking-group] button[aria-expanded="true"]').count()).toBe(2);
+  await page.getByPlaceholder("Untitled session").evaluate(el => el.setAttribute("data-thinking-owner", "same owner"));
+  const readStart = reads.length, length = await page.evaluate(() => history.length);
+  await page.locator('[data-thinking-group] button[aria-expanded="true"]').first().click(); await title(page, thinkingTitle(1, "peer-b"));
+  expect(await page.evaluate(() => history.length)).toBe(length + 1);
+  await page.goBack(); await title(page, thinkingTitle(2, "peer-b"));
+  expect(await page.locator('[data-thinking-group] button[aria-expanded="true"]').count()).toBe(2);
+  await page.goForward(); await title(page, thinkingTitle(1, "peer-b"));
+  expect(await page.getByPlaceholder("Untitled session").getAttribute("data-thinking-owner")).toBe("same owner");
+  expect(reads.slice(readStart).filter(({ action }) => ["GetSession", "GetSessionEvent"].includes(action._)).length).toBe(0);
+  if (view === "term") { const p = new URLSearchParams(new URL(page.url()).hash.slice(7)); expect(p.get("node")).toBe("peer-b"); expect(p.get("filter")).toBe("retained"); }
+  await page.reload(); await title(page, thinkingTitle(1, "peer-b"));
+  expect(await page.locator('[data-thinking-group] button[aria-expanded="true"]').count()).toBe(1);
+  await fresh(async tab => { await tab.goto(page.url()); await title(tab, thinkingTitle(1, "peer-b")); expect(await tab.locator('[data-thinking-group] button[aria-expanded="true"]').count()).toBe(1); });
+ }), browserBudget);
+
+ test(`${view} transcript tool-group selections canonicalize and keep missing groups honest`, () => fresh(async page => {
+  await page.goto(thinkingHref(view, [thinkingIds[1], thinkingIds[0], thinkingIds[1], "", "\u0001", "x".repeat(513)]));
+  await title(page, thinkingTitle(2));
+  const selected = () => page.evaluate((view) => {
+   const params = new URLSearchParams(location.hash.slice(location.hash.indexOf("?") + 1));
+   return view === "seed" ? new URLSearchParams((params.get("r") || "").split("?")[1]).getAll("thinking") : params.getAll("thinking");
+  }, view);
+  expect(await selected()).toEqual(thinkingIds);
+  const start = reads.length;
+  await page.evaluate(hash => location.hash = hash, new URL(thinkingHref(view, [thinkingIds[0], "missing group"])).hash);
+  await title(page, "Tool group not found · Seed · Cyberdeck"); await page.getByRole("alert").filter({ hasText: "Selected tool group is not in this transcript." }).waitFor();
+  expect((await selected()).includes("missing group")).toBe(true);
+  expect(reads.slice(start).filter(({ action }) => ["GetSession", "GetSessionEvent"].includes(action._)).length).toBe(0);
+  await page.goBack(); await title(page, thinkingTitle(2));
+  await page.getByTestId("nav-data").click(); await title(page, "Data · Cyberdeck");
+ }), browserBudget);
+
+ test(`${view} transcript tool groups survive inspector navigation and preserve share links`, () => fresh(async page => {
+  await page.goto(thinkingHref(view, thinkingIds)); await title(page, thinkingTitle(2));
+  await page.getByRole("button", { name: "View raw tool input/output", exact: true }).first().click();
+  await page.getByRole("dialog").filter({ hasText: "Raw tool call payload" }).waitFor();
+  await title(page, "Tool input/output · read · local First conversation · Seed session · Cyberdeck");
+  await page.reload(); await page.getByRole("dialog").waitFor();
+  expect(await page.locator('[data-thinking-group] button[aria-expanded="true"]').count()).toBe(2);
+  await page.keyboard.press("Escape"); await page.getByRole("dialog").waitFor({ state: "hidden" });
+  await title(page, "Message · 2 expanded tool groups · local First conversation · Seed session · Cyberdeck");
+  await page.getByRole("button", { name: "Show markdown sent to the LLM", exact: true }).first().click(); await page.getByRole("dialog").waitFor();
+  const shared = await page.getByRole("dialog").locator("code").innerText();
+  const params = new URLSearchParams(new URL(shared).hash.slice(7));
+  expect(view === "seed" ? new URLSearchParams(params.get("r")!.split("?")[1]).getAll("thinking") : params.getAll("thinking")).toEqual(thinkingIds);
+  await page.keyboard.press("Escape"); await page.getByRole("dialog").waitFor({ state: "hidden" });
+  await page.locator('[data-thinking-group] button[aria-expanded="true"]').last().click();
+  await page.getByRole("button", { name: "Show markdown sent to the LLM", exact: true }).first().click(); await page.getByRole("dialog").waitFor();
+  const updated = new URLSearchParams(new URL(await page.getByRole("dialog").locator("code").innerText()).hash.slice(7));
+  expect(view === "seed" ? new URLSearchParams(updated.get("r")!.split("?")[1]).getAll("thinking") : updated.getAll("thinking")).toEqual([thinkingIds[0]]);
+ }), browserBudget);
+}
+
+test("Seed delayed transcripts cannot publish an old tool-group failure after another session or lock", () => fresh(async page => {
+ hold = true;
+ await page.goto(href("session/slow?thinking=missing")); while (!pending.size) await page.waitForTimeout(10);
+ await page.evaluate(hash => location.hash = hash, new URL(thinkingHref("seed", thinkingIds)).hash);
+ await title(page, thinkingTitle(2));
+ for (const release of pending) release(); pending.clear(); await page.waitForTimeout(100); expect(await page.title()).toBe(thinkingTitle(2));
+ await page.route("**/api/fs/list**", route => route.fulfill({ status: 401, json: { error: "Locked" } }));
+ await page.getByTestId("nav-files").click(); await title(page, "Locked · Cyberdeck");
 }), browserBudget);

@@ -7,7 +7,13 @@ index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2
 diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-2ee0796f63137253 b/.bun-tag-2ee0796f63137253
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-31cae14f4ee4ac5d b/.bun-tag-31cae14f4ee4ac5d
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-366d721dc707f004 b/.bun-tag-366d721dc707f004
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-4c52938f6f02834b b/.bun-tag-4c52938f6f02834b
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-4c9ddf051c1c62cb b/.bun-tag-4c9ddf051c1c62cb
@@ -43,6 +49,9 @@ index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2
 diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-df8fa8b4397e7a70 b/.bun-tag-df8fa8b4397e7a70
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-ebba96f16ffa0d14 b/.bun-tag-ebba96f16ffa0d14
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-ef846d762a1b560f b/.bun-tag-ef846d762a1b560f
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
@@ -53,7 +62,7 @@ diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-f9f119ea13884e4d b
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/chunks/index-ZHWGA37c.js b/chunks/index-ZHWGA37c.js
-index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d9f464f10 100644
+index 46d2a63607a75cc74548b660fb72e79cb665942f..6bd7de9fa2d18e1da864224899a944ce79ee54c3 100644
 --- a/chunks/index-ZHWGA37c.js
 +++ b/chunks/index-ZHWGA37c.js
 @@ -21335,10 +21335,15 @@ const hue = [
@@ -74,7 +83,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
  }), Rq = j({
    key: ne("agent"),
    agentId: $(),
-@@ -21346,12 +21351,18 @@ const hue = [
+@@ -21346,12 +21351,19 @@ const hue = [
    tab: Rt(["sessions", "triggers", "memory", "tools", "prompt", "collaborators", "settings"]).optional(),
    triggerId: $().optional(),
    /** Memory tab: the file to open, so a `~/memory/…` link in a tool row lands on that file. */
@@ -85,6 +94,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
  }), Wue = j({
    key: ne("agent-session"),
    sessionId: $(),
++  expandedThinking: $().array().max(100).optional(),
    serverUrl: $().optional(),
 -  agentId: $().optional()
 +  agentId: $().optional(),
@@ -95,7 +105,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
  }), Yue = j({
    key: ne("agent-run"),
    runId: $(),
-@@ -22466,16 +22477,16 @@ function SN(e, t) {
+@@ -22466,16 +22478,16 @@ function SN(e, t) {
    if (typeof e != "string" && e.key === "notifications")
      return `/hm/notifications${e.view ? `?view=${e.view}` : ""}`;
    if (typeof e != "string" && e.key === "agents")
@@ -112,11 +122,11 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
    if (typeof e != "string" && e.key === "agent-session") {
      const s = [];
 -    return e.serverUrl && s.push(`server=${encodeURIComponent(e.serverUrl)}`), e.agentId && s.push(`agent=${encodeURIComponent(e.agentId)}`), `/hm/agents/session/${encodeURIComponent(e.sessionId)}${s.length ? `?${s.join("&")}` : ""}`;
-+    return e.serverUrl && s.push(`server=${encodeURIComponent(e.serverUrl)}`), e.agentId && s.push(`agent=${encodeURIComponent(e.agentId)}`), e.panel && s.push(`panel=${e.panel}`), e.eventId && s.push(`event=${encodeURIComponent(e.eventId)}`), e.panel === "tool" && e.toolId && s.push(`tool=${encodeURIComponent(e.toolId)}`), e.panel === "tool" && e.toolId && ["input", "output", "both"].includes(e.fullPayload) && s.push(`full=${e.fullPayload}`), `/hm/agents/session/${encodeURIComponent(e.sessionId)}${s.length ? `?${s.join("&")}` : ""}`;
++    return e.serverUrl && s.push(`server=${encodeURIComponent(e.serverUrl)}`), e.agentId && s.push(`agent=${encodeURIComponent(e.agentId)}`), s.push(...seedThinkingIds(e.expandedThinking || []).map(id => `thinking=${encodeURIComponent(id)}`)), e.panel && s.push(`panel=${e.panel}`), e.eventId && s.push(`event=${encodeURIComponent(e.eventId)}`), e.panel === "tool" && e.toolId && s.push(`tool=${encodeURIComponent(e.toolId)}`), e.panel === "tool" && e.toolId && ["input", "output", "both"].includes(e.fullPayload) && s.push(`full=${e.fullPayload}`), `/hm/agents/session/${encodeURIComponent(e.sessionId)}${s.length ? `?${s.join("&")}` : ""}`;
    }
    if (typeof e != "string" && e.key === "agent-run") {
      const s = [];
-@@ -22709,11 +22720,30 @@ function yde(e) {
+@@ -22709,11 +22721,33 @@ function yde(e) {
    }, t;
  }
  const vde = Rq.shape.tab.unwrap().options;
@@ -136,6 +146,9 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
 +function seedExpandedQuery(route) {
 +  return (seedExpandedSessions(route.expandedSessions) || []).map(token => `child=${encodeURIComponent(token)}`);
 +}
++function seedThinkingIds(values) {
++  return [...new Set(values.filter(value => typeof value === "string" && value.length > 0 && value.length <= 512 && !/[\u0000-\u001f]/.test(value)))].sort().slice(0, 100);
++}
 +function seedListPages(params) {
 +  return /^(?:[2-9]|[1-9][0-9]|100)$/.test(params.get("pages") || "") ? Number(params.get("pages")) : undefined;
 +}
@@ -148,7 +161,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
    }
    if (r[0] === "agent" && r[1]) {
      const i = t.get("tab"), s = vde.find((o) => o === i);
-@@ -22723,20 +22753,26 @@ function Bq(e, t) {
+@@ -22723,20 +22757,27 @@ function Bq(e, t) {
        serverUrl: t.get("server") || void 0,
        tab: s,
        triggerId: t.get("trigger") || void 0,
@@ -161,6 +174,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
    return r[0] === "session" && r[1] ? {
      key: "agent-session",
      sessionId: r[1],
++    expandedThinking: seedThinkingIds(t.getAll("thinking")),
      serverUrl: t.get("server") || void 0,
 -    agentId: t.get("agent") || void 0
 +    agentId: t.get("agent") || void 0,
@@ -178,7 +192,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
  }
  function bde(e) {
    return /^https?:\/\/[^/?#]+\/hm\/agents(?:[/?#]|$)/.test(e);
-@@ -69610,13 +69646,15 @@ function fDe(e) {
+@@ -69610,13 +69651,15 @@ function fDe(e) {
    const n = e.match(/<trigger_instructions>\n?([\s\S]*?)\n?<\/trigger_instructions>/)?.[1]?.trim();
    return n || void 0;
  }
@@ -191,48 +205,48 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
      )}`;
  }
 -function xv(e, t, n, r) {
-+function xv(e, t, n, r, routeUrl) {
-+  if (routeUrl) return routeUrl({ key: "agent-session", serverUrl: e, agentId: t, sessionId: n, eventId: r });
++function xv(e, t, n, r, routeUrl, expandedThinking) {
++  if (routeUrl) return routeUrl({ key: "agent-session", serverUrl: e, agentId: t, sessionId: n, eventId: r, expandedThinking });
    const i = _P(e, t, n);
    return i ? `${i}#event=${encodeURIComponent(r)}` : void 0;
  }
-@@ -69696,7 +69734,7 @@ function sQ(e, t) {
+@@ -69696,7 +69739,7 @@ function sQ(e, t) {
            eventId: u.id,
            sessionId: u.sessionId,
            seq: u.seq,
 -          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id)
-+          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id, t.routeUrl)
++          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id, t.routeUrl, t.expandedThinking)
          }
        });
        continue;
-@@ -69723,7 +69761,7 @@ function sQ(e, t) {
+@@ -69723,7 +69766,7 @@ function sQ(e, t) {
            eventId: u.id,
            sessionId: u.sessionId,
            seq: u.seq,
 -          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id)
-+          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id, t.routeUrl)
++          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id, t.routeUrl, t.expandedThinking)
          }
        };
        n.push(x), r.set(y.id, x);
-@@ -69760,7 +69798,7 @@ function sQ(e, t) {
+@@ -69760,7 +69803,7 @@ function sQ(e, t) {
              eventId: u.id,
              sessionId: u.sessionId,
              seq: u.seq,
 -            shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id)
-+            shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id, t.routeUrl)
++            shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id, t.routeUrl, t.expandedThinking)
            }
          };
          n.push(w), r.set(y.toolCallId, w);
-@@ -69794,7 +69832,7 @@ function sQ(e, t) {
+@@ -69794,7 +69837,7 @@ function sQ(e, t) {
            eventId: u.id,
            sessionId: u.sessionId,
            seq: u.seq,
 -          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id)
-+          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id, t.routeUrl)
++          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id, t.routeUrl, t.expandedThinking)
          }
        });
        continue;
-@@ -70669,7 +70707,8 @@ function Aa(e, t, n) {
+@@ -70669,7 +70712,8 @@ function Aa(e, t, n) {
          accountUid: t,
          action: { _: "ListModelProviders", ...n ? { agentId: n } : {} }
        });
@@ -242,7 +256,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
        return r.providers;
      },
      enabled: !!e && !!t,
-@@ -70735,7 +70774,8 @@ function $P(e, t, n) {
+@@ -70735,7 +70779,8 @@ function $P(e, t, n) {
          accountUid: t,
          action: { _: "ListSigningIdentities", ...n ? { agentId: n } : {} }
        });
@@ -252,7 +266,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
        return r.identities;
      },
      enabled: !!e && !!t,
-@@ -71178,8 +71218,17 @@ async function wQ(e, t, n) {
+@@ -71178,8 +71223,17 @@ async function wQ(e, t, n) {
    if (r._ !== "GetAgentResponse") throw new Error("Unexpected GetAgent response");
    return Gt().setQueryData(["agents", "detail", e, t, n], r), r;
  }
@@ -271,7 +285,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
      queryKey: ["agents", "detail", e, t, n],
      queryFn: async () => {
        if (!e || !t || !n) return null;
-@@ -71188,12 +71237,15 @@ function zP(e, t, n) {
+@@ -71188,12 +71242,15 @@ function zP(e, t, n) {
        return r;
      },
      enabled: !!e && !!t && !!n,
@@ -288,7 +302,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
  }
  function xQ(e, t, n, { excludeTriggered: r = !1 } = {}) {
    return Ele({
-@@ -71240,7 +71292,7 @@ function kQ(e, t, n) {
+@@ -71240,7 +71297,7 @@ function kQ(e, t, n) {
    });
  }
  function tMe(e, t, n) {
@@ -297,7 +311,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
      queryKey: ["agents", "trigger", e, t, n],
      queryFn: async () => {
        if (!e || !t || !n) return null;
-@@ -71249,9 +71301,13 @@ function tMe(e, t, n) {
+@@ -71249,9 +71306,13 @@ function tMe(e, t, n) {
        return r;
      },
      enabled: !!e && !!t && !!n,
@@ -311,7 +325,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
  }
  function nMe(e, t, n, r) {
    return Pr({
-@@ -71268,6 +71324,8 @@ function nMe(e, t, n, r) {
+@@ -71268,6 +71329,8 @@ function nMe(e, t, n, r) {
          return s;
        },
        enabled: !!e && !!t && !!n,
@@ -320,7 +334,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
        retry: !1,
        useErrorBoundary: !1
      }))
-@@ -71426,7 +71484,8 @@ function lMe(e, t) {
+@@ -71426,7 +71489,8 @@ function lMe(e, t) {
    });
  }
  function SQ(e, t, n, r) {
@@ -330,7 +344,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
      queryKey: ["agents", "memory", e, t, n, "file", r],
      queryFn: async () => {
        if (!e || !t || !n || !r) return null;
-@@ -71442,6 +71501,14 @@ function SQ(e, t, n, r) {
+@@ -71442,6 +71506,14 @@ function SQ(e, t, n, r) {
      retry: !1,
      useErrorBoundary: !1
    });
@@ -345,7 +359,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
  }
  function cMe(e, t) {
    return ft({
-@@ -71649,7 +71716,7 @@ function yMe(e, t) {
+@@ -71649,7 +71721,7 @@ function yMe(e, t) {
    });
  }
  function Rg(e, t, n) {
@@ -354,7 +368,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
      queryKey: ["agents", "session", e, t, n],
      queryFn: async () => {
        if (!e || !t || !n) return null;
-@@ -71658,9 +71725,13 @@ function Rg(e, t, n) {
+@@ -71658,9 +71730,13 @@ function Rg(e, t, n) {
        return r;
      },
      enabled: !!e && !!t && !!n,
@@ -368,7 +382,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
  }
  function vMe(e, t, n, r, i) {
    return qt({
-@@ -71671,7 +71742,7 @@ function vMe(e, t, n, r, i) {
+@@ -71671,7 +71747,7 @@ function vMe(e, t, n, r, i) {
          accountUid: t,
          action: { _: "GetSessionEvent", sessionId: n, seq: r }
        });
@@ -377,7 +391,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
        return s.event;
      },
      enabled: i && !!e && !!t && !!n && r !== void 0,
-@@ -71680,85 +71751,92 @@ function vMe(e, t, n, r, i) {
+@@ -71680,85 +71756,92 @@ function vMe(e, t, n, r, i) {
      useErrorBoundary: !1
    });
  }
@@ -545,7 +559,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
  function bMe(e, t, n, r) {
    const i = r?.enabled !== !1 && !!e && !!t && !!n;
    return qt({
-@@ -71766,16 +71844,17 @@ function bMe(e, t, n, r) {
+@@ -71766,16 +71849,17 @@ function bMe(e, t, n, r) {
      queryFn: async () => {
        if (!e || !t || !n) return [];
        const s = await Be({ serverUrl: e, accountUid: t, action: { _: "ListSessions", parentSessionId: n } });
@@ -566,7 +580,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
      queryKey: ["agents", "runs", "run", e, t, n],
      queryFn: async () => {
        if (!e || !t || !n) return null;
-@@ -71787,9 +71866,13 @@ function Dy(e, t, n) {
+@@ -71787,9 +71871,13 @@ function Dy(e, t, n) {
      // Run changes stream over the WebSocket; this slow poll is only a safety net while the run is
      // live, in case an event is dropped. A finished run never changes again, so it stops entirely.
      refetchInterval: (r) => r && IQ.includes(r.status) ? !1 : cQ,
@@ -580,7 +594,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
  }
  const IQ = ["succeeded", "failed", "canceled"];
  function K0(e, t, n) {
-@@ -73292,10 +73375,29 @@ function $F(e) {
+@@ -73292,10 +73380,29 @@ function $F(e) {
      }
    ];
  }
@@ -610,7 +624,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
    async function s(o) {
      try {
        if ((await n.mutateAsync(o))._ !== "DeleteModelProviderResponse") throw new Error("Unexpected delete response");
-@@ -73310,7 +73412,9 @@ function KQ({
+@@ -73310,7 +73417,9 @@ function KQ({
        /* @__PURE__ */ f(wn, { children: "Model providers connect your agents to AI models like Claude, GPT, and Gemini. Add a provider to make its models available when configuring agents." })
      ] }),
      /* @__PURE__ */ A("div", { className: "grid gap-3", children: [
@@ -621,7 +635,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
          /* @__PURE__ */ A("div", { className: "flex items-center justify-between gap-3", children: [
            /* @__PURE__ */ A("div", { className: "flex items-center gap-3", children: [
              /* @__PURE__ */ f(My, { type: o.type, className: "text-muted-foreground size-5" }),
-@@ -73346,7 +73450,7 @@ function KQ({
+@@ -73346,7 +73455,7 @@ function KQ({
            ) : r.data?.subscriptionAuth === !0 ? /* @__PURE__ */ f(W, { size: "sm", color: "muted", children: "Subscription sign-in is only available from the desktop app. Sign in again there, or delete this provider and use an API key instead." }) : /* @__PURE__ */ f(W, { size: "sm", color: "muted", children: "This server no longer offers subscription sign-in. Delete this provider and use an API key instead." })
          ] }) : null
        ] }, o.id)),
@@ -630,7 +644,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
      ] }),
      /* @__PURE__ */ f("div", { className: "flex justify-end gap-2", children: /* @__PURE__ */ A(fe, { onClick: () => i.open(e), children: [
        /* @__PURE__ */ f(fr, { className: "size-4" }),
-@@ -73498,6 +73602,7 @@ function WQ({
+@@ -73498,6 +73607,7 @@ function WQ({
    input: e
  }) {
    const t = $P(e.serverUrl, e.selectedAccountId), n = qP(e.serverUrl, e.selectedAccountId), r = FDe(e.serverUrl, e.selectedAccountId), i = Or(), s = Qi(), o = _y(e.serverUrl, s.data), a = Ot(iBe), l = Ot(oBe, { isAlert: !0 }), [c, d] = ee({}), [u, h] = ee({}), [m, p] = ee(!1), [g, y] = ee(null), v = ge(null);
@@ -638,7 +652,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
    xe(() => {
      const I = {};
      for (const k of t.data || [])
-@@ -73563,7 +73668,9 @@ function WQ({
+@@ -73563,7 +73673,9 @@ function WQ({
        /* @__PURE__ */ f(wn, { children: "To give an agent access to write content, invite these accounts as collaborators on your spaces or documents." })
      ] }),
      /* @__PURE__ */ A("div", { className: "grid gap-3", children: [
@@ -649,7 +663,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
          aBe,
          {
            identity: I,
-@@ -73582,7 +73689,7 @@ function WQ({
+@@ -73582,7 +73694,7 @@ function WQ({
          },
          I.id
        )),
@@ -658,7 +672,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
      ] }),
      /* @__PURE__ */ A("div", { className: "flex justify-end gap-2", children: [
        /* @__PURE__ */ A(fe, { variant: "outline", onClick: () => p(!0), children: [
-@@ -74541,6 +74648,41 @@ function yBe(e) {
+@@ -74541,6 +74653,41 @@ function yBe(e) {
    if (e?.length)
      return e.some((t) => t.status === "error") ? "error" : e.some((t) => t.status === "streaming") ? "streaming" : "idle";
  }
@@ -700,7 +714,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
  function vBe({
    serverUrl: e,
    accountUid: t,
-@@ -74548,15 +74690,23 @@ function vBe({
+@@ -74548,15 +74695,23 @@ function vBe({
    childSessionCount: r,
    compact: i,
    selectedSessionId: s,
@@ -726,7 +740,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
          className: `text-muted-foreground hover:text-foreground flex items-center gap-1.5 self-start rounded px-1 py-0.5 max-sm:min-h-10 ${u}`,
          onClick: (h) => {
            h.stopPropagation(), l((m) => !m);
-@@ -75114,9 +75264,16 @@ const uK = pe.memo(function({
+@@ -75114,9 +75269,16 @@ const uK = pe.memo(function({
    accountUid: s,
    agentId: o
  }) {
@@ -746,7 +760,36 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
    );
    return /* @__PURE__ */ f(CP.Provider, { value: p, children: /* @__PURE__ */ A("div", { className: "group/message my-1.5", "data-message-kind": c ? "system" : d ? "user" : "assistant", children: [
      c ? /* @__PURE__ */ f(
-@@ -75366,7 +75523,7 @@ function OBe({ durationMs: e, first: t }) {
+@@ -75309,8 +75471,18 @@ function _Be({
+   agentId: s,
+   sessionId: o
+ }) {
+-  const [a, l] = ee(!1), c = t || e.some(PP), d = ge(Yv(r)), u = e[0]?.stepStartedAt ?? e[0]?.calledAt ?? d.current, h = Cy(r, c), m = c ? void 0 : iDe(e), p = c ? Math.max(0, h - u) : m !== void 0 ? Math.max(0, m - u) : void 0, g = c ? `Thinking (${n_(p ?? 0)})` : p !== void 0 ? `Thought for ${dBe(p)}` : "Finished thinking", y = a ? e : c ? e.slice(-1) : [], v = a ? Rz : fi;
+-  return /* @__PURE__ */ A("div", { className: "my-1.5 mr-6", "data-thinking-group": c ? "active" : "done", children: [
++  const route = Xye(), navigate = N8e(), [local, setLocal] = ee(false);
++  const owned = route.key === "agent-session" && route.sessionId === o;
++  const id = e[0]?.id, a = owned ? !!route.expandedThinking?.includes(id) : local;
++  const l = update => {
++    const open = typeof update === "function" ? update(a) : update;
++    if (!owned) return setLocal(open);
++    if (open === a || open && (route.expandedThinking || []).length >= 100) return;
++    const expandedThinking = seedThinkingIds(open ? [...(route.expandedThinking || []), id] : (route.expandedThinking || []).filter(value => value !== id));
++    navigate({ ...route, expandedThinking });
++  };
++  const c = t || e.some(PP), d = ge(Yv(r)), u = e[0]?.stepStartedAt ?? e[0]?.calledAt ?? d.current, h = Cy(r, c), m = c ? void 0 : iDe(e), p = c ? Math.max(0, h - u) : m !== void 0 ? Math.max(0, m - u) : void 0, g = c ? `Thinking (${n_(p ?? 0)})` : p !== void 0 ? `Thought for ${dBe(p)}` : "Finished thinking", y = a ? e : c ? e.slice(-1) : [], v = a ? Rz : fi;
++  return /* @__PURE__ */ A("div", { className: "my-1.5 mr-6", "data-thinking-group": c ? "active" : "done", "data-thinking-id": id, children: [
+     y.length ? /* @__PURE__ */ f("div", { children: y.map((x, w) => {
+       const I = a ? oDe(x, e[e.indexOf(x) - 1]) : void 0;
+       return /* @__PURE__ */ A(fT, { children: [
+@@ -75334,6 +75506,7 @@ function _Be({
+         type: "button",
+         "aria-expanded": a,
+         title: a ? "Hide tool calls" : "Show all tool calls",
++        disabled: owned && !a && (route.expandedThinking || []).length >= 100,
+         onClick: () => l((x) => !x),
+         className: "text-muted-foreground hover:text-foreground hover:bg-muted/60 my-2 flex w-full items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs select-none",
+         children: [
+@@ -75366,7 +75539,7 @@ function OBe({ durationMs: e, first: t }) {
    );
  }
  function RBe({ item: e }) {
@@ -755,7 +798,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
    return /* @__PURE__ */ A(
      "div",
      {
-@@ -75408,7 +75565,7 @@ function RBe({ item: e }) {
+@@ -75408,7 +75581,7 @@ function RBe({ item: e }) {
    );
  }
  function DBe({ item: e, serverUrl: t }) {
@@ -764,7 +807,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
    return /* @__PURE__ */ A(ze, { children: [
      /* @__PURE__ */ f(
        GRe,
-@@ -75424,9 +75581,10 @@ function DBe({ item: e, serverUrl: t }) {
+@@ -75424,9 +75597,10 @@ function DBe({ item: e, serverUrl: t }) {
  function MBe({
    item: e,
    open: t,
@@ -777,7 +820,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
    return /* @__PURE__ */ f(ya, { open: t, onOpenChange: n, children: /* @__PURE__ */ A(va, { className: "max-h-[85vh] w-[min(44rem,calc(100vw-2rem))]", children: [
      /* @__PURE__ */ A(Ad, { children: [
        /* @__PURE__ */ A(Ut, { children: [
-@@ -75451,11 +75609,13 @@ function MBe({
+@@ -75451,11 +75625,13 @@ function MBe({
        ] }) : null,
        /* @__PURE__ */ A("div", { className: "space-y-1", children: [
          /* @__PURE__ */ f("div", { className: "text-muted-foreground text-[10px] font-medium tracking-[0.18em] uppercase", children: "Call" }),
@@ -793,7 +836,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
        ] })
      ] })
    ] }) });
-@@ -75688,12 +75848,66 @@ function qBe({ args: e }) {
+@@ -75688,12 +75864,78 @@ function qBe({ args: e }) {
      ] }, s.label)) })
    ] });
  }
@@ -812,6 +855,18 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
 +    /* @__PURE__ */ f("span", { role: query?.error ? "alert" : "status", children: !selected ? `${label} is truncated for display.` : query?.isFetching ? `Loading full ${label.toLowerCase()}…` : query?.error ? `Could not load the full ${label.toLowerCase()} payload: ${query.error.message}` : `Full ${label.toLowerCase()} data` }),
 +    /* @__PURE__ */ f("button", { type: "button", disabled: selected && query?.isFetching, onClick: () => selected && query?.error ? query.refetch() : onSelect(!selected), className: "text-foreground hover:bg-muted rounded border px-1.5 py-0.5 disabled:opacity-50", children: selected && query?.error ? "Retry" : selected ? `Show truncated ${label.toLowerCase()}` : "Load full data" })
 +  ] });
++}
++function SeedThinkingSelection({ rows, serverUrl, accountUid, sessionId }) {
++  const route = Xye(), host = T8e();
++  const selected = route.expandedThinking || [], path = JSON.stringify(selected);
++  const groups = rows.flatMap(row => row.message?.role === "assistant" && row.message.actor !== "system"
++    ? rDe(FBe(row.message)).filter(group => group.kind === "thinking").map(group => group.parts[0].id) : []);
++  const missing = selected.filter(id => !groups.includes(id));
++  const error = Ce(() => missing.length ? { status: 404 } : undefined, [JSON.stringify(missing)]);
++  xe(() => {
++    if (selected.length) host.onReadOutcome?.({ kind: "session-thinking", serverUrl, accountUid, sessionId, path, error });
++  }, [host, serverUrl, accountUid, sessionId, path, error]);
++  return missing.length ? /* @__PURE__ */ f(W, { role: "alert", children: "Selected tool group is not in this transcript." }) : null;
 +}
 +function SeedSessionToolInspector({ rows, serverUrl, accountUid, sessionId, agentId }) {
 +  const route = Xye(), navigate = nn(), replace = nn("replace"), host = T8e();
@@ -862,7 +917,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
    return /* @__PURE__ */ f(ya, { open: t, onOpenChange: n, children: /* @__PURE__ */ A(va, { className: "max-h-[85vh] w-[min(44rem,calc(100vw-2rem))]", children: [
      /* @__PURE__ */ A(Ad, { children: [
        /* @__PURE__ */ f(Ut, { children: e.name }),
-@@ -75715,12 +75929,12 @@ function hK({
+@@ -75715,12 +75957,12 @@ function hK({
        /* @__PURE__ */ A("div", { className: "min-h-0 space-y-1", children: [
          /* @__PURE__ */ f("div", { className: "text-muted-foreground text-[10px] font-medium tracking-[0.18em] uppercase", children: "Input" }),
          /* @__PURE__ */ f("pre", { className: "bg-muted max-h-48 overflow-auto rounded-xl p-3 text-[11px] whitespace-pre-wrap", children: ca(a) }),
@@ -877,7 +932,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
        ] })
      ] })
    ] }) });
-@@ -76389,7 +76603,7 @@ function Lg({
+@@ -76389,7 +76631,7 @@ function Lg({
    agentId: i,
    sessionId: s
  }) {
@@ -886,7 +941,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
      n,
      r,
      s,
-@@ -78400,8 +78614,11 @@ function jK({
+@@ -78400,8 +78642,11 @@ function jK({
    onOpenTrigger: s,
    agentName: o,
    activity: a,
@@ -899,7 +954,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
    const c = e.title || "Untitled session", d = ga(new Date(e.updatedAt)), u = a ? /* @__PURE__ */ f(pw, { tone: a.tone, label: a.label, className: l ? "size-2" : void 0 }) : /* @__PURE__ */ f(gw, { status: e.status, className: l ? "size-2" : void 0 }), h = e.startedByTrigger ? /* @__PURE__ */ A(
      "button",
      {
-@@ -78415,13 +78632,14 @@ function jK({
+@@ -78415,13 +78660,14 @@ function jK({
          e.startedByTrigger.triggerName
        ]
      }
@@ -916,7 +971,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
        onOpenSession: i
      }
    ) }) : null;
-@@ -78507,13 +78725,18 @@ function x_({
+@@ -78507,13 +78753,18 @@ function x_({
    compact: l = !1,
    showAgentName: c = !0,
    readState: d,
@@ -937,7 +992,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
      y ? /* @__PURE__ */ f(W, { size: l ? "sm" : void 0, color: "muted", className: l ? "px-2 py-1" : void 0, children: "Loading sessions…" }) : null,
      o.map((v) => /* @__PURE__ */ f(
        On,
-@@ -78535,6 +78758,7 @@ function x_({
+@@ -78535,6 +78786,7 @@ function x_({
          serverUrl: v,
          accountUid: t,
          compact: l,
@@ -945,7 +1000,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
          agentName: c ? w?.definition.name || x.agentId : void 0,
          activity: d ? LMe(x, v, d, w?.activity) : void 0,
          onOpen: (I) => g({ serverUrl: v, agentId: x.agentId, sessionId: x.id }, I),
-@@ -78549,6 +78773,7 @@ function x_({
+@@ -78549,6 +78801,7 @@ function x_({
        },
        `${v}:${x.id}`
      )) }),
@@ -953,7 +1008,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
      /* @__PURE__ */ f("div", { ref: p, "aria-hidden": "true", className: "h-px" }),
      i && e.length ? /* @__PURE__ */ f(W, { size: "sm", color: "muted", className: "text-center", children: "Loading more…" }) : null
    ] });
-@@ -85436,6 +85661,14 @@ function z5e({
+@@ -85436,6 +85689,14 @@ function z5e({
      G ? void 0 : k ?? void 0
    ), ye = m?.data?.totals, Ne = Ot(J5e), de = Ot(V5e), ce = ge(null), ae = ge(null), Pe = ge({ tree: l?.treeScrollTop ?? 0, file: l?.fileScrollTop ?? 0 }), He = ge(null), q = ge({ selectedPath: k, expandedDirs: c });
    q.current = { selectedPath: k, expandedDirs: c };
@@ -968,7 +1023,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
    function N() {
      U5e(e, n, {
        selectedPath: q.current.selectedPath,
-@@ -86747,11 +86980,23 @@ function a$e({
+@@ -86747,11 +87008,23 @@ function a$e({
    triggerId: r,
    memoryPath: i
  }) {
@@ -994,7 +1049,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
    const F = m.data?.agent.accessRole ?? "owner", B = tx(F), z = Ly(F), Y = F === "owner", [J, Q] = ee(""), [R, X] = ee(""), [re, L] = ee(""), [ie, ue] = ee(void 0), [le, G] = ee(void 0), [te, ye] = ee([]), Ne = FP(u, s, R, e), de = T.data?.find((Se) => Se.name === R)?.type, [ce, ae] = ee([]), [Pe, He] = ee(0), [q, N] = ee(!1), [_, H] = ee(!1), [V, se] = ee("idle"), [Z, De] = ee("idle"), rt = ge(0), ut = ge(0), oe = ge(null), be = ge(null), We = ge(null);
    xe(() => {
      n !== "sessions" || !u || _K(u, e, null);
-@@ -86947,11 +87192,14 @@ function a$e({
+@@ -86947,11 +87220,14 @@ function a$e({
              U.content,
              D.content,
              n === "sessions" ? /* @__PURE__ */ f("section", { className: "flex min-h-0 flex-1 flex-col", children: /* @__PURE__ */ A("div", { className: "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1", children: [
@@ -1010,7 +1065,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
                    serverUrl: u,
                    accountUid: s,
                    onOpen: (at) => l({ key: "agent-session", agentId: e, sessionId: Se.id, serverUrl: u }, at),
-@@ -86969,14 +87217,14 @@ function a$e({
+@@ -86969,14 +87245,14 @@ function a$e({
                  },
                  Se.id
                )),
@@ -1027,7 +1082,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
                    },
                    children: p.isFetchingNextPage ? "Loading…" : "Load more"
                  }
-@@ -88824,7 +89072,7 @@ function O$e() {
+@@ -88824,7 +89100,7 @@ function O$e() {
  }
  function R$e({ selectedAccountId: e }) {
    V0();
@@ -1036,7 +1091,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
      () => r.flatMap(
        (O, M) => (s[M]?.data || []).map((U) => ({ ...U, serverUrl: O }))
      ),
-@@ -88839,7 +89087,7 @@ function R$e({ selectedAccountId: e }) {
+@@ -88839,7 +89115,7 @@ function R$e({ selectedAccountId: e }) {
        (O) => !m.some((M) => M.serverUrl === O.serverUrl && M.id === O.agent.id)
      ),
      [m, g.agents]
@@ -1045,7 +1100,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
      const O = new Set(v.entries.map((U) => `${U.serverUrl}:${U.session.id}`)), M = g.sessions.filter((U) => !O.has(`${U.serverUrl}:${U.session.id}`));
      return M.length ? [...v.entries, ...M].sort((U, F) => F.session.updatedAt - U.session.updatedAt) : v.entries;
    }, [v.entries, g.sessions]), w = v.isLoading || g.isLoading && !x.length, I = Ce(
-@@ -88904,11 +89152,11 @@ function R$e({ selectedAccountId: e }) {
+@@ -88904,11 +89180,11 @@ function R$e({ selectedAccountId: e }) {
                            /* @__PURE__ */ f(u2, {}),
                            "Open Server"
                          ] }),
@@ -1059,7 +1114,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
                            /* @__PURE__ */ f(p2, {}),
                            "Providers"
                          ] })
-@@ -88944,8 +89192,6 @@ function R$e({ selectedAccountId: e }) {
+@@ -88944,8 +89220,6 @@ function R$e({ selectedAccountId: e }) {
              ] })
            ] }),
            r.map((O) => /* @__PURE__ */ f(B$e, { serverUrl: O, selectedAccountId: e }, O)),
@@ -1068,7 +1123,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
            d.content,
            u.content,
            p.length ? /* @__PURE__ */ A("section", { className: "flex flex-col gap-3", children: [
-@@ -88963,6 +89209,7 @@ function R$e({ selectedAccountId: e }) {
+@@ -88963,6 +89237,7 @@ function R$e({ selectedAccountId: e }) {
                `${O.serverUrl}:${O.agentId}`
              )) })
            ] }) : null,
@@ -1076,7 +1131,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
            D ? (
              // Nothing to list and nobody to talk to yet: the page's one job is getting a first agent.
              /* @__PURE__ */ f(
-@@ -88997,6 +89244,9 @@ function R$e({ selectedAccountId: e }) {
+@@ -88997,6 +89272,9 @@ function R$e({ selectedAccountId: e }) {
                  hasNextPage: v.hasNextPage,
                  isFetchingNextPage: v.isFetchingNextPage,
                  fetchNextPage: v.fetchNextPage,
@@ -1086,7 +1141,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
                  problems: E,
                  emptyText: r.length ? "No sessions yet. Start one below." : "No sessions yet."
                }
-@@ -89222,9 +89472,10 @@ function J$e() {
+@@ -89222,9 +89500,10 @@ function J$e() {
  }
  function H$e({ routeServerUrl: e, selectedAccountId: t }) {
    V0();
@@ -1099,7 +1154,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
      serverUrl: g.serverUrl,
      notice: si(g.error, { failed: "Couldn’t load sessions" }),
      refetch: g.refetch,
-@@ -89264,7 +89515,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
+@@ -89264,7 +89543,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
              {
                variant: "outline",
                className: "max-sm:min-h-10",
@@ -1108,7 +1163,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
                children: [
                  /* @__PURE__ */ f(Bz, { className: "size-4" }),
                  "Accounts"
-@@ -89276,7 +89527,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
+@@ -89276,7 +89555,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
              {
                variant: "outline",
                className: "max-sm:min-h-10",
@@ -1117,7 +1172,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
                children: [
                  /* @__PURE__ */ f(p2, { className: "size-4" }),
                  "Providers"
-@@ -89285,8 +89536,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
+@@ -89285,8 +89564,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
            )
          ] })
        ] }),
@@ -1127,7 +1182,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
        l.content,
        s.isError ? /* @__PURE__ */ f(
          z$e,
-@@ -89308,6 +89558,9 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
+@@ -89308,6 +89586,9 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
            hasNextPage: d.hasNextPage,
            isFetchingNextPage: d.isFetchingNextPage,
            fetchNextPage: d.fetchNextPage,
@@ -1137,7 +1192,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
            problems: u,
            emptyText: s.data?.length ? "No sessions on this server yet. Start one below." : "No sessions on this server yet."
          }
-@@ -89330,9 +89583,11 @@ function j$e({
+@@ -89330,9 +89611,11 @@ function j$e({
    routeServerUrl: t,
    routeAgentId: n
  }) {
@@ -1152,23 +1207,25 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
    UQ(o, e, qQ(a.data?.events));
    const v = Zu(
      o,
-@@ -89353,6 +89608,7 @@ function j$e({
+@@ -89353,6 +89636,8 @@ function j$e({
            agentId: l,
            sessionId: e,
            triggerContext: a.data?.triggerContext ?? null,
 +          routeUrl: displayedHost.routeUrl,
++          expandedThinking: selectedRoute.expandedThinking,
            runs: O.data
          }),
          O.data || [],
-@@ -89367,6 +89623,7 @@ function j$e({
+@@ -89367,6 +89652,8 @@ function j$e({
        a.data?.events,
        a.data?.session.plan,
        a.data?.triggerContext,
 +      displayedHost.routeUrl,
++      JSON.stringify(selectedRoute.expandedThinking),
        e,
        O.data
      ]
-@@ -89416,9 +89673,14 @@ function j$e({
+@@ -89416,9 +89703,14 @@ function j$e({
    }, [D, T, w]), xe(() => {
      E.resetToBottom();
    }, [e]), xe(() => {
@@ -1186,7 +1243,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
    function N() {
      if (!a.data) return;
      const Z = a.data.session;
-@@ -89537,7 +89799,7 @@ function j$e({
+@@ -89537,7 +89829,7 @@ function j$e({
                    label: "Copy session URL",
                    disabled: !l,
                    onClick: () => {
@@ -1195,10 +1252,11 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
                      Z && (navigator.clipboard?.writeText(Z), we.success("Session URL copied"));
                    }
                  },
-@@ -89596,12 +89858,15 @@ function j$e({
+@@ -89596,12 +89888,16 @@ function j$e({
              onScroll: E.handleScroll,
              className: "min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-1",
              children: /* @__PURE__ */ A("div", { ref: E.contentRef, className: "flex min-h-full flex-col gap-3 pt-4", children: [
++              /* @__PURE__ */ f(SeedThinkingSelection, { rows: M, serverUrl: o, accountUid: r, sessionId: e }),
 +              selectedRoute.panel === "tool" ? /* @__PURE__ */ f(SeedSessionToolInspector, { rows: M, serverUrl: o, accountUid: r, sessionId: e, agentId: l }) : null,
 +              selectedRoute.eventId && !M.some(row => row.key === selectedRoute.eventId) ? /* @__PURE__ */ f(W, { role: "alert", children: "Selected message is not in this transcript." }) : null,
                M.length ? null : /* @__PURE__ */ f(W, { color: "muted", children: "No messages yet." }),
@@ -1213,10 +1271,10 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..3f0d6e35c0abc3a9c065ae90b2a5165d
                      G$e,
                      {
 diff --git a/host.d.ts b/host.d.ts
-index ee1c082fffbe395f63ddcf81630997454cf7804d..eece365639fd97eeb5f6eaa61ac191c36163a584 100644
+index ee1c082fffbe395f63ddcf81630997454cf7804d..44b71ce42e15a916a6e4ba1a0eb8b4610a0b300d 100644
 --- a/host.d.ts
 +++ b/host.d.ts
-@@ -96,6 +96,26 @@ export type SeedAgentsNavigationMode = 'push' | 'replace' | 'spawn';
+@@ -96,6 +96,27 @@ export type SeedAgentsNavigationMode = 'push' | 'replace' | 'spawn';
   * for account names, avatars and hm:// links.
   */
  export type SeedAgentsHost = {
@@ -1238,13 +1296,14 @@ index ee1c082fffbe395f63ddcf81630997454cf7804d..eece365639fd97eeb5f6eaa61ac191c3
 +        | { kind: 'session'; sessionId: string }
 +        | { kind: 'run'; runId: string }
 +        | { kind: 'trigger'; triggerId: string }
++        | { kind: 'session-thinking'; sessionId: string; path: string }
 +        | { kind: 'session-event'; sessionId: string; path: string }
 +        | { kind: 'session-tool'; sessionId: string; toolId: string; path: string })) => void;
      /**
       * Base URL of the agents server, as the browser can reach it. A canonical base ends in
       * `/hm/api/agents` (a site serving agents on its own origin, or `https://agentic.seed.hyper.media/hm/api/agents`)
 diff --git a/routes.d.ts b/routes.d.ts
-index aa408f2f19a1f10e10e4f10ae0decf6cfd147015..68371635f9d35c2f5c9e97ff35719edd1c811dde 100644
+index aa408f2f19a1f10e10e4f10ae0decf6cfd147015..db1ac2ddde72bcfa1daba33a1d2661a4937c4385 100644
 --- a/routes.d.ts
 +++ b/routes.d.ts
 @@ -5,11 +5,20 @@ export type SeedAgentsRoute =
@@ -1268,7 +1327,7 @@ index aa408f2f19a1f10e10e4f10ae0decf6cfd147015..68371635f9d35c2f5c9e97ff35719edd
  }
  /** One agent, on one of its tabs. */
   | {
-@@ -20,6 +29,10 @@ export type SeedAgentsRoute =
+@@ -20,13 +29,24 @@ export type SeedAgentsRoute =
      triggerId?: string;
      /** Memory tab: the file to open. */
      memoryPath?: string;
@@ -1279,8 +1338,10 @@ index aa408f2f19a1f10e10e4f10ae0decf6cfd147015..68371635f9d35c2f5c9e97ff35719edd
  }
  /** One session (a conversation). */
   | {
-@@ -27,6 +40,11 @@ export type SeedAgentsRoute =
+     key: 'agent-session';
      sessionId: string;
++    /** Expanded transcript tool groups, identified by their first recorded call. */
++    expandedThinking?: string[];
      serverUrl?: string;
      agentId?: string;
 +    /** Navigable transcript content; no actions are replayed. */
