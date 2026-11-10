@@ -28,6 +28,9 @@ const errors: string[] = [], mutations: string[] = [];
 let fixtureAccounts = 0, directoryStatus = 503;
 let accountStatus = 200, libraryStatus = 200, versionStatus = 200, runsStatus = 200;
 let overviewStatus = 200, logStatus = 200, batchStatus = 200;
+let matchStatus = 200, decisionStatus = 200, invalidMatch = false, invalidDecisions = false;
+const archivedMatch = { id: "navigation-match", name: "Navigation match", kind: "commander", stage: "fixture", startedAt: 1, outcome: "loss", ticks: 2, candidateSeat: 0, opponent: "Rival", errors: [], replayUrl: null, runtime: "fixture", policies: [{ name: "Candidate", source: "function turn() {}", parameters: [] }, { name: "Rival", source: "function turn() {}", parameters: [] }], counts: [2, 2], diagnostics: null };
+const observedGame = { id: "navigation-game", width: 1, height: 1, tick: 0, tickMs: 500, phase: "running", practice: true, winner: null, cells: [{ visibility: "visible", terrain: "general", owner: "p0", troops: 4 }], scores: [{ id: "p0", name: "Fixture", color: "#567", army: 4, land: 1, eliminated: false }], general: 0, queue: [], orderMessage: null, events: [] };
 const tactic = { id: "navigation-tactic", name: "Navigation tactic", version: 2, parameters: [], source: "function turn() { return {}; }", description: "Read-only fixture", hash: "navigation", createdAt: 1 };
 const overview = { updatedAt: 1, coach: { status: "idle", daily: {} }, online: { status: "idle" }, policies: [], totals: { batches: 0, promotions: 0, ranked: {}, local: {}, private: {} }, batches: [], humanMatches: [], remoteMatches: [], storage: { archiveBytes: 0, freeBytes: 1e10 } };
 const batch = { id: "navigation-batch", name: "Navigation experiment", status: "rejected", reasons: [], trainingSeeds: [], validationSeeds: [], candidates: [], policies: [], matches: [] };
@@ -54,6 +57,8 @@ await context.route("**/*", async route => {
     if (u.pathname === "/api/runs") return route.fulfill({ status: runsStatus, json: runsStatus === 200 ? [] : {} });
     if (u.pathname === "/api/trainer/overview") return route.fulfill({ status: overviewStatus, json: overviewStatus === 200 ? overview : {} });
     if (u.pathname === "/api/trainer/live") return route.fulfill({ json: { local: null, remote: null } });
+    if (u.pathname === "/api/trainer/matches/navigation-match") return route.fulfill({ status: matchStatus, json: invalidMatch ? {} : archivedMatch });
+    if (u.pathname === "/api/trainer/matches/navigation-match/decisions") return route.fulfill({ status: decisionStatus, json: { decisions: invalidDecisions ? [null] : [0, 1].map(sequence => ({ seat: Number(u.searchParams.get("seat") || 0), sequence, input: { game: observedGame, args: {}, state: null }, output: { orders: [], logs: [`Navigation decision ${sequence}`], state: null } })) } });
     if (u.pathname.startsWith("/api/trainer/logs/")) return route.fulfill({ status: logStatus, json: logStatus === 200 ? { text: "Read-only fixture logs" } : {} });
     if (u.pathname === "/api/trainer/batches/navigation-batch") return route.fulfill({ status: batchStatus, json: batchStatus === 200 ? batch : {} });
     if (u.pathname.startsWith("/api/replays/navigation-")) {
@@ -131,6 +136,24 @@ try {
     assert.equal(await page.evaluate(() => history.length), position);
     assert.equal(await page.evaluate(() => new URLSearchParams(location.hash.split("?")[1]).get("route")), item.route);
     passed.push(item.title + "/direct/reload/retry/no-extra-entry");
+  }
+  const matchRoute = "/?decision=1&match=navigation-match&seat=1&tab=Matches&trainer=1";
+  for (const item of [
+    { title: "Match unavailable", fail: () => { matchStatus = 503; }, recover: () => { matchStatus = 200; }, retry: "Retry match" },
+    { title: "Invalid match", fail: () => { invalidMatch = true; }, recover: () => { invalidMatch = false; }, retry: "Retry match" },
+    { title: "Access denied", fail: () => { decisionStatus = 403; }, recover: () => { decisionStatus = 200; }, retry: "Retry decisions" },
+    { title: "Invalid decisions", fail: () => { invalidDecisions = true; }, recover: () => { invalidDecisions = false; }, retry: "Retry decisions" },
+  ]) {
+    item.fail();
+    await page.goto("about:blank");
+    await page.goto(href(matchRoute)); await waitTitle(item.title);
+    await page.reload(); await waitTitle(item.title);
+    const length = await page.evaluate(() => history.length), selected = page.url();
+    item.recover();
+    await child.getByRole("button", { name: item.retry, exact: true }).click();
+    await waitTitle("Navigation match · Decision 2 · Rival");
+    assert.equal(page.url(), selected); assert.equal(await page.evaluate(() => history.length), length);
+    passed.push(item.title + "/match-decision/direct/reload/retry/no-extra-entry");
   }
   assert.deepEqual(errors, []); assert.deepEqual(mutations, []);
   console.log(JSON.stringify({ passed, pageErrors: 0, productionApiWrites: 0, childApiNetworkRequests: 0, gameConnections: 0, syntheticAccountResponses: fixtureAccounts }));

@@ -60,7 +60,7 @@ credentials should not be replayed from a link.
 | App / api / navigation | primary view, node, not-found, auth, titles | Covered, including legacy `service`→`svc`, Steam app→Vault tab. More parameter validation and every error title remain. |
 | `fleet` / Home | local/fleet overview, node links; pairing and account/reset dialogs; NetworkMap selected endpoints | Overview and node links covered. `networkFrom` / `networkTo` identify an inspected connection by host name, independent of the serving node. Selections push once; partial/whitespace links replace canonical defaults; Back/Forward, reload and fresh tabs restore both endpoints. Unknown/same-host links keep honest errors and titles; unavailable telemetry retains the requested pair. Pairing/reset/benchmark actions remain explicit and never replay from links. |
 | `controls` / Controls | control diagram, bindings/editor, reset notice | Static route/title covered where installed. Binding changes are settings, not navigation. Keyboard/gamepad mode preferences remain local. |
-| `applications` / Applications | application id, Casework example, pairing dialog, reload | Id, unknown-id and unavailable-listing errors/titles covered; failed lookups retain the requested link instead of showing an ordinary app list. Pairing is an explicit operation. Visited generic iframe documents now survive primary-view, application and node navigation. Opt-in generic SPA navigation now restores root-relative child routes/titles via an origin/source/request-bound bridge and keeps one history owner. Commander has a bridge integration for its main views, trainer tabs/inspectors/filters, workshop tabs/run inspection, community directory and active-match menu/chat/help/workshop. Replay reads now distinguish missing, denied, unavailable and invalid content; directory reads have route-bound error titles, retry and hidden-response protection. Runtime match availability and the rest of the error matrix still need coverage. Unsupported nested links in noncooperating apps report a restoration error. See `docs/EMBEDDED-NAVIGATION.md`. |
+| `applications` / Applications | application id, Casework example, pairing dialog, reload | Id, unknown-id and unavailable-listing errors/titles covered; failed lookups retain the requested link instead of showing an ordinary app list. Pairing is an explicit operation. Visited generic iframe documents now survive primary-view, application and node navigation. Opt-in generic SPA navigation now restores root-relative child routes/titles via an origin/source/request-bound bridge and keeps one history owner. Commander has a bridge integration for its main views, trainer tabs/inspectors/filters, workshop tabs/run inspection, community directory and active-match menu/chat/help/workshop. Replay reads now distinguish missing, denied, unavailable and invalid content; directory reads have route-bound error titles, retry and hidden-response protection. Match/decision archive reads now validate selected identities, page data and rendered board shapes; missing/denied/unavailable/invalid outcomes retry at the same URL without replacing the inspector or issuing commands (November 10). Other malformed responses and real remote-match availability still need coverage. Unsupported nested links in noncooperating apps report a restoration error. See `docs/EMBEDDED-NAVIGATION.md`. |
 | `applications?app=soniq` / Soniq | studio track/scene/bar/step, steps/piano editor, library query/category/source/offset, project and export dialogs | Clipper's Studio cooperates with the retained frame for track/scene/bar/step, editor mode, library visibility/query/category/source/page/sample, and the Projects dialog/selected snapshot. Direct links, reload, new tabs, Back/Forward and truthful errors/titles are covered. Links select snapshots without loading them; only Load selected snapshot changes the project. Project list loading, denied/unavailable reads, retry and late-response isolation are covered. A real AudioContext with a verified silent sink survives dialog/history/primary-view changes. External project changes retain selected IDs with honest errors; delayed load/import completions cannot reset a later selection or navigation round trip. Invalid-link recovery uses parent history and retains the same iframe. Piano-roll octave 0–8 now restores through canonical links, reload and history; the default 4 is omitted. Nondefault visible ranges name the title, and switching editors retains the selected range without changing notes or audio ownership. Starlight's separate older prototype is preserved. |
 | `applications?app=afterglow` / AfterglowFrame + BoticalMedia/public/navigation.js | child route, season/episode, search/filter, person dialog, music and YouTube state | Existing bridge retained: exact origin+source, parent-only history, route restoration, stable iframe, title cleanup. Browser regressions now prove document/timer continuity across primary views, other apps and node changes, plus hidden-message isolation and route/title restoration. A pending parent route rejects stale child acknowledgements. Missing, malformed and legacy child routes normalize with replace, preserving the iframe document and prior history. No production media is played by these checks. |
 | `applications?app=vimm` / Vault | tabs, system, query, letter, page; selected retro title modal | Covered. `game=<catalog-id>` restores a detail from its shelf/catalog/list context on fresh open, reload and history without starting playback. Invalid tab/system/query/letter/page/game values normalize; missing IDs retain an honest error/title. My list and ready-to-play metadata remain browser-local by design. |
@@ -815,3 +815,31 @@ view or another message selection writes one entry and Back restores the open
 popover. A plain outside click writes one close, while Escape/focus behavior and
 compact nonnavigable embeds retain their normal behavior. Pending click handlers
 are removed when their route owner closes or unmounts; lock cannot retain them.
+
+
+### Commander match and decision archive reads
+
+Clipper's current Commander source was captured separately from its serving
+`~/.commander/web/client` installation. The untouched captured source rebuilt to
+exactly the serving entrypoint with its existing trusted parent origins. The
+verified four-file source overlay adds schema/identity checks for match metadata
+and decision pages, read-only Retry match/Retry decisions controls and exact
+loading/error titles. Rows must match their requested seat and page sequence;
+malformed boards and outputs cannot crash the selected inspector. Retry preserves
+its URL, history position and mounted owner. Explicit replay verification remains
+a command and never runs from a URL or retry.
+
+Standalone, Cyberdeck-embedded and protected Probe-parent fixtures cover missing,
+denied, unavailable, malformed and non-JSON data, recovery, reload, stable owners,
+page/perspective races and failures after hiding the inspector. The actual serving
+assets can be selected with `COMMANDER_UI=~/.commander/web/client` in Commander's
+navigation suite. Cyberdeck's `scripts/check-commander-errors-live.ts` now also
+checks these installed error/retry paths over private loopback transports, with
+synthetic child APIs and all game connections blocked. No production account,
+match or order is created by the checks. Server and worker processes are retained.
+
+Remaining acceptance: Seed workflow tool/source/activity/error and other read
+disclosures, attachment details/errors and selected messages outside the returned
+event window; other Commander malformed-payload and independent remote-seat
+availability cases; native/device and original-file viewer boundaries. Starlight
+must receive/reconcile the still-pending fleet overlay when it becomes reachable.
