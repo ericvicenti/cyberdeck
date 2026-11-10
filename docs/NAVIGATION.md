@@ -792,3 +792,19 @@ its own title. Opening inspectors retains expansion; message share links preserv
 it and update after later toggles. Delayed transcripts cannot rename another
 session/node/view or the locked screen. Other run/plan and read disclosures,
 attachments and selected messages outside the returned event window remain open.
+
+### Recorded message Context popovers
+
+`panel=context&event=<message-id>` restores the recorded context that accompanied
+a user message in Seed and Sessions. The existing popover retains its presentation;
+its open/close state now pushes one entry and restores through refresh/new tabs
+and history. Closing retains the message anchor. The selected node, Sessions
+filter, transcript/composer and subscriptions survive these transitions.
+
+Only context present in the displayed transcript can open. A missing message,
+a message without context, or a system/assistant row keeps the requested URL and
+shows a matching Context not found title/error without issuing an arbitrary event
+read. A context panel without an event canonicalizes with replace. Late transcript
+results cannot reopen a previous context or rename another session/node/view or
+the locked screen. No current window is inspected, no context is captured, and no
+message is sent when following these links. Tests use recorded synthetic lines.

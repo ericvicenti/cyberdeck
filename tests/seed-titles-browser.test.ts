@@ -42,7 +42,10 @@ const toolEvents = [
  { type: "tool_result", toolCallId: "continued-call", name: "continue_session", output: { sessionId: "two", title: "Recorded successor" } },
  { type: "message", role: "assistant", content: "These are recorded tool results" },
 ];
-const transcriptEvents = (id: string) => id === "thinking" ? thinkingEvents.map((event, index) => ({ id: `thinking-event-${index + 1}`, sessionId: id, seq: index + 1, createdAt: index + 1, event })) : id === "tools" ? toolEvents.map((event, index) => ({
+const transcriptEvents = (id: string) => id === "contexts" ? ["context-one", "context two/?&", "no-context"].map((eventId, index) => ({
+ id: eventId, sessionId: id, seq: index + 1, createdAt: index + 1,
+ event: { type: "message", role: "user", content: `Context fixture message ${index + 1}`, ...(index < 2 ? { contextLines: [`Recorded window ${index + 1}`, `Recorded project ${index + 1}`] } : {}) },
+})) : id === "thinking" ? thinkingEvents.map((event, index) => ({ id: `thinking-event-${index + 1}`, sessionId: id, seq: index + 1, createdAt: index + 1, event })) : id === "tools" ? toolEvents.map((event, index) => ({
  id: `tool-event-${index + 1}`, sessionId: id, seq: index + 1, createdAt: index + 1, event,
  ...([1, 2].includes(index) ? { truncated: true } : {}),
 })) : id === "transcript" ? ["message-one", "message two/?&"].map((eventId, index) => ({
@@ -1205,4 +1208,58 @@ test("Seed delayed transcripts cannot publish an old tool-group failure after an
  for (const release of pending) release(); pending.clear(); await page.waitForTimeout(100); expect(await page.title()).toBe(thinkingTitle(2));
  await page.route("**/api/fs/list**", route => route.fulfill({ status: 401, json: { error: "Locked" } }));
  await page.getByTestId("nav-files").click(); await title(page, "Locked · Cyberdeck");
+}), browserBudget);
+
+const contextHref = (view: "seed" | "term", event = "context-one", node = "", panel = "context") => {
+ const selected = new URLSearchParams({ panel, ...(event ? { event } : {}) });
+ return view === "seed" ? href(`session/contexts?${selected}`, node)
+  : `${server.url}#/term?${new URLSearchParams({ session: "seed-contexts", filter: "retained", ...(node ? { node } : {}) })}&${selected}`;
+};
+const contextTitle = (node = "local") => `Message context · ${node} First conversation · Seed session${node === "peer-b" ? " · Peer B" : ""} · Cyberdeck`;
+for (const view of ["seed", "term"] as const) {
+ test(`${view} recorded message Context restores direct links, reload, new tabs and history`, () => fresh(async page => {
+  await page.goto(contextHref(view, "context two/?&", "peer-b")); await title(page, contextTitle("peer-b"));
+  await page.getByRole("dialog").getByText("Recorded window 2", { exact: false }).waitFor();
+  await page.getByPlaceholder("Untitled session").evaluate(el => el.setAttribute("data-context-owner", "same owner"));
+  const length = await page.evaluate(() => history.length), start = reads.length;
+  await page.keyboard.press("Escape"); await page.getByRole("dialog").waitFor({ state: "hidden" });
+  await title(page, "Message · peer-b First conversation · Seed session · Peer B · Cyberdeck");
+  expect(await page.evaluate(() => history.length)).toBe(length + 1);
+  await page.goBack(); await title(page, contextTitle("peer-b")); await page.getByRole("dialog").waitFor();
+  await page.goForward(); await page.getByRole("dialog").waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: "Context", exact: true }).first().click(); await title(page, contextTitle("peer-b"));
+  await page.getByRole("dialog").getByText("Recorded window 1", { exact: false }).waitFor();
+  expect(await page.getByPlaceholder("Untitled session").getAttribute("data-context-owner")).toBe("same owner");
+  expect(reads.slice(start).filter(({ action }) => ["GetSession", "GetSessionEvent"].includes(action._)).length).toBe(0);
+  const link = page.url(); await page.reload(); await title(page, contextTitle("peer-b")); await page.getByRole("dialog").waitFor();
+  await fresh(async tab => { await tab.goto(link); await title(tab, contextTitle("peer-b")); await tab.getByRole("dialog").getByText("Recorded project 1", { exact: false }).waitFor(); });
+  if (view === "term") { const p = new URLSearchParams(new URL(page.url()).hash.slice(7)); expect(p.get("node")).toBe("peer-b"); expect(p.get("filter")).toBe("retained"); }
+ }), browserBudget);
+
+ test(`${view} missing message Context keeps honest errors and invalid defaults replace without read actions`, () => fresh(async page => {
+  for (const event of ["no-context", "missing-message"]) {
+   await page.goto(contextHref(view, event)); await title(page, "Message context not found · Seed · Cyberdeck");
+   await page.getByRole("alert").filter({ hasText: "Selected message context is not in this transcript." }).waitFor();
+   expect(page.url()).toContain(encodeURIComponent(event)); expect(await page.getByRole("dialog").count()).toBe(0);
+  }
+  await page.goto(contextHref(view, ""));
+  await page.waitForFunction(view => {
+   const p = new URLSearchParams(location.hash.slice(location.hash.indexOf("?") + 1));
+   return view === "seed" ? !new URLSearchParams((p.get("r") || "").split("?")[1]).has("panel") : !p.has("panel");
+  }, view);
+  await title(page, "local First conversation · Seed session · Cyberdeck");
+  await page.getByRole("button", { name: "Context", exact: true }).first().click(); await title(page, contextTitle());
+  await page.evaluate(() => location.hash = "#/data"); await title(page, "Data · Cyberdeck");
+ }), browserBudget);
+}
+
+test("Delayed Seed Context reads cannot reopen a previous message, node or locked screen", () => fresh(async page => {
+ hold = true;
+ await page.goto(href("session/slow?panel=context&event=missing")); while (!pending.size) await page.waitForTimeout(10);
+ await page.evaluate(hash => location.hash = hash, new URL(contextHref("seed", "context-one", "peer-b")).hash);
+ await title(page, contextTitle("peer-b"));
+ for (const release of pending) release(); pending.clear(); await page.waitForTimeout(100);
+ expect(await page.title()).toBe(contextTitle("peer-b")); expect(await page.getByRole("dialog").count()).toBe(1);
+ await page.route("**/api/fs/list**", route => route.fulfill({ status: 401, json: { error: "Locked" } }));
+ await page.evaluate(() => location.hash = "#/files"); await title(page, "Locked · Cyberdeck"); expect(await page.getByRole("dialog").count()).toBe(0);
 }), browserBudget);

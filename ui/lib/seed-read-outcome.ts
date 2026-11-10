@@ -29,6 +29,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       case "agent": return selected.key === "agent" && selected.agentId === outcome.agentId;
       case "session": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId;
       case "session-event": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && selected.eventId === outcome.path;
+      case "session-context": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && selected.panel === "context" && selected.eventId === outcome.path;
       case "session-thinking": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && !!selected.expandedThinking?.length && JSON.stringify(selected.expandedThinking) === outcome.path;
       case "session-tool": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && selected.panel === "tool" && selected.toolId === outcome.toolId && (selected.fullPayload || "") === outcome.path;
       case "trigger": return selected.key === "agent" && selected.triggerId === outcome.triggerId;
@@ -60,7 +61,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
   let title: string | undefined = route.key === "agents" || route.key === "agent-server" ? "Loading sessions · Seed" : undefined;
   const memory = get("memory-file"), agent = get("agent"), session = get("session"), run = get("run"), event = get("session-event");
   const list = get("session-list"), selection = get("memory-selection"), trigger = get("trigger");
-  const tool = get("session-tool"), globalList = get("global-session-list"), thinking = get("session-thinking");
+  const tool = get("session-tool"), globalList = get("global-session-list"), thinking = get("session-thinking"), context = get("session-context");
   const children = results?.host === host ? Object.values(results.values).filter((value): value is Outcome => !!value && value.kind === "child-session-list" && owns(route, value)) : [];
   const child = children.find(value => value.error) || children.find(value => value.pending);
   const dialog = get("server-dialog");
@@ -88,9 +89,10 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
   } else if (session && route.key === "agent-session") {
     title = session.error ? failure(session.error, "Session")
       : tool?.error ? failure(tool.error, tool.name && route.fullPayload ? "Tool payload" : "Tool call")
+      : context?.error ? failure(context.error, "Message context")
       : event?.error ? failure(event.error, "Message")
       : thinking?.error ? failure(thinking.error, "Tool group")
-      : `${route.panel === "prompt" ? "Current system prompt · " : route.panel === "tool" ? `${!tool || tool.pending ? "Loading tool payload · " : route.fullPayload ? `Full ${route.fullPayload === "both" ? "input/output" : route.fullPayload} · ` : "Tool input/output · "}${tool?.name || route.toolId} · ` : route.eventId ? "Message · " : ""}${!route.panel && route.expandedThinking?.length ? `${route.expandedThinking.length} expanded tool group${route.expandedThinking.length === 1 ? "" : "s"} · ` : ""}${session.name?.trim() || "Untitled session"} · Seed session`;
+      : `${route.panel === "prompt" ? "Current system prompt · " : route.panel === "context" ? "Message context · " : route.panel === "tool" ? `${!tool || tool.pending ? "Loading tool payload · " : route.fullPayload ? `Full ${route.fullPayload === "both" ? "input/output" : route.fullPayload} · ` : "Tool input/output · "}${tool?.name || route.toolId} · ` : route.eventId ? "Message · " : ""}${!route.panel && route.expandedThinking?.length ? `${route.expandedThinking.length} expanded tool group${route.expandedThinking.length === 1 ? "" : "s"} · ` : ""}${session.name?.trim() || "Untitled session"} · Seed session`;
   } else if (run && route.key === "agent-run") {
     title = run.error ? failure(run.error, "Run") : `${run.name?.trim() || route.runId} · Seed run`;
   }

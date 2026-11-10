@@ -116,7 +116,7 @@ function NativeSeedSession({ id, node, params }: { id: string; node: string; par
     : undefined, [id, sessionId, node, filter]);
   const eventId = params.get("event") || undefined, toolId = params.get("tool") || undefined;
   const selectedPanel = params.get("panel"), full = params.get("full");
-  const panel = selectedPanel === "prompt" ? "prompt" : selectedPanel === "message" && eventId ? "message" : selectedPanel === "tool" && toolId ? "tool" : undefined;
+  const panel = selectedPanel === "prompt" ? "prompt" : (selectedPanel === "message" || selectedPanel === "context") && eventId ? selectedPanel : selectedPanel === "tool" && toolId ? "tool" : undefined;
   // Match the pinned Seed route contract without eagerly loading the full UI in
   // ordinary terminal tabs. Browser cases exercise both adapters together.
   const expandedThinking = [...new Set(params.getAll("thinking").filter(value => value.length > 0 && value.length <= 512 && !/[\u0000-\u001f]/.test(value)))].sort().slice(0, 100);
