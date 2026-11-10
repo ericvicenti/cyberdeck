@@ -2,6 +2,8 @@
 //   GET /api/dashboard  -> { at, usage: {claude, codex}, disks, system, activity, redundancy, backup }
 //   GET /api/disks      -> { at, disks } (just this node's volumes, each with its fill `trend`; the `disks` MCP tool reads it from every peer)
 //   GET /api/disks/usage?wait=ms&fresh=1 -> SpaceReport (what is using the space: home entries and repos; `disk_usage` reads it from every peer)
+//   POST /api/disks/cleanup/plan {idleDays?} -> CleanupPlan (rebuildable build output in idle repos; `free_space` asks every peer)
+//   POST /api/disks/cleanup/apply {id, reason?} -> CleanupResult (re-checks each folder, removes it, audits)
 //   GET  /api/usage/codex/resets -> the Codex rate-limit reset credits (with expiry)
 //   POST /api/usage/codex/reset  -> spend one, through the official `codex app-server`
 //
@@ -22,6 +24,7 @@ import { readCodexResets, consumeCodexReset, type CodexResetOutcome } from "../c
 import { randomUUID } from "crypto";
 import { ensureDiskSamples, nearlyFull, sampleDisks, SAMPLE_EVERY_MS, type DiskTrend } from "../disks";
 import { spaceReport, startSpaceMeasure } from "../space";
+import { applyCleanup, planCleanup } from "../cleanup";
 
 export const USAGE_CACHE_MS = 60_000;
 const FETCH_TIMEOUT_MS = 10_000;
@@ -486,6 +489,16 @@ export function registerDashboardRoutes(app: Hono, db: Database, cfg: CyberdeckC
   app.get("/api/disks/usage", async (c) => {
     const waitMs = Math.min(Math.max(Number(c.req.query("wait")) || 0, 0), 30_000);
     return c.json(await spaceReport(db, cfg.roots, { waitMs, fresh: Boolean(c.req.query("fresh")) }));
+  });
+  app.post("/api/disks/cleanup/plan", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { idleDays?: number };
+    return c.json(await planCleanup(db, cfg.junkDirs, { idleDays: typeof body.idleDays === "number" ? body.idleDays : undefined }));
+  });
+  app.post("/api/disks/cleanup/apply", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { id?: string; reason?: string };
+    if (typeof body.id !== "string") return c.json({ error: "id required" }, 400);
+    const r = await applyCleanup(db, body.id, { reason: typeof body.reason === "string" ? body.reason.slice(0, 500) : undefined });
+    return "error" in r ? c.json(r, 409) : c.json(r);
   });
 
   app.get("/api/dashboard", async (c) => {

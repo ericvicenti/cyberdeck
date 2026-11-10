@@ -147,7 +147,7 @@ describe("mcp tools", () => {
     const client = await connect(srv.base);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["announce", "collab_add", "collab_run", "collab_tasks", "deck_context", "delegate", "delegate_result", "disk_usage", "disks", "documents", "edit_file", "fleet_status", "grep", "handoff", "handoff_note", "hosts", "list_dir", "listen", "media", "note", "open_url", "projects", "read_document", "read_file", "repos", "repos_detail", "run_log", "scan", "service_logs", "services", "services_restart", "sessions", "sessions_search", "shell", "status", "todo", "todo_add", "todo_done", "write_file"]);
+    expect(names).toEqual(["announce", "collab_add", "collab_run", "collab_tasks", "deck_context", "delegate", "delegate_result", "disk_usage", "disks", "documents", "edit_file", "fleet_status", "free_space", "grep", "handoff", "handoff_note", "hosts", "list_dir", "listen", "media", "note", "open_url", "projects", "read_document", "read_file", "repos", "repos_detail", "run_log", "scan", "service_logs", "services", "services_restart", "sessions", "sessions_search", "shell", "status", "todo", "todo_add", "todo_done", "write_file"]);
     for (const t of tools) {
       expect(t.name).toMatch(/^[a-z0-9_]{1,40}$/);
       expect(t.description?.length ?? 0).toBeGreaterThan(20);
@@ -804,6 +804,28 @@ describe("disk_usage", () => {
       await client.close();
       own.stop();
       delete process.env.CYBERDECK_SPACE_HOME;
+    }
+  }, 30_000);
+});
+
+describe("free_space", () => {
+  test("plans on a peer over /api/disks/cleanup/plan, deletes nothing, and refuses an unknown plan id", async () => {
+    const own = startTestServer(testConfig({ fleetDir: FLEET_STUB, nodeName: "test-node" }));
+    own.db.query("INSERT INTO nodes (id, name, url, token, added_at) VALUES (?, ?, ?, ?, ?)").run("n-bare-f", "Bare", bare.base, TEST_TOKEN, Date.now());
+    const client = await connect(own.base);
+    try {
+      const plan = await call(client, "free_space", { host: "bare", brief: true });
+      expect(plan.isError).toBeFalsy();
+      expect(plan.content[0]?.text).toStartWith("Bare: nothing to free safely");
+      expect((plan.structuredContent as any)).toMatchObject({ host: "Bare", repos: 0, bytes: 0 });
+      const bad = await call(client, "free_space", { plan: "nope00" });
+      expect(bad.isError).toBe(true);
+      expect(bad.content[0]?.text).toContain('No cleanup plan "nope00"');
+      const none = await call(client, "free_space", { host: "phone" });
+      expect(none.isError).toBe(true);
+    } finally {
+      await client.close();
+      own.stop();
     }
   }, 30_000);
 });

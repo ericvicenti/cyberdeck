@@ -27,6 +27,7 @@ import { matchRepo, repoDetail, type RepoDetail } from "../repodetail";
 import { registerNodeTools, resolveShellHost, runShell } from "./mcp-node";
 import { diskInfo, type DiskInfo } from "./dashboard";
 import { disksSentence, ensureDiskSamples, fillingFast, nearlyFull, remoteDisks, sampleDisks, recordDisks, sizeWords, FILLING_DAYS, FULL_PERCENT, LOW_FREE_BYTES, REMOTE_DF, type HostDisks } from "../disks";
+import { applyCleanup, applySentence, planCleanup, planSentence, PLAN_TTL_MS, DEFAULT_IDLE_DAYS, type CleanupPlan, type CleanupResult } from "../cleanup";
 import { remoteSpace, spaceReport, spaceSentence, REMOTE_DU, SPACE_TTL_MS, type SpaceReport } from "../space";
 import { listDocuments, readDocument, ago as publishedAgo } from "./documents";
 import type { Kiosk } from "./kiosk";
@@ -244,7 +245,7 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
 
   server.tool(
     "disk_usage",
-    `What is using the space on one machine, the follow-up to a nearly full disk ("what is filling yacht's disk?"). On a Cyberdeck node: the biggest folders in the home directory, each with its biggest subfolder (~/Library -> ~/Library/Developer), and the code roots sized from the repo index with how much of it is rebuildable build output (node_modules, build dirs) and which repos hold the most. On a manifest host without a node (agentic): a bounded read-only du of / two levels deep over ssh. A node walks its home in the background (minutes on a big disk) and keeps the result ${SPACE_TTL_MS / 3600_000} h, already done when its disk is nearly full; if it answers "measuring", say so and offer to ask again. Read-only: suggest what could go, never delete, and leave the decision to Eric.`,
+    `What is using the space on one machine, the follow-up to a nearly full disk ("what is filling yacht's disk?"). On a Cyberdeck node: the biggest folders in the home directory, each with its biggest subfolder (~/Library -> ~/Library/Developer), and the code roots sized from the repo index with how much of it is rebuildable build output (node_modules, build dirs) and which repos hold the most. On a manifest host without a node (agentic): a bounded read-only du of / two levels deep over ssh. A node walks its home in the background (minutes on a big disk) and keeps the result ${SPACE_TTL_MS / 3600_000} h, already done when its disk is nearly full; if it answers "measuring", say so and offer to ask again. Read-only. To actually make room, offer \`free_space\`, which removes only rebuildable build output after Eric says yes.`,
     {
       host: z.string().max(64).optional().describe("The machine (a node or manifest host name); default this node"),
       fresh: z.boolean().default(false).describe("Measure again even if the last walk is recent"),
@@ -284,6 +285,43 @@ export function buildMcpServer(db: Database, cfg: CyberdeckConfig, control: Cont
         }
       }
       return spoken(spaceSentence(name, report), { host: name, via, ...report }, brief, { host: name, via, state: report.state, measuredAt: report.measuredAt, biggest: report.entries.slice(0, 4).map((e) => e.path), reclaimableBytes: report.repos.junkBytes });
+    }
+  );
+
+  server.tool(
+    "free_space",
+    `Make room on a Cyberdeck node ("free up space on yacht"), the step after \`disks\` and \`disk_usage\`. Removes only rebuildable build output (node_modules, target, .next, dist, ... at a repo's root or one package down) that git ignores, in repos with no commit and no change for \`idleDays\` (default ${DEFAULT_IDLE_DAYS}), never in a repo a running process uses. Two steps: call without \`plan\` to measure (deletes nothing; answers how much and from where, with a plan id), read that to Eric and ask; only after he says yes call again with \`plan\` set to that id (good for ${PLAN_TTL_MS / 60_000} minutes, on the same host). Every removal is audited. The repos rebuild with their install command.`,
+    {
+      host: z.string().max(64).optional().describe("The node (default this node)"),
+      plan: z.string().max(16).optional().describe("Apply this plan id from an earlier call; only after the owner said yes"),
+      idleDays: z.number().int().min(3).max(365).optional().describe(`Only repos idle at least this many days (default ${DEFAULT_IDLE_DAYS})`),
+      reason: z.string().max(500).optional().describe("Why (goes into the audit line)"),
+      brief: BRIEF,
+    },
+    async ({ host, plan, idleDays, reason, brief }) => {
+      const me = cfg.nodeName;
+      const want = (host ?? me).toLowerCase();
+      let name = me;
+      let out: CleanupPlan | CleanupResult | { error: string };
+      if (want === me.toLowerCase()) {
+        out = plan ? await applyCleanup(db, plan, { reason }) : await planCleanup(db, cfg.junkDirs, { idleDays });
+      } else {
+        const node = peers().find((n) => n.name.toLowerCase() === want);
+        if (!node) return fail(`No paired Cyberdeck node named "${host}"; free_space works on nodes only.`);
+        name = node.name;
+        try {
+          const path = plan ? "/api/disks/cleanup/apply" : "/api/disks/cleanup/plan";
+          const res = await peerFetch(node, path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(plan ? { id: plan, reason } : { idleDays }), signal: AbortSignal.timeout(plan ? 600_000 : 120_000) });
+          if (res.status === 404) return fail(`${node.name} runs an older Cyberdeck without free_space; it updates within the hour.`);
+          out = (await res.json()) as typeof out;
+          if (!res.ok && !("error" in out)) return fail(`${node.name} answered HTTP ${res.status}.`);
+        } catch (err) {
+          return fail(`${node.name} did not answer: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      if ("error" in out) return fail(out.error);
+      if ("items" in out) return spoken(planSentence(name, out), { host: name, ...out }, brief, { host: name, plan: out.id, bytes: out.bytes, repos: out.items.length, expiresAt: out.expiresAt });
+      return spoken(applySentence(name, out), { host: name, ...out }, brief, { host: name, freedBytes: out.freedBytes, repos: out.removed.length, skipped: out.skipped.length });
     }
   );
 
