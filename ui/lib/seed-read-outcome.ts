@@ -20,6 +20,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
     if (!host || host.signer?.accountUid !== outcome.accountUid ||
       serverKey("serverUrl" in selected && selected.serverUrl || host.serverUrl) !== serverKey(outcome.serverUrl)) return false;
     switch (outcome.kind) {
+      case "server-dialog": return selected.key === "agent-server" && selected.serverDialog === outcome.path;
       case "child-session-list": return (selected.key === "agents" || selected.key === "agent-server" || selected.key === "agent" && (!selected.tab || selected.tab === "sessions")) && !!selected.expandedSessions?.includes(outcome.path) && outcome.listOwner === JSON.stringify([selected.key, selected.key === "agent" ? selected.agentId : "", selected.sessionPages || 1]);
       case "global-session-list": return selected.key === outcome.routeKey && (selected.key === "agents" || selected.key === "agent-server") && String(selected.sessionPages || 1) === outcome.path;
       case "memory-selection":
@@ -61,7 +62,14 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
   const tool = get("session-tool"), globalList = get("global-session-list");
   const children = results?.host === host ? Object.values(results.values).filter((value): value is Outcome => !!value && value.kind === "child-session-list" && owns(route, value)) : [];
   const child = children.find(value => value.error) || children.find(value => value.pending);
-  if (globalList?.error) title = failure(globalList.error, "Sessions");
+  const dialog = get("server-dialog");
+  if (route.key === "agent-server" && route.serverDialog) {
+    const label = route.serverDialog === "accounts" ? "Server accounts" : "Model providers";
+    title = dialog?.error ? failure(dialog.error, label)
+      : !dialog || dialog.pending ? `Loading ${label.toLowerCase()} · Seed`
+      : `${label} · ${route.serverUrl} · Seed server`;
+  }
+  else if (globalList?.error) title = failure(globalList.error, "Sessions");
   else if (agent?.error && route.key === "agent") title = failure(agent.error, "Agent");
   else if (list?.error) title = failure(list.error, "Sessions");
   else if (child?.error) title = failure(child.error, (child.error as { missingEntry?: boolean }).missingEntry ? "Sub-session parent" : "Sub-sessions");

@@ -16,6 +16,7 @@ export function seedReadFailureTitle(error: unknown, entity: string) {
 }
 
 export function seedListTitle(route: Extract<SeedAgentsRoute, { key: "agents" | "agent-server" }>) {
+  if (route.key === "agent-server" && route.serverDialog) return `${route.serverDialog === "accounts" ? "Server accounts" : "Model providers"} · ${route.serverUrl} · Seed server`;
   const pages = (route.sessionPages ? ` · ${route.sessionPages} pages` : "") + seedExpandedTitle(route);
   return route.key === "agent-server" ? `Sessions${pages} · ${route.serverUrl} · Seed server`
     : pages ? `Sessions${pages} · Seed` : "Seed";

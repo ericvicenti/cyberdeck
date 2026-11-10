@@ -19,6 +19,7 @@ let payloadStatus = 200, holdPayload = false, malformedPayload = "";
 let emptySeedLists = false, childEmpty = false;
 let childLists = false, childReadStatus = 200, holdChildRead = false, malformedChild = false;
 let globalPaged = false, globalListStatus = 200, globalFailCursor = "", holdGlobalList = false, malformedList = "";
+let serverDialogStatus = 200, holdServerDialog = false, malformedServerDialog = "", populatedServerDialog = false;
 const reads: { node: string; action: any }[] = [];
 const toolId = "call two/?&";
 const toolEvents = [
@@ -53,6 +54,17 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,async fetch(req,server) {
     const action=envelope.action;actions.push(`${node}:${action._}`);reads.push({node,action});
     if(!readActions.has(action._)){unexpected.push(action._);return fail(405,"Fixture forbids mutations");}
     const id=action.agentId||action.sessionId||action.runId||action.triggerId||"";
+    if (["ListModelProviders", "ListSigningIdentities"].includes(action._) && !action.agentId) {
+      const status = serverDialogStatus, malformed = malformedServerDialog;
+      if (holdServerDialog) await new Promise<void>(r => pending.add(r));
+      if (status !== 200) return fail(status, "Server dialog read failed");
+      const field = action._ === "ListModelProviders" ? "providers" : "identities";
+      return ok({ _: malformed === "response" ? "GetSessionResponse" : `${action._}Response`,
+        [field]: malformed === "list" ? {} : malformed === "entry" ? [null] : populatedServerDialog
+          ? action._ === "ListModelProviders" ? [{ id: "fixture-provider", name: `Provider on ${node}`, type: "openai" }]
+            : [{ id: "fixture-identity", name: "identity-fixture", label: `Account on ${node}`, accountId: account }]
+          : [] });
+    }
     if (action._ === "ReadAgentMemoryFile" && action.path === "notes/today.md") {
       const status = memoryReadStatus;
       if (holdMemoryRead) await new Promise<void>(r => pending.add(r));
@@ -165,10 +177,112 @@ async function fresh(fn:(page:Page)=>Promise<void>){
  page.setDefaultNavigationTimeout(process.env.CYBERDECK_TEST_ORIGIN ? 30000 : 12000);
  await page.route("**/*",route=>new URL(route.request().url()).origin===server.url.origin?route.continue():route.abort());
  try{await fn(page);}catch(e){console.error(JSON.stringify({title:await page.title(),body:(await page.locator("body").innerText()).slice(0,1800),errors,actions:actions.slice(-15)}));throw e;}
- finally{emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
+ finally{serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
 }
 const href=(path:string,node="")=>`${server.url}#/seed?${new URLSearchParams({r:path,...(node?{node}:{})})}`;
 const title=(page:Page,value:string)=>page.waitForFunction(value=>document.title===value,value);
+
+const serverPath = (dialog = "", serverNode = "local", extra = "") => `server?url=${encodeURIComponent(`${server.url}seed-fixture/${serverNode}`)}${dialog ? `&dialog=${dialog}` : ""}${extra}`;
+const dialogTitle = (dialog: string, serverNode = "local", node = "") => `${dialog === "accounts" ? "Server accounts" : "Model providers"} · ${server.url}seed-fixture/${serverNode} · Seed server${node ? ` · ${node === "peer-a" ? "Peer A" : "Peer B"}` : ""} · Cyberdeck`;
+
+test("Seed global menu shortcuts use canonical server dialog links and return to the global list", () => fresh(async page => {
+ for (const dialog of ["accounts", "providers"]) {
+  await page.goto(href("", "peer-a"));
+  await page.getByRole("button", { name: "Agent Server", exact: true }).click();
+  await page.getByRole("menuitem", { name: /Unreachable|127\.0\.0\.1|Local/ }).first().hover();
+  await page.getByRole("menuitem", { name: dialog === "accounts" ? "Accounts" : "Providers", exact: true }).click();
+  await title(page, dialogTitle(dialog, "peer-a", "peer-a"));
+  expect(new URLSearchParams(new URL(page.url()).hash.slice(7)).get("r")).toBe(serverPath(dialog, "peer-a"));
+  await page.goBack(); await page.getByRole("dialog").waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: "Agent Server", exact: true }).waitFor();
+ }
+}), browserBudget);
+
+test("Seed server read dialogs restore on direct links, reload and fresh tabs with the selected signing node", () => fresh(async page => {
+ for (const dialog of ["providers", "accounts"]) {
+  populatedServerDialog = true;
+  await page.goto(href(serverPath(dialog, "peer-a"), "peer-a"));
+  await title(page, dialogTitle(dialog, "peer-a", "peer-a"));
+  await page.getByRole("dialog").waitFor();
+  if (dialog === "providers") await page.getByText("Provider on peer-a", { exact: true }).waitFor();
+  else expect(await page.getByRole("dialog").getByRole("textbox").inputValue()).toBe("Account on peer-a");
+  await page.reload(); await title(page, dialogTitle(dialog, "peer-a", "peer-a"));
+  const link = page.url();
+  await fresh(async tab => { await tab.goto(link); await title(tab, dialogTitle(dialog, "peer-a", "peer-a")); await tab.getByRole("dialog").waitFor(); });
+ }
+}), browserBudget);
+
+test("Seed server dialog open/close uses one history entry and retains the list and composer", () => fresh(async page => {
+ await page.goto(href(serverPath("", "local", "&pages=2")));
+ await page.getByRole("button", { name: "Providers", exact: true }).waitFor();
+ await page.evaluate(() => { (document.querySelector("textarea") as any).__navigationFixtureOwner = "same composer"; });
+ const before = await page.evaluate(() => history.length);
+ await page.getByRole("button", { name: "Providers", exact: true }).click();
+ await title(page, dialogTitle("providers"));
+ expect(await page.evaluate(() => history.length)).toBe(before + 1);
+ await page.goBack(); await page.getByRole("dialog").waitFor({ state: "hidden" });
+ expect(await page.evaluate(() => (document.querySelector("textarea") as any).__navigationFixtureOwner)).toBe("same composer");
+ await page.goForward(); await title(page, dialogTitle("providers"));
+ await page.keyboard.press("Escape"); await page.getByRole("dialog").waitFor({ state: "hidden" });
+ expect(new URLSearchParams(new URL(page.url()).hash.split("?").slice(1).join("?")).get("r")).not.toContain("dialog=");
+ await page.goBack(); await title(page, dialogTitle("providers"));
+ await page.evaluate(hash => location.hash = hash, new URL(href(serverPath("accounts"))).hash);
+ await title(page, dialogTitle("accounts"));
+ await page.goBack(); await title(page, dialogTitle("providers"));
+ expect(await page.evaluate(() => (document.querySelector("textarea") as any).__navigationFixtureOwner)).toBe("same composer");
+}), browserBudget);
+
+test("Seed invalid dialog selections normalize with replace and never restore write forms", () => fresh(async page => {
+ for (const dialog of ["import", "new-account", "add-provider", "delete", "PROVIDERS"]) {
+  await page.goto(href(serverPath(dialog)));
+  await page.getByRole("button", { name: "Providers", exact: true }).waitFor();
+  await page.waitForFunction(() => !new URLSearchParams(location.hash.slice(location.hash.indexOf("?") + 1)).get("r")?.includes("dialog="));
+  expect(await page.getByRole("dialog").count()).toBe(0);
+ }
+ await page.getByRole("button", { name: "Providers", exact: true }).click(); await title(page, dialogTitle("providers"));
+ const link = page.url(), length = await page.evaluate(() => history.length);
+ await page.getByRole("button", { name: "Add provider", exact: true }).click();
+ await page.getByRole("heading", { name: "Add model provider", exact: true }).waitFor();
+ expect(page.url()).toBe(link); expect(await page.evaluate(() => history.length)).toBe(length);
+ await page.reload(); await title(page, dialogTitle("providers"));
+ expect(await page.getByRole("heading", { name: "Add model provider", exact: true }).count()).toBe(0);
+}), browserBudget);
+
+for (const dialog of ["accounts", "providers"]) test(`Seed ${dialog} missing, denied, unavailable and malformed reads retry without history changes`, () => fresh(async page => {
+ for (const [status, malformed, expected] of [[403, "", "Access denied"], [404, "", `${dialog === "accounts" ? "Server accounts" : "Model providers"} not found`], [503, "", `${dialog === "accounts" ? "Server accounts" : "Model providers"} unavailable`], [200, "response", `${dialog === "accounts" ? "Server accounts" : "Model providers"} unavailable`], [200, "list", `${dialog === "accounts" ? "Server accounts" : "Model providers"} unavailable`], [200, "entry", `${dialog === "accounts" ? "Server accounts" : "Model providers"} unavailable`]] as const) {
+  serverDialogStatus = status; malformedServerDialog = malformed;
+  await page.goto("about:blank");
+  await page.goto(href(serverPath(dialog)));
+  await title(page, `${expected} · Seed · Cyberdeck`);
+  expect(await page.getByRole("dialog").getByText(dialog === "accounts" ? "No agent accounts exist on this server yet." : "No providers configured yet.", { exact: true }).count()).toBe(0);
+  const url = page.url(), length = await page.evaluate(() => history.length);
+  serverDialogStatus = 200; malformedServerDialog = "";
+  await page.getByRole("dialog").getByRole("button", { name: /retry|try again/i }).click();
+  await title(page, dialogTitle(dialog));
+  expect(page.url()).toBe(url); expect(await page.evaluate(() => history.length)).toBe(length);
+ }
+}), browserBudget);
+
+test("Seed delayed dialog reads cannot rename a different dialog, node, primary view or authentication screen", () => fresh(async page => {
+ for (const destination of ["dialog", "node", "data", "locked"]) {
+  holdServerDialog = true; serverDialogStatus = 503;
+  await page.goto("about:blank");
+  await page.goto(href(serverPath("providers")));
+  await title(page, "Loading model providers · Seed · Cyberdeck");
+  while (!pending.size) await page.waitForTimeout(10);
+  holdServerDialog = false; serverDialogStatus = 200;
+  const target = destination === "dialog" ? new URL(href(serverPath("accounts"))).hash
+    : destination === "node" ? new URL(href(serverPath("accounts", "peer-b"), "peer-b")).hash
+    : destination === "data" ? "#/data" : "#/files";
+  if (destination === "locked") await page.route("**/api/fs/list**", route => route.fulfill({ status: 401, json: { error: "Locked" } }));
+  await page.evaluate(hash => location.hash = hash, target);
+  const expected = destination === "dialog" ? dialogTitle("accounts") : destination === "node" ? dialogTitle("accounts", "peer-b", "peer-b") : destination === "data" ? "Data · Cyberdeck" : "Locked · Cyberdeck";
+  await title(page, expected);
+  for (const release of pending) release(); pending.clear();
+  await page.waitForTimeout(100); expect(await page.title()).toBe(expected);
+  if (destination === "locked") await page.unroute("**/api/fs/list**");
+ }
+}), browserBudget);
 
 test("Seed agent/tab, session and run names restore on direct links, reload, new tabs and history",()=>fresh(async page=>{
  await page.goto(href("agent/alpha"));await title(page,"Sessions · local Alpha assistant · Seed · Cyberdeck");
