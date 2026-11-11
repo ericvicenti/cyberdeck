@@ -57,7 +57,7 @@ const ok = (value: unknown) => new Response(cbor.encode(value) as unknown as Bod
 const fail = (status: number, message: string) => new Response(cbor.encode({_:"Error",message}) as unknown as BodyInit,{status,headers:{"content-type":"application/cbor"}});
 const agent = (id: string, node: string) => ({id,account,definition:{name:renamed || `${node} ${id === "beta" ? "Beta assistant" : "Alpha assistant"}`,systemPrompt:"Fixture",model:"fixture",modelProvider:"fixture",mcpServers:[]},stateDir:"",status:"idle",createdAt:1,updatedAt:2});
 const session = (id: string, node: string) => ({id,account,agentId:"alpha",title:id === "untitled" ? "" : `${node} ${id === "two" ? "Second conversation" : id === "older" ? "Older conversation" : "First conversation"}`,status:"idle",createdAt:1,updatedAt:2,...(childLists && ["one", "two"].includes(id) ? { childSessionCount: id === "one" ? 2 : 1 } : {})});
-const run = (id: string, node: string) => ({id,account,rootRunId:id,depth:0,kind:"workflow",origin:"user",title:`${node} Review navigation`,status:"succeeded",createdAt:1,updatedAt:2,finishedAt:2});
+const run = (id: string, node: string) => ({id,account,rootRunId:id,depth:0,kind:"workflow",origin:"user",title:`${node} Review navigation`,status:"succeeded",createdAt:1,updatedAt:2,finishedAt:2,...(id === "activity" ? {sourceText:"// Recorded workflow fixture\nreturn 42;"} : {})});
 const server = Bun.serve({hostname:"127.0.0.1",port:0,async fetch(req,server) {
   const url=new URL(req.url),path=url.pathname;
   if (path.endsWith("/agents/ws") && server.upgrade(req)) return;
@@ -181,7 +181,10 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,async fetch(req,server) {
   }
   const file=Bun.file(join(process.env.CYBERDECK_TEST_UI||join(import.meta.dir,"../dist/ui"),path==="/"?"index.html":path));
   return await file.exists()?new Response(file):new Response("Not found",{status:404});
-},websocket:{open(){},message(){},close(){}}});
+},websocket:{open(){},message(ws, message){
+ const envelope:any = typeof message === "string" ? JSON.parse(message) : cbor.decode(new Uint8Array(message));
+ if(envelope.action?.key === "runs/activity") for (let seq=1;seq<=2;seq++) ws.send(JSON.stringify({_:"append",key:"runs/activity",runId:"activity",seq,createdAt:seq,entry:{kind:"log",level:"info",message:`Recorded activity ${seq}`,detail:`Full recorded detail ${seq}`}}));
+},close(){}}});
 let browser:Browser;
 beforeAll(async()=>{browser=await chromium.launch();});
 afterAll(async()=>{for(const release of pending)release();await browser.close();server.stop(true);expect(unexpected).toEqual([]);expect(errors).toEqual([]);});
@@ -1281,4 +1284,91 @@ for (const view of ["seed", "term"] as const) test(`${view} Context plain outsid
  await page.goBack(); await title(page, contextTitle()); await page.getByRole("dialog").getByText("Recorded window 2", { exact: false }).waitFor();
  await page.getByRole("button", { name: "Context", exact: true }).first().click();
  await page.getByRole("dialog").getByText("Recorded window 1", { exact: false }).waitFor(); await title(page, contextTitle());
+}), browserBudget);
+
+
+const runHref = (query = "", node = "") => href(`run/activity${query ? `?${query}` : ""}`, node);
+const runTitle = (prefix = "", node = "") => `${prefix}${node || "local"} Review navigation · Seed run${node ? " · Peer A" : ""} · Cyberdeck`;
+test("Seed run source and activity restore through direct links, reload, fresh tabs and node selection", () => fresh(async page => {
+ for (const query of ["code=1", "activity=1", "code=1&activity=1&entry=activity%3A1"]) {
+  await page.goto(runHref(query, "peer-a"));
+  const prefix = query.includes("code=1") ? "Code · " : "";
+  const expected = runTitle(prefix + (query.includes("entry=") ? "1 activity entry · " : query.includes("activity=1") ? "Activity · " : ""), "peer-a");
+  await title(page, expected);
+  if(query.includes("code=1")) await page.getByLabel("Workflow source: peer-a Review navigation").waitFor();
+  if(query.includes("activity=1")) await page.getByLabel("Run activity").waitFor();
+  if(query.includes("entry=")) await page.getByText(/Full recorded detail 1/).waitFor();
+  await page.reload(); await title(page, expected);
+  const link=page.url();await fresh(async tab=>{await tab.goto(link);await title(tab,expected);});
+ }
+}), browserBudget);
+
+test("Seed run disclosures use one history entry per click and keep their mounted owner", () => fresh(async page => {
+ await page.goto(runHref());await title(page,runTitle());
+ const code=page.getByRole("button",{name:"Code",exact:true});
+ await code.evaluate(el=>(el as any).__fixtureOwner="same run");
+ const before=await page.evaluate(()=>history.length);
+ await code.click();await title(page,runTitle("Code · "));
+ expect(await page.evaluate(()=>history.length)).toBe(before+1);
+ await page.getByRole("button",{name:/^Activity/}).click();await title(page,runTitle("Code · Activity · "));
+ await page.getByRole("button",{name:"info · Recorded activity 1",exact:true}).click();await title(page,runTitle("Code · 1 activity entry · "));
+ await page.goBack();await title(page,runTitle("Code · Activity · "));
+ await page.goBack();await title(page,runTitle("Code · "));
+ expect(await code.evaluate(el=>(el as any).__fixtureOwner)).toBe("same run");
+ await page.goBack();await title(page,runTitle());
+ await page.goForward();await title(page,runTitle("Code · "));
+ await page.goForward();await title(page,runTitle("Code · Activity · "));
+ await page.goForward();await title(page,runTitle("Code · 1 activity entry · "));
+ await page.getByRole("button",{name:/^Activity/}).click();await title(page,runTitle("Code · "));
+ expect(new URLSearchParams(new URL(page.url()).hash.slice(7)).get("r")).toBe("run/activity?code=1");
+}), browserBudget);
+
+test("Seed run disclosure links canonicalize defaults, duplicate entries and invalid flags", () => fresh(async page => {
+ await page.goto(runHref("activity=0&code=garbage&entry=activity%3A2&entry=activity%3A1&entry=activity%3A1&entry="));
+ await title(page,runTitle("2 activity entries · "));
+ expect(new URLSearchParams(new URL(page.url()).hash.slice(7)).get("r")).toBe("run/activity?activity=1&entry=activity%3A1&entry=activity%3A2");
+ expect(await page.getByText(/Full recorded detail/).count()).toBe(2);
+}), browserBudget);
+
+test("Seed run missing source and pending activity keep honest titles and clean up on navigation", () => fresh(async page => {
+ await page.goto(href("run/review?code=1"));await title(page,"Workflow source not found · Seed · Cyberdeck");
+ await page.getByRole("alert").filter({hasText:"Workflow source is not available"}).waitFor();
+ await page.goto(href("run/review?activity=1&entry=missing"));await title(page,runTitle("Waiting for activity · 1 activity entry · "));
+ await page.getByText("Waiting for recorded activity…").waitFor();
+ await page.goto(href("session/one"));await title(page,"local First conversation · Seed session · Cyberdeck");
+}), browserBudget);
+
+test("Seed run read failures outrank selected disclosures without replaying commands", () => fresh(async page => {
+ for (const [id, label] of [["missing","Run not found"],["denied","Access denied"],["offline","Run unavailable"]]) {
+  await page.goto(href(`run/${id}?code=1&activity=1`));await title(page,`${label} · Seed · Cyberdeck`);
+ }
+}), browserBudget);
+
+test("Seed run disclosures ignore late previous-run reads and retain selected activity links", () => fresh(async page => {
+ hold=true;await page.goto(href("run/slow?code=1"));
+ await page.waitForFunction(()=>document.body.innerText.includes("Run"));
+ await page.evaluate(url=>location.hash=new URL(url).hash,runHref("activity=1&entry=activity%3A2"));
+ await title(page,runTitle("1 activity entry · "));
+ const link=page.url();for(const release of pending)release();pending.clear();
+ await page.waitForTimeout(150);expect(page.url()).toBe(link);expect(await page.title()).toBe(runTitle("1 activity entry · "));
+ await page.getByText(/Full recorded detail 2/).waitFor();
+}), browserBudget);
+
+test("Seed activity entry selection is bounded and missing stream entries remain pending", () => fresh(async page => {
+ const entries=Array.from({length:105},(_,index)=>`entry=missing-${String(index).padStart(3,"0")}`).join("&");
+ await page.goto(runHref(entries));await title(page,runTitle("Waiting for activity · 100 activity entries · "));
+ const path=new URLSearchParams(new URL(page.url()).hash.slice(7)).get("r")!;
+ expect(new URLSearchParams(path.split("?")[1]).getAll("entry").length).toBe(100);
+ expect(await page.getByRole("button",{name:"info · Recorded activity 1",exact:true}).isDisabled()).toBe(true);
+ await page.getByRole("button",{name:/^Activity/}).click();await title(page,runTitle());
+}), browserBudget);
+
+test("Seed run late disclosures cannot rename a locked host or replay a run", () => fresh(async page => {
+ hold=true;await page.goto(href("run/slow?code=1&activity=1"));
+ while(!pending.size) await page.waitForTimeout(10);
+ await page.route("**/api/fs/list**",route=>route.fulfill({status:401,json:{error:"Locked"}}));
+ await page.evaluate(()=>location.hash="#/files");await title(page,"Locked · Cyberdeck");
+ for(const release of pending)release();pending.clear();await page.waitForTimeout(150);
+ expect(await page.title()).toBe("Locked · Cyberdeck");
+ expect(await page.getByText("Workflow source is not available for this run.").count()).toBe(0);
 }), browserBudget);

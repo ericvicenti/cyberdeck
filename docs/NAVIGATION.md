@@ -69,7 +69,7 @@ credentials should not be replayed from a link.
 | GamesSection / Games | installed native games and import form | Part of Applications. Play/import are actions; no automatic execution from links. |
 | CaseworkConsole | selected device, events, camera/media/QR, calls, native scene actions | Selected device is covered by `device=<id>`, including canonical default, reload/history, missing-device error/title and no action replay. Visited consoles retain their socket, calls and previews across apps, primary views, node URLs and history; lock tears them down. `media=<stored-name>` fetches only an existing authenticated upload: fresh open, reload and history never capture, upload or autoplay. Invalid, missing and denied previews have matching errors/titles. Tests use synthetic devices/tracks only. |
 | `applications?app=afterglow&tab=music` / Spotify (the listening room), SpotifyRecordings, SpotifyVisualizer | shelves, entities, query, pagination, recordings, immersive mode | One player everywhere, inside Afterglow: `shelf`, `id`, `q`, `radio`, `page`, `immersive` and `shelf=history&recording=<id>` restore through direct links, reload and history; OAuth returns to the requested content, including saved recordings; read failures and unavailable pages retain the link with an honest title and read-only retry. Late or hidden reads cannot replace another view; no link starts playback; the SDK/player stays mounted through URL and primary-view changes. Legacy `#/spotify` links are rewritten. |
-| `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session/message/tool/prompt, list pages, run, server, node | Nested paths, canonical defaults/errors, Back/Forward and node-preserving new-window links covered. Titles observe the displayed authenticated reads, including external servers; late responses are bound to the signing host/account, server and entity. Session message/prompt/tool inspectors and full tool input/output restore without replacing the transcript or composer. Agent session-list page counts restore and retry. Global/server list rounds and sub-session disclosures also restore (November 9). Server account/provider read dialogs restore through `dialog=accounts|providers`, with route-owned loading/errors and retry (November 10); write forms and credentials stay transient. Expanded transcript tool groups and recorded message Context popovers restore in Seed and Sessions (November 10). Other transcript disclosures and attachment state, plus older-message history outside returned events, remain. |
+| `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session/message/tool/prompt, list pages, run, server, node | Nested paths, canonical defaults/errors, Back/Forward and node-preserving new-window links covered. Titles observe the displayed authenticated reads, including external servers; late responses are bound to the signing host/account, server and entity. Session message/prompt/tool inspectors and full tool input/output restore without replacing the transcript or composer. Agent session-list page counts restore and retry. Global/server list rounds and sub-session disclosures also restore (November 9). Server account/provider read dialogs restore through `dialog=accounts|providers`, with route-owned loading/errors and retry (November 10); write forms and credentials stay transient. Expanded transcript tool groups and recorded message Context popovers restore in Seed and Sessions (November 10). Run Code/Activity/full-entry disclosures now restore from URLs and history (November 11). Other transcript/workflow disclosures and attachment state, plus older-message history outside returned events, remain. |
 | `desktop` / Desktop | selected node and connection | Primary route/title and URL-selected node covered; connect/input/credentials remain explicit runtime actions. |
 | `desk` / Desk + voice | Fleet/Services/Agents glance tab, voice call, transcript, setup, mute | `tab=services` / `tab=agents` restore from fresh links and history; default fleet ignores stale local preferences, invalid tabs replace to the default, and titles match. Tab transitions retain the voice subtree without reconnecting. Calls and permissions stay explicit. The call owner now stays mounted across primary views, node changes and screen-remote navigation. Voice requests stay on the serving daemon’s hub relay; idle configuration refreshes on return. Simulated live-room tests prove no disconnect/reconnect during navigation, release of push-to-talk when hidden, and disconnect on authentication lock. Real calls/microphones are not used by tests. |
 | `projects` / Projects | selected project, nested slug, unassigned repos, query | URL selection, canonical default, filter, title, missing project covered. Nested slugs use the same `p` key. Editing launches Files/Editor. |
@@ -843,3 +843,29 @@ disclosures, attachment details/errors and selected messages outside the returne
 event window; other Commander malformed-payload and independent remote-seat
 availability cases; native/device and original-file viewer boundaries. Starlight
 must receive/reconcile the still-pending fleet overlay when it becomes reachable.
+
+## 2026-11-11: Seed run Code and Activity disclosures
+
+Seed run URLs now restore `code=1`, `activity=1`, and repeated `entry=<run-id:seq>`
+inside the nested `r=run/<id>?…` route. Entry ids are deduplicated, sorted, bounded
+at 100 and validated with the existing recorded-selection limits; selecting an
+entry also opens Activity. Closing Activity clears its entry selections in the
+same transition. Code and Activity can be open together. Each toggle adds one
+history entry; Back/Forward retains the run page and existing subscription.
+New tabs and refresh restore the server, signer node and selected disclosures.
+Opening a link reads recorded content and never executes or cancels a run.
+
+Titles observe the displayed run and disclosure state, including missing source,
+read failures and activity that has not arrived. The live journal stream has no
+completion marker: absent selected entries remain explicitly waiting instead of
+being reported as missing. Historical journal availability and subscription
+failure diagnostics remain an acceptance limitation. No extra journal request
+or subscription is created for navigation or titles.
+
+The actual patched package is covered by `tests/seed-titles-browser.test.ts`:
+direct/reload/fresh-tab links, node selection, history/retained DOM, canonical
+flags and bounded entries, unavailable source, read failures, delayed reads,
+missing stream entries and lock cleanup. Other workflow tool/error/plan
+selections, transcript attachments and older-window messages remain open;
+Commander malformed/read-disclosure/live-seat and native/original-file cases
+also remain. Keep the routine enabled until the full acceptance matrix passes.

@@ -33,6 +33,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       case "session-thinking": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && !!selected.expandedThinking?.length && JSON.stringify(selected.expandedThinking) === outcome.path;
       case "session-tool": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && selected.panel === "tool" && selected.toolId === outcome.toolId && (selected.fullPayload || "") === outcome.path;
       case "trigger": return selected.key === "agent" && selected.triggerId === outcome.triggerId;
+      case "run-disclosure": return selected.key === "agent-run" && selected.runId === outcome.runId && JSON.stringify([!!selected.runCode, !!selected.runActivity, selected.activityEntries || []]) === outcome.path;
       case "run": return selected.key === "agent-run" && selected.runId === outcome.runId;
     }
   };
@@ -64,7 +65,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
   const tool = get("session-tool"), globalList = get("global-session-list"), thinking = get("session-thinking"), context = get("session-context");
   const children = results?.host === host ? Object.values(results.values).filter((value): value is Outcome => !!value && value.kind === "child-session-list" && owns(route, value)) : [];
   const child = children.find(value => value.error) || children.find(value => value.pending);
-  const dialog = get("server-dialog");
+  const dialog = get("server-dialog"), disclosure = get("run-disclosure");
   if (route.key === "agent-server" && route.serverDialog) {
     const label = route.serverDialog === "accounts" ? "Server accounts" : "Model providers";
     title = dialog?.error ? failure(dialog.error, label)
@@ -94,7 +95,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       : thinking?.error ? failure(thinking.error, "Tool group")
       : `${route.panel === "prompt" ? "Current system prompt · " : route.panel === "context" ? "Message context · " : route.panel === "tool" ? `${!tool || tool.pending ? "Loading tool payload · " : route.fullPayload ? `Full ${route.fullPayload === "both" ? "input/output" : route.fullPayload} · ` : "Tool input/output · "}${tool?.name || route.toolId} · ` : route.eventId ? "Message · " : ""}${!route.panel && route.expandedThinking?.length ? `${route.expandedThinking.length} expanded tool group${route.expandedThinking.length === 1 ? "" : "s"} · ` : ""}${session.name?.trim() || "Untitled session"} · Seed session`;
   } else if (run && route.key === "agent-run") {
-    title = run.error ? failure(run.error, "Run") : `${run.name?.trim() || route.runId} · Seed run`;
+    title = run.error ? failure(run.error, "Run") : disclosure?.error ? failure(disclosure.error, "Workflow source") : `${disclosure?.pending ? "Waiting for activity · " : ""}${route.runCode ? "Code · " : ""}${route.runActivity ? route.activityEntries?.length ? `${route.activityEntries.length} activity entr${route.activityEntries.length === 1 ? "y" : "ies"} · ` : "Activity · " : ""}${run.name?.trim() || route.runId} · Seed run`;
   }
   return { host: observed, title };
 }
