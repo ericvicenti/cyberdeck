@@ -5,6 +5,7 @@ import { ProbeFleet } from "../components/ProbeFleet";
 import { NetworkMap } from "../components/NetworkMap";
 import { useEffect, useState } from "react";
 import { api, post, navigate, fmtBytes, fmtAgo, ApiError } from "../lib/api";
+import { storageRoute } from "../lib/storage";
 import { useOverview, refreshNodes } from "../lib/fleet";
 import { pairingOrigin } from "../lib/pairing";
 import { confirmAction } from "../lib/tv/confirm";
@@ -488,15 +489,16 @@ export function Home({ params, onLocked }: { params: URLSearchParams; onLocked: 
           </Widget>
 
           {/* row 2: storage, repo safety, activity */}
-          <Widget title="Storage" testId="widget-storage" meta={volumes ? `${volumes} volume${volumes === 1 ? "" : "s"} · ${machines.filter((m) => m.node).length} machines` : "…"} onClick={() => navigate("data")}>
+          <Widget title="Storage" testId="widget-storage" meta={volumes ? `${volumes} volume${volumes === 1 ? "" : "s"} · ${machines.filter((m) => m.node).length} machines` : "…"}>
             {disks.map(({ m, d }) => d ? (
-              <Meter
-                key={`${m.id}:${d.filesystem}:${d.mount}`}
-                label={<span>{m.name} <span className="text-zinc-500">{d.mount}</span></span>}
-                percent={d.percent}
-                sev={severity(d.percent, 80, 92)}
-                right={<span>{fmtBytes(d.freeBytes)} free <span className="text-zinc-600">of {fmtBytes(d.totalBytes)}</span>{fillsIn(d.trend?.daysLeft) && <span className={d.trend!.daysLeft! < 14 ? "text-amber-400" : "text-zinc-500"} title={`losing ${fmtBytes(d.trend!.lossPerDay)} a day over the last ${d.trend!.spanDays} days`}> · full {fillsIn(d.trend?.daysLeft)}</span>}</span>}
-              />
+              <button type="button" key={`${m.id}:${d.filesystem}:${d.mount}`} data-testid="storage-item" className="block w-full rounded-sm text-left hover:bg-zinc-800/70 focus-visible:outline focus-visible:outline-sky-400" onClick={() => navigate("storage", storageRoute(m.id, d))} aria-label={`View ${m.name} storage ${d.mount} (${d.filesystem})`}>
+                <Meter
+                  label={<span>{m.name} <span className="text-zinc-500">{d.mount}</span></span>}
+                  percent={d.percent}
+                  sev={severity(d.percent, 80, 92)}
+                  right={<span>{fmtBytes(d.freeBytes)} free <span className="text-zinc-600">of {fmtBytes(d.totalBytes)}</span>{fillsIn(d.trend?.daysLeft) && <span className={d.trend!.daysLeft! < 14 ? "text-amber-400" : "text-zinc-500"} title={`losing ${fmtBytes(d.trend!.lossPerDay)} a day over the last ${d.trend!.spanDays} days`}> · full {fillsIn(d.trend?.daysLeft)}</span>}</span>}
+                />
+              </button>
             ) : (
               <Meter key={m.id} label={<span className="text-zinc-500">{m.name}</span>} percent={null} right={m.self ? "…" : m.online ? "no data yet" : "offline"} />
             ))}

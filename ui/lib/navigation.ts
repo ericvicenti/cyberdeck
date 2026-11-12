@@ -7,7 +7,7 @@ import { useEffect } from "react";
 export interface Route { view: string; params: URLSearchParams }
 export const VIEW_NAMES: Record<string, string> = {
   desktop: "Desktop", seed: "Seed", fleet: "Home", controls: "Controls", applications: "Applications",
-  desk: "Desk", projects: "Projects", agents: "Agents", services: "Services", data: "Data",
+  desk: "Desk", storage: "Storage", projects: "Projects", agents: "Agents", services: "Services", data: "Data",
   files: "Files", edit: "Editor", term: "Sessions", cmux: "cmux", cloud: "Cloud", remote: "Screen remote",
 };
 
@@ -91,7 +91,8 @@ export function updateParams(values: Record<string, string | null>, mode: "push"
 export function routeTitle(route = readRoute()): string {
   const p = route.params;
   let title = Object.hasOwn(VIEW_NAMES, route.view) ? VIEW_NAMES[route.view] : "Page not found";
-  const detail = route.view === "files" || route.view === "edit" ? p.get("path")
+  const detail = route.view === "storage" ? p.get("mount")
+    : route.view === "files" || route.view === "edit" ? p.get("path")
     : route.view === "projects" ? p.get("p")
     : route.view === "services" ? [p.get("host"), p.get("svc")].filter(Boolean).join(" / ")
     : route.view === "term" ? p.get("session")

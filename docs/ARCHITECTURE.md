@@ -904,3 +904,7 @@ binary or text frames to the selected paired host. See README for host setup.
 ## Probe connectivity
 
 Enrolled peers use persistent `nodes.probe_device` identities and a shared pinned SSH transport for HTTP/WebSockets. `/api/fleet/probe` reports membership freshness; `/api/fleet/nodes` reports actual Cyberdeck reachability and the selected transport. `/api/fleet/probe/console` approves browser sign-in. See [PROBE.md](PROBE.md) for the gateway, authentication and deployment.
+
+## Storage detail UI
+
+Home's Storage widget links each reported volume to `#/storage?node=<self|paired-id>&filesystem=<reported>&mount=<reported>`. The detail view reads that machine's `/api/disks`, not an SSH disk operation, and shows capacity, used/free, utilization, filesystem/device, mount, reported paths and sample-based fill warnings. Missing/renamed items, offline/unpaired nodes and failed probes show explicit states; a failed refresh retains the last reading. Iris ambience appears only if its volume is actually reported; atmosphere is not currently imported and is not inferred from disk names.

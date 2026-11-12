@@ -95,6 +95,26 @@ afterAll(async () => {
   rmSync(play, { recursive: true, force: true });
 });
 
+test("Home storage rows open a real read-only disk detail with a stable URL", async () => {
+  await page.goto(`${BASE}/#/fleet`);
+  await page.waitForSelector('[data-testid="storage-item"]');
+  await page.click('[data-testid="storage-item"]');
+  await page.waitForSelector('[data-testid="storage-warning"]');
+  const url = new URL(page.url());
+  expect(url.hash).toContain("#/storage?");
+  expect(url.hash).toContain("node=self");
+  expect(url.hash).toContain("filesystem=");
+  expect(url.hash).toContain("mount=");
+  const detail = (await page.textContent('[data-testid="storage-detail"]')) ?? "";
+  expect(detail).toContain("e2e-node");
+  expect(detail).toContain("Capacity");
+  expect(detail).toContain("Filesystem / device");
+  await page.reload();
+  await page.waitForSelector('[data-testid="storage-warning"]');
+  await page.goto(`${BASE}/#/fleet`);
+  await page.waitForSelector('[data-testid="widget-storage"]');
+}, 60000);
+
 test("shell renders: title bar, activity bar, home dashboard", async () => {
   expect(await page.textContent("header")).toContain("Cyberdeck");
   expect(await page.isVisible('[data-testid="nav-files"]')).toBe(true);

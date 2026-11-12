@@ -10,6 +10,7 @@ import { Applications } from "./views/Applications";
 import { Controls } from "./views/Controls";
 import { ScreenRemote } from "./views/ScreenRemote";
 import { Home } from "./views/Home";
+import { Storage } from "./views/Storage";
 import { Desk } from "./views/Desk";
 import { Projects } from "./views/Projects";
 import { Agents } from "./views/Agents";
@@ -53,7 +54,7 @@ export function App() {
   const [locked, setLocked] = useState(false);
   const [sessionDrafts] = useState<SessionDraftStore>(() => ({ values: new Map(), pending: new Set(), generation: 0 }));
   const { fleet } = useFleet();
-  const knownRoute = NAV.some(item => item.view === route.view) || ["edit", "remote"].includes(route.view);
+  const knownRoute = NAV.some(item => item.view === route.view) || ["edit", "remote", "storage"].includes(route.view);
   // a machine-bound view remounts when its machine changes, so nothing of the old machine lingers
   const nodeId = route.params.get("node") ?? "";
   const { overview: hudOverview } = useOverview(undefined, 30_000);
@@ -106,6 +107,7 @@ export function App() {
       {route.view === "controls" && <Controls />}
       {route.view === "desktop" && <Suspense fallback={<div className="p-6">Loading desktop…</div>}><Desktop params={route.params} key={`desktop-${nodeId}`} /></Suspense>}
       {route.view === "fleet" && <Home params={route.params} onLocked={lock} />}
+      {route.view === "storage" && <Storage params={route.params} onLocked={lock} />}
       {route.view === "projects" && <Projects params={route.params} onLocked={lock} />}
       {route.view === "seed" && <Suspense fallback={<div className="p-6 text-xs text-zinc-500">Loading Seed agents…</div>}><SeedAgents params={route.params} key={`seed-${nodeId}`} /></Suspense>}
       {route.view === "agents" && <Agents params={route.params} onLocked={lock} />}

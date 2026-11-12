@@ -50,6 +50,7 @@ const server = Bun.serve<{legacy:boolean;terminal?:boolean}>({port:0,hostname:"1
     }
     if (path === "/api/repos") return Response.json([]);
     if (path === "/api/data") return Response.json({dirs:[{id:1,root:"/home/test",path:"/home/test/media",name:"media",kind:"data",size_bytes:1,cache_bytes:0,mtime:1},{id:2,root:"/other",path:"/other/cache",name:"cache",kind:"cache",size_bytes:1,cache_bytes:0,mtime:1}]});
+    if (path === "/api/disks") return original.includes("peer-b") ? Response.json({error:"disk probe failed"},{status:503}) : Response.json({at:Date.now(),disks:[{filesystem:"tank/iris",mount:"/mnt/Iris ambience",totalBytes:100 * 1024 ** 3,usedBytes:40 * 1024 ** 3,freeBytes:60 * 1024 ** 3,percent:40,paths:["/mnt/Iris ambience"]}]});
     if (path === "/api/status") return Response.json({nodeName:"Test",version:"test",roots:[],repos:0});
     if (path === "/api/fs/list") {
       const dir = u.searchParams.get("path") || "/home/test";
@@ -733,4 +734,20 @@ test("Editor playlist selection hands playback to one track while ordinary navig
   await page.getByTestId("nav-applications").click();
   expect(await page.locator('audio[src*="two.wav"]').evaluate((audio:HTMLAudioElement)=>audio.paused)).toBe(false);
   await page.goBack();expect(await page.locator('audio[src*="two.wav"]:visible').count()).toBe(1);
+});
+
+test("storage detail loads the named peer's volume, handles unavailable and missing items", async () => {
+  await go("storage?node=peer-a&filesystem=tank%2Firis&mount=%2Fmnt%2FIris+ambience");
+  await page.getByTestId("storage-warning").waitFor();
+  expect(await page.getByTestId("storage-detail").innerText()).toContain("Peer A");
+  expect(await page.getByTestId("storage-detail").innerText()).toContain("60.00 GB");
+  expect(requests.some(r => r.startsWith("/api/nodes/peer-a/proxy/disks"))).toBe(true);
+  await title("/mnt/Iris ambience · Storage · Peer A · Cyberdeck");
+  await page.reload(); await page.getByTestId("storage-warning").waitFor();
+  await go("storage?node=peer-b&filesystem=tank%2Firis&mount=%2Fmnt%2FIris+ambience");
+  await page.getByTestId("storage-unavailable").getByText("Storage unavailable: disk probe failed").waitFor();
+  await go("storage?node=peer-a&filesystem=tank%2Firis&mount=%2Fmissing");
+  await page.getByTestId("storage-unavailable").getByText("no longer reported", { exact:false }).waitFor();
+  await go("storage?node=not-paired&filesystem=tank%2Firis&mount=%2Fmissing");
+  await page.getByTestId("storage-unavailable").getByText("Machine is not paired").waitFor();
 });
