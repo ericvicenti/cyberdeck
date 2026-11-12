@@ -495,8 +495,8 @@ export function Home({ params, onLocked }: { params: URLSearchParams; onLocked: 
                 <Meter
                   label={<span>{m.name} <span className="text-zinc-500">{d.mount}</span></span>}
                   percent={d.percent}
-                  sev={severity(d.percent, 80, 92)}
-                  right={<span>{fmtBytes(d.freeBytes)} free <span className="text-zinc-600">of {fmtBytes(d.totalBytes)}</span>{fillsIn(d.trend?.daysLeft) && <span className={d.trend!.daysLeft! < 14 ? "text-amber-400" : "text-zinc-500"} title={`losing ${fmtBytes(d.trend!.lossPerDay)} a day over the last ${d.trend!.spanDays} days`}> · full {fillsIn(d.trend?.daysLeft)}</span>}</span>}
+                  sev={d.poolHealth && d.poolHealth !== "ONLINE" ? "bad" : severity(d.percent, 80, 92)}
+                  right={<span>{d.poolHealth && d.poolHealth !== "ONLINE" && <span className="text-red-400">{d.poolHealth} · </span>}{fmtBytes(d.freeBytes)} free <span className="text-zinc-600">of {fmtBytes(d.totalBytes)}</span>{fillsIn(d.trend?.daysLeft) && <span className={d.trend!.daysLeft! < 14 ? "text-amber-400" : "text-zinc-500"} title={`losing ${fmtBytes(d.trend!.lossPerDay)} a day over the last ${d.trend!.spanDays} days`}> · full {fillsIn(d.trend?.daysLeft)}</span>}</span>}
                 />
               </button>
             ) : (

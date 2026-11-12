@@ -18,6 +18,7 @@ test("storage links retain explicit machine and both volume identity fields", ()
 });
 test("health warns for low space, high utilization and fast fill without inventing trend", () => {
   expect(storageWarning(disk).level).toBe("ok");
+  expect(storageWarning({ ...disk, poolHealth: "DEGRADED" })).toMatchObject({ level: "bad", text: expect.stringContaining("DEGRADED") });
   expect(storageWarning({ ...disk, percent: 83 }).level).toBe("warn");
   expect(storageWarning({ ...disk, trend: { lossPerDay: 1024 ** 3, daysLeft: 3, samples: 12, spanDays: 3 } }).text).toContain("3 day");
   expect(storageWarning({ ...disk, freeBytes: 2 * 1024 ** 3 }).level).toBe("bad");

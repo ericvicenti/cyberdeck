@@ -75,6 +75,8 @@ export type DiskInfo = {
   mount: string; filesystem: string; totalBytes: number; usedBytes: number; freeBytes: number; percent: number; paths: string[];
   /** Fill rate from the node's hourly samples (`src/daemon/disks.ts`); null until 12 h of history, absent from older nodes. */
   trend?: DiskTrend | null;
+  /** ZFS pool health, when this volume belongs to a mounted pool. */
+  poolHealth?: string;
 };
 export type SystemInfo = { platform: string; cpus: number; load: [number, number, number]; totalMem: number; freeMem: number; uptimeSec: number };
 export type ActivityDay = { date: string; cc: number; cx: number };
@@ -360,12 +362,13 @@ export function localLinuxMounts(mountinfo: string): string[] {
 /** zpool allocation includes all datasets and snapshots; keep df available (ZFS slop is not usable). */
 export function applyZpoolSizes(rows: DiskInfo[], output: string): DiskInfo[] {
   const pools = new Map(output.trim().split("\n").map((line) => line.split("\t"))
-    .filter((f) => f.length === 4 && f.slice(1).every((n) => Number.isFinite(Number(n))))
-    .map(([name, size, alloc, free]) => [name, { size: Number(size), alloc: Number(alloc), free: Number(free) }]));
+    .filter((f) => f.length === 5 && f.slice(1, 4).every((n) => Number.isFinite(Number(n))))
+    .map(([name, size, alloc, free, health]) => [name, { size: Number(size), alloc: Number(alloc), free: Number(free), health }]));
   for (const row of rows) {
     if (row.filesystem.startsWith("/dev/")) continue;
     const pool = pools.get(row.filesystem.split("/")[0]);
     if (!pool || pool.size <= 0) continue;
+    row.poolHealth = pool.health;
     row.usedBytes = pool.alloc;
     row.totalBytes = pool.alloc + row.freeBytes;
     row.percent = Math.round(pool.alloc / Math.max(1, row.totalBytes) * 100);
@@ -395,7 +398,7 @@ export async function diskInfo(cfg: CyberdeckConfig): Promise<DiskInfo[]> {
   const merged = mergeVolumes(rows);
   if (platform() === "linux" && merged.some((r) => !r.filesystem.startsWith("/dev/"))) {
     try {
-      const p = Bun.spawn(["zpool", "list", "-Hp", "-o", "name,size,alloc,free"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+      const p = Bun.spawn(["zpool", "list", "-Hp", "-o", "name,size,alloc,free,health"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
       const out = await new Response(p.stdout).text();
       if ((await p.exited) === 0) applyZpoolSizes(merged, out);
     } catch {} // zpool may not be installed or accessible to the daemon user

@@ -11,6 +11,7 @@ export function findStorageDisk(disks: DiskInfo[], filesystem: string, mount: st
   return disks.find((d) => d.filesystem === filesystem && d.mount === mount) ?? null;
 }
 export function storageWarning(d: DiskInfo): { level: "bad" | "warn" | "ok"; text: string } {
+  if (d.poolHealth && d.poolHealth !== "ONLINE") return { level: "bad", text: `ZFS pool ${d.poolHealth} — inspect pool status and protect data` };
   if (d.percent >= FULL_PERCENT || d.freeBytes < LOW_FREE_BYTES) return { level: "bad", text: "Low space — this volume is nearly full" };
   if (d.trend?.daysLeft != null && d.trend.daysLeft <= FILLING_DAYS) return { level: "warn", text: `Filling fast — projected full in about ${Math.max(1, Math.ceil(d.trend.daysLeft))} day(s)` };
   if (d.percent >= 80) return { level: "warn", text: "High utilization — watch available space" };

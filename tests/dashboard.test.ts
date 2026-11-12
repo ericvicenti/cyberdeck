@@ -133,9 +133,9 @@ describe("local metrics", () => {
     const temp = merged.find((r) => r.filesystem.startsWith("temprebuild"))!;
     expect(temp.mount).toBe("/temprebuild/ambience");
     expect(temp.paths).toEqual(["/temprebuild", "/temprebuild/ambience"]);
-    applyZpoolSizes(merged, "temprebuild\t1000\t910\t90\nambience\t2000\t800\t1200\n");
+    applyZpoolSizes(merged, "temprebuild\t1000\t910\t90\tONLINE\nambience\t2000\t800\t1200\tDEGRADED\n");
     expect(temp).toMatchObject({ totalBytes: 1000, usedBytes: 910, freeBytes: 90, percent: 91 });
-    expect(merged.find((r) => r.filesystem === "ambience")).toMatchObject({ totalBytes: 1300, usedBytes: 800 });
+    expect(merged.find((r) => r.filesystem === "ambience")).toMatchObject({ totalBytes: 1300, usedBytes: 800, poolHealth: "DEGRADED" });
   });
   test("parseDf handles POSIX output and mount points with spaces", () => {
     const rows = parseDf(
