@@ -341,18 +341,66 @@ export function parseDf(output: string): Omit<DiskInfo, "paths">[] {
   return rows;
 }
 
+/** Linux mountinfo is the kernel's mounted-filesystem view; no probes of unmounted disks or network shares. */
+export function localLinuxMounts(mountinfo: string): string[] {
+  const mounts: string[] = [];
+  for (const line of mountinfo.split("\n")) {
+    const [before, after] = line.split(" - ");
+    if (!before || !after) continue;
+    const fields = before.split(" "), [type, source] = after.split(" ");
+    // Whitelist local on-disk filesystems; in particular exclude autofs, NFS, tmpfs and snap loops.
+    if (!/^(ext[234]|xfs|btrfs|vfat|exfat|ntfs|fuseblk|zfs)$/.test(type)) continue;
+    if (type === "zfs" ? !source || source.startsWith("/") : !source?.startsWith("/dev/") || source.startsWith("/dev/loop")) continue;
+    const mount = fields[4]?.replace(/\\([0-7]{3})/g, (_, octal: string) => String.fromCharCode(parseInt(octal, 8)));
+    if (mount?.startsWith("/") && !mounts.includes(mount)) mounts.push(mount);
+  }
+  return mounts;
+}
+
+/** zpool allocation includes all datasets and snapshots; keep df available (ZFS slop is not usable). */
+export function applyZpoolSizes(rows: DiskInfo[], output: string): DiskInfo[] {
+  const pools = new Map(output.trim().split("\n").map((line) => line.split("\t"))
+    .filter((f) => f.length === 4 && f.slice(1).every((n) => Number.isFinite(Number(n))))
+    .map(([name, size, alloc, free]) => [name, { size: Number(size), alloc: Number(alloc), free: Number(free) }]));
+  for (const row of rows) {
+    if (row.filesystem.startsWith("/dev/")) continue;
+    const pool = pools.get(row.filesystem.split("/")[0]);
+    if (!pool || pool.size <= 0) continue;
+    row.usedBytes = pool.alloc;
+    row.totalBytes = pool.alloc + row.freeBytes;
+    row.percent = Math.round(pool.alloc / Math.max(1, row.totalBytes) * 100);
+  }
+  return rows;
+}
+
 export async function diskInfo(cfg: CyberdeckConfig): Promise<DiskInfo[]> {
-  const paths = ["/", CYBERDECK_HOME, ...cfg.roots, ...(cfg.dataRoots ?? [])].filter((p, i, a) => existsSync(p) && a.indexOf(p) === i);
+  let mounts: string[] = [];
+  if (platform() === "linux") {
+    try { mounts = localLinuxMounts(readFileSync("/proc/self/mountinfo", "utf8")); } catch {}
+  }
+  const paths = ["/", CYBERDECK_HOME, ...cfg.roots, ...(cfg.dataRoots ?? []), ...mounts]
+    .filter((p, i, a) => existsSync(p) && a.indexOf(p) === i);
   const rows: DiskInfo[] = [];
   for (const path of paths) {
     try {
       const p = Bun.spawn(["df", "-Pk", path], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
       const out = await new Response(p.stdout).text();
       if ((await p.exited) !== 0) continue;
-      for (const row of parseDf(out)) rows.push({ ...row, paths: [path] });
+      for (const row of parseDf(out)) {
+        if (platform() === "linux" && !mounts.includes(row.mount)) continue;
+        rows.push({ ...row, paths: [path] });
+      }
     } catch {}
   }
-  return mergeVolumes(rows);
+  const merged = mergeVolumes(rows);
+  if (platform() === "linux" && merged.some((r) => !r.filesystem.startsWith("/dev/"))) {
+    try {
+      const p = Bun.spawn(["zpool", "list", "-Hp", "-o", "name,size,alloc,free"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+      const out = await new Response(p.stdout).text();
+      if ((await p.exited) === 0) applyZpoolSizes(merged, out);
+    } catch {} // zpool may not be installed or accessible to the daemon user
+  }
+  return merged;
 }
 
 /** /dev/disk3s1s1 and /dev/disk3s5 live in APFS container disk3; other device names are their own container. */
@@ -365,12 +413,20 @@ const container = (fs: string): string => /^\/dev\/disk\d+s\d+/.test(fs) ? fs.re
 export function mergeVolumes(rows: DiskInfo[]): DiskInfo[] {
   const out: DiskInfo[] = [];
   for (const r of rows) {
-    const same = out.find((o) => o.filesystem === r.filesystem || container(o.filesystem) === container(r.filesystem) || (o.totalBytes === r.totalBytes && Math.abs(o.freeBytes - r.freeBytes) <= r.totalBytes * 0.005));
+    const zfsPool = (fs: string) => fs.startsWith("/dev/") || fs.includes(":") ? null : fs.split("/")[0];
+    const same = out.find((o) => o.filesystem === r.filesystem || container(o.filesystem) === container(r.filesystem) ||
+      (zfsPool(o.filesystem) && zfsPool(o.filesystem) === zfsPool(r.filesystem)) ||
+      (o.filesystem.startsWith("/dev/disk") && r.filesystem.startsWith("/dev/disk") &&
+        o.totalBytes === r.totalBytes && Math.abs(o.freeBytes - r.freeBytes) <= r.totalBytes * 0.005));
     if (!same) { out.push({ ...r, paths: [...r.paths] }); continue; }
     for (const p of r.paths) if (!same.paths.includes(p)) same.paths.push(p);
     if (same.filesystem !== r.filesystem) {
-      // a shared pool: report the pool's fullness and the most recognisable mount
-      if (r.mount === "/" ) { same.mount = "/"; same.filesystem = r.filesystem; }
+      // A ZFS parent's df total is just its own used bytes + shared free space; prefer
+      // the largest child until zpool's actual size/allocated bytes are available.
+      if (r.mount === "/" || (zfsPool(r.filesystem) === zfsPool(same.filesystem) && r.totalBytes > same.totalBytes)) {
+        same.mount = r.mount; same.filesystem = r.filesystem;
+      }
+      same.totalBytes = Math.max(same.totalBytes, r.totalBytes);
       same.usedBytes = same.totalBytes - same.freeBytes;
       same.percent = Math.round((same.usedBytes / Math.max(1, same.totalBytes)) * 100);
     }

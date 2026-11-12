@@ -4,7 +4,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { startTestServer, testConfig, tmpHomeDir, type TestServer } from "./helpers";
-import { normalizeClaudeUsage, normalizeCodexUsage, codexUsageFromSessions, parseDf, mergeVolumes, activityByDay, backupStatus, claudeResetOffer } from "../src/daemon/api/dashboard";
+import { normalizeClaudeUsage, normalizeCodexUsage, codexUsageFromSessions, parseDf, mergeVolumes, localLinuxMounts, applyZpoolSizes, activityByDay, backupStatus, claudeResetOffer } from "../src/daemon/api/dashboard";
 import { normalizeCodexResets } from "../src/daemon/codexrpc";
 import { readFileSync, existsSync } from "fs";
 
@@ -103,6 +103,40 @@ describe("codex usage", () => {
 });
 
 describe("local metrics", () => {
+  test("Linux discovers mounted local disks and ZFS, but not NFS, virtual or snap volumes", () => {
+    const entry = (mount: string, type: string, source: string) => `22 1 8:1 / ${mount} rw - ${type} ${source} rw`;
+    const mounts = [
+      entry("/", "ext4", "/dev/sda1"), entry("/media/eric/migrate2", "fuseblk", "/dev/sde1"),
+      entry("/media/ambience", "zfs", "ambience"), entry("/temprebuild", "zfs", "temprebuild"),
+      entry("/temprebuild/ambience", "zfs", "temprebuild/ambience"),
+      entry("/mnt/sentinel", "nfs4", "10.255.0.3:/sentinel-old"),
+      entry("/snap/core", "squashfs", "/dev/loop1"), entry("/run", "tmpfs", "tmpfs"),
+      entry("/media/My\\040Disk", "exfat", "/dev/sdq1"),
+    ];
+    expect(localLinuxMounts(mounts.join("\n"))).toEqual([
+      "/", "/media/eric/migrate2", "/media/ambience", "/temprebuild",
+      "/temprebuild/ambience", "/media/My Disk",
+    ]);
+  });
+  test("ZFS datasets collapse by pool and use actual pool allocation", () => {
+    const row = (filesystem: string, mount: string, totalBytes: number, freeBytes: number) => ({
+      filesystem, mount, totalBytes, usedBytes: totalBytes - freeBytes, freeBytes,
+      percent: 0, paths: [mount],
+    });
+    const merged = mergeVolumes([
+      row("/dev/sda1", "/", 1000, 500), row("temprebuild", "/temprebuild", 100, 90),
+      row("temprebuild/ambience", "/temprebuild/ambience", 810, 90),
+      row("ambience", "/media/ambience", 1000, 500),
+      row("/dev/sde1", "/media/eric/migrate2", 1000, 500),
+    ]);
+    expect(merged).toHaveLength(4); // identical capacity/free on distinct disks is not identity
+    const temp = merged.find((r) => r.filesystem.startsWith("temprebuild"))!;
+    expect(temp.mount).toBe("/temprebuild/ambience");
+    expect(temp.paths).toEqual(["/temprebuild", "/temprebuild/ambience"]);
+    applyZpoolSizes(merged, "temprebuild\t1000\t910\t90\nambience\t2000\t800\t1200\n");
+    expect(temp).toMatchObject({ totalBytes: 1000, usedBytes: 910, freeBytes: 90, percent: 91 });
+    expect(merged.find((r) => r.filesystem === "ambience")).toMatchObject({ totalBytes: 1300, usedBytes: 800 });
+  });
   test("parseDf handles POSIX output and mount points with spaces", () => {
     const rows = parseDf(
       "Filesystem 1024-blocks Used Available Capacity Mounted on\n" +
