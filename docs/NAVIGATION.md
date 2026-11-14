@@ -59,6 +59,7 @@ credentials should not be replayed from a link.
 | main / PWA / token and OAuth bootstrap | token entry, OAuth return, install manifest | Spotify OAuth restores a validated, tab-local return fragment after state verification. Callback codes are removed and cannot enter shared URLs; invalid state cannot choose a return destination. |
 | App / api / navigation | primary view, node, not-found, auth, titles | Covered, including legacy `service`→`svc`, Steam app→Vault tab. More parameter validation and every error title remain. |
 | `fleet` / Home | local/fleet overview, node links; pairing and account/reset dialogs; NetworkMap selected endpoints | Overview and node links covered. `networkFrom` / `networkTo` identify an inspected connection by host name, independent of the serving node. Selections push once; partial/whitespace links replace canonical defaults; Back/Forward, reload and fresh tabs restore both endpoints. Unknown/same-host links keep honest errors and titles; unavailable telemetry retains the requested pair. Pairing/reset/benchmark actions remain explicit and never replay from links. |
+| `storage` / Storage | node, filesystem and mount identify a volume; loading, last reading, errors and retry | Added to this inventory after the November 12–13 storage changes. Canonical explicit `node=self`, first-value singleton parameters, direct/reload/new-tab/history restoration and both identity fields are covered (November 14). Missing, invalid, unpaired/offline, denied, unavailable and malformed reads have owned titles. Peer reads wait for fleet discovery; delayed/overlapping reads cannot restore old errors, replace newer readings, rename another view or lock another node. Retry retains the URL; a failed refresh preserves a visibly marked last reading. |
 | `controls` / Controls | control diagram, bindings/editor, reset notice | Static route/title covered where installed. Binding changes are settings, not navigation. Keyboard/gamepad mode preferences remain local. |
 | `applications` / Applications | application id, Casework example, pairing dialog, reload | Id, unknown-id and unavailable-listing errors/titles covered; failed lookups retain the requested link instead of showing an ordinary app list. Pairing is an explicit operation. Visited generic iframe documents now survive primary-view, application and node navigation. Opt-in generic SPA navigation now restores root-relative child routes/titles via an origin/source/request-bound bridge and keeps one history owner. Commander has a bridge integration for its main views, trainer tabs/inspectors/filters, workshop tabs/run inspection, community directory and active-match menu/chat/help/workshop. Replay reads now distinguish missing, denied, unavailable and invalid content; directory reads have route-bound error titles, retry and hidden-response protection. Match/decision archive reads now validate selected identities, page data and rendered board shapes; missing/denied/unavailable/invalid outcomes retry at the same URL without replacing the inspector or issuing commands (November 10). Other malformed responses and real remote-match availability still need coverage. Unsupported nested links in noncooperating apps report a restoration error. See `docs/EMBEDDED-NAVIGATION.md`. |
 | `applications?app=soniq` / Soniq | studio track/scene/bar/step, steps/piano editor, library query/category/source/offset, project and export dialogs | Clipper's Studio cooperates with the retained frame for track/scene/bar/step, editor mode, library visibility/query/category/source/page/sample, and the Projects dialog/selected snapshot. Direct links, reload, new tabs, Back/Forward and truthful errors/titles are covered. Links select snapshots without loading them; only Load selected snapshot changes the project. Project list loading, denied/unavailable reads, retry and late-response isolation are covered. A real AudioContext with a verified silent sink survives dialog/history/primary-view changes. External project changes retain selected IDs with honest errors; delayed load/import completions cannot reset a later selection or navigation round trip. Invalid-link recovery uses parent history and retains the same iframe. Piano-roll octave 0–8 now restores through canonical links, reload and history; the default 4 is omitted. Nondefault visible ranges name the title, and switching editors retains the selected range without changing notes or audio ownership. Starlight's separate older prototype is preserved. |
@@ -904,3 +905,36 @@ Remaining coverage: run tool inspectors/details and other transcript/workflow
 plan disclosures, attachments/errors and older-message windows; Commander deep
 read/live-seat cases; native/device/original-file boundaries. Journal availability
 and subscription failures still need diagnostics. App-wide acceptance remains open.
+
+
+## 2026-11-14: Storage volume restoration and read ownership
+
+Storage is a new primary view added since the preceding inventory. Its canonical
+URL is `#/storage?filesystem=<device-or-pool>&mount=<mount>&node=<paired-id-or-self>`.
+Both volume identity fields must agree; a missing item never falls back to a
+same-mount or same-device volume. Default and duplicate singleton parameters
+replace in place, and absent/invalid selections keep useful states without disk
+reads. Filesystem and mount strings preserve encoded spaces, slashes and query
+characters. Unknown and offline peers are never probed by this view.
+
+Each read/error belongs to the exact node and effect generation. Node changes,
+retry, Back/Forward and leaving the view discard late completions. A newer poll
+wins over an older request. A failed refresh retains the last reading with a
+visible warning, accurate unavailable title and explicit retry; links never run
+a rescan or cleanup. Peer reads wait for successful paired-node discovery; fleet
+lookup failures can retry at the same link. Only an active serving-node 401 locks
+the app. Other nodes' denials and late local denials cannot lock the active node.
+
+`tests/storage-navigation.test.ts` covers the exact production bundle with nine
+read-only Chromium cases: encoded direct/reload/new-tab/history links; canonical
+and invalid URLs; missing/denied/unavailable/malformed reads and retry; delayed
+node/view transitions; overlapping poll ordering and retained readings; local
+versus peer authentication; paired-node discovery; legacy daemon compatibility; and phone/desktop error states.
+Repeat after building with `bun test tests/storage-navigation.test.ts --timeout
+30000`. `CYBERDECK_TEST_ORIGIN` selects installed assets over private loopback SSH.
+
+
+On an endpoint-only 404, Storage reads the same node’s existing dashboard disk
+snapshot. Botical’s long-running daemon requires this compatibility path. It
+uses the same validation, owner and authentication guards; a 401/403/503 never
+triggers a dashboard fallback, and navigation never restarts the daemon.

@@ -4,9 +4,10 @@ import { apiOn, ApiError, fmtBytes, navigate } from "../lib/api";
 import { useFleet } from "../lib/fleet";
 import { findStorageDisk, storageWarning } from "../lib/storage";
 import { Meter, severity } from "../components/Widgets";
+import { readRoute, routeHash, useRouteTitle, writeRoute } from "../lib/navigation";
 
 export function Storage({ params, onLocked }: { params: URLSearchParams; onLocked: () => void }) {
-  const { fleet } = useFleet();
+  const { fleet, error: fleetError, refresh: refreshFleet } = useFleet();
   const requested = params.get("node") ?? "";
   const node = requested === "self" ? "" : requested;
   const filesystem = params.get("filesystem");
@@ -15,37 +16,75 @@ export function Storage({ params, onLocked }: { params: URLSearchParams; onLocke
   const name = node ? peer?.name ?? node : fleet?.self.name ?? "this machine";
   const offline = !!node && !!peer && !peer.online;
   const unknown = !!node && !!fleet && !peer;
-  const [reading, setReading] = useState<{ node: string; disks: DiskInfo[]; at: number } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const invalid = [filesystem, mount].some(value => value !== null && (value.length > 4096 || /[\u0000-\u001f]/.test(value))) || node.length > 512 || /[\u0000-\u001f]/.test(node);
+  const selected = !!filesystem && !!mount && !invalid;
+  const ready = !node || !!fleet;
+  const eligible = selected && ready && !offline && !unknown;
+  const [attempt, retry] = useState(0);
+  const [reading, setReading] = useState<{ node: string; disks?: DiskInfo[]; at?: number; error?: unknown; pending: boolean }>();
+  const current = reading?.node === node ? reading : undefined;
+  const error = current?.error;
+  const errorText = error instanceof Error ? error.message : String(error || "");
+  const status = (error as { status?: number })?.status;
+  const loading = eligible && (!current || current.pending);
 
   useEffect(() => {
-    let active = true;
-    if (offline || unknown) { setLoading(false); return () => { active = false; }; }
+    if (location.hash !== routeHash("storage", params)) return;
+    const canonical = new URLSearchParams(params);
+    canonical.set("node", requested || "self");
+    for (const key of ["filesystem", "mount"]) {
+      const value = params.get(key);
+      if (value) canonical.set(key, value); else canonical.delete(key);
+    }
+    writeRoute("storage", canonical, "replace");
+  }, [params.toString()]);
+
+  useEffect(() => {
+    let active = true, generation = 0;
+    if (!eligible) return;
+    const ownsNode = () => {
+      const route = readRoute(), requested = route.params.get("node") || "self";
+      return route.view === "storage" && (requested === "self" ? "" : requested) === node;
+    };
     const load = async () => {
+      const request = ++generation;
+      setReading(previous => ({ ...(previous?.node === node ? previous : {}), node, pending: true, error: undefined }));
       try {
-        const result = await apiOn<{ at: number; disks: DiskInfo[] }>(node, "/api/disks");
-        if (active) { setReading({ node, ...result }); setError(null); setLoading(false); }
-      } catch (e) {
-        if (active) { setError(e instanceof Error ? e.message : String(e)); setLoading(false); if (!node && e instanceof ApiError && e.status === 401) onLocked(); }
+        let result: { at: number; disks: DiskInfo[] };
+        try { result = await apiOn(node, "/api/disks"); }
+        catch (error) {
+          if (!(error instanceof ApiError) || error.status !== 404) throw error;
+          // Older running daemons already include these readings in dashboard.
+          // Keep their sessions alive instead of requiring a service restart.
+          if (!active || request !== generation || !ownsNode()) return;
+          result = await apiOn(node, "/api/dashboard");
+        }
+        const valid = Number.isFinite(result?.at) && Array.isArray(result.disks) && result.disks.every(disk => disk && typeof disk.filesystem === "string" && typeof disk.mount === "string" && Array.isArray(disk.paths) && disk.paths.every(path => typeof path === "string") && [disk.totalBytes, disk.usedBytes, disk.freeBytes, disk.percent].every(Number.isFinite) && (!disk.trend || [disk.trend.lossPerDay, disk.trend.samples, disk.trend.spanDays].every(Number.isFinite)));
+        if (!valid) throw new ApiError(502, "Invalid storage response");
+        if (active && request === generation && ownsNode()) setReading({ node, ...result, pending: false });
+      } catch (error) {
+        if (active && request === generation && ownsNode()) {
+          setReading(previous => ({ ...(previous?.node === node ? previous : {}), node, error, pending: false }));
+          if (!node && error instanceof ApiError && error.status === 401) onLocked();
+        }
       }
     };
-    setLoading(true);
     load();
     const timer = setInterval(load, 60_000);
     return () => { active = false; clearInterval(timer); };
-  }, [node, offline, unknown]);
+  }, [node, eligible, attempt]);
 
-  const current = reading?.node === node ? reading : null;
-  const disk = current && filesystem !== null && mount !== null ? findStorageDisk(current.disks, filesystem, mount) : null;
+  const disk = current?.disks && selected ? findStorageDisk(current.disks, filesystem!, mount!) : null;
   const warning = disk && storageWarning(disk);
-  const unavailable = unknown ? "Machine is not paired" : offline ? "Machine is offline" : error ? `Storage unavailable: ${error}` : loading ? "Loading storage…" : !filesystem || mount === null ? "No storage item selected" : "This storage item is no longer reported by this machine";
+  const unavailable = invalid ? "Invalid storage link" : !selected ? "No storage item selected" : unknown ? "Machine is not paired" : offline ? "Machine is offline" : !ready ? fleetError ? `Machine list unavailable: ${fleetError}` : "Loading machine…" : error ? `Storage unavailable: ${errorText}` : loading ? "Loading storage…" : "This storage item is no longer reported by this machine";
+  const title = invalid ? "Invalid storage link" : !selected ? `No storage item selected · Storage · ${name}` : unknown ? `Machine not paired · Storage · ${name}` : offline ? `Machine offline · Storage · ${name}` : !ready ? fleetError ? "Machine list unavailable · Storage" : "Loading machine · Storage" : error ? `${status === 401 || status === 403 ? "Storage access denied" : "Storage unavailable"} · ${name}` : loading && !disk ? `Loading storage · ${name}` : !disk ? `Storage item not found · ${name}` : `${mount} · Storage · ${name}`;
+  useRouteTitle(title);
 
   return <main className="mx-auto max-w-5xl space-y-5 p-4 md:p-7" data-testid="storage-detail">
     <div className="flex items-center gap-2 text-xs text-zinc-500"><button className="hover:text-sky-300" onClick={() => navigate("fleet")}>Fleet</button><span>/</span><span>{name}</span><span>/</span><span>Storage</span></div>
     <header><h1 className="text-2xl font-semibold text-zinc-100">{disk?.mount ?? mount ?? "Storage"}</h1><p className="mt-1 text-sm text-zinc-400">{name} · storage detail</p></header>
     {disk && !offline && !unknown ? <>
-      {error && <p role="status" className="rounded border border-amber-600/40 p-3 text-sm text-amber-300">Latest reading unavailable: {error}. Showing last reading.</p>}
+      {error && <p role="status" className="rounded border border-amber-600/40 p-3 text-sm text-amber-300">Latest reading unavailable: {errorText}. Showing last reading. <button type="button" className="ml-2 min-h-11 rounded border border-amber-600/40 px-3" disabled={loading} onClick={() => retry(value => value + 1)}>Retry</button></p>}
       <section className="hud-card space-y-5 p-5" aria-label="Storage capacity">
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">{([
           ["Capacity", fmtBytes(disk.totalBytes)], ["Used", fmtBytes(disk.usedBytes)], ["Free", fmtBytes(disk.freeBytes)], ["Utilization", `${disk.percent}%`],
@@ -61,7 +100,7 @@ export function Storage({ params, onLocked }: { params: URLSearchParams; onLocke
         <div><div className="hud-label">Mount</div><div className="mt-1 break-all font-mono text-zinc-200">{disk.mount}</div></div>
         {disk.paths.length > 1 && <div className="sm:col-span-2"><div className="hud-label">Paths on this volume</div><div className="mt-1 break-all font-mono text-zinc-300">{disk.paths.join(" · ")}</div></div>}
       </section>
-      <p className="text-xs text-zinc-500">Reported {new Date(current!.at).toLocaleString()} by {name}. Capacity is the reported filesystem/pool view, not a sum of partitions.</p>
-    </> : <section className="hud-card p-5 text-sm text-zinc-400" role="status" data-testid="storage-unavailable">{unavailable}</section>}
+      <p className="text-xs text-zinc-500">Reported {new Date(current!.at!).toLocaleString()} by {name}. Capacity is the reported filesystem/pool view, not a sum of partitions.</p>
+    </> : <section className="hud-card p-5 text-sm text-zinc-400" role={error || !ready && fleetError || invalid || unknown || offline || selected && ready && !loading ? "alert" : "status"} data-testid="storage-unavailable"><p>{unavailable}</p>{(error && eligible || !ready && fleetError) ? <button type="button" className="mt-3 min-h-11 rounded border border-zinc-600 px-3 py-2 hover:text-sky-300" disabled={loading} onClick={() => !ready ? refreshFleet() : retry(value => value + 1)}>Retry</button> : null}</section>}
   </main>;
 }
