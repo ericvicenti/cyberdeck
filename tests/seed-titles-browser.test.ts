@@ -11,6 +11,9 @@ const browserBudget = process.env.CYBERDECK_TEST_ORIGIN ? 90000 : 30000;
 const actions: string[] = [], errors: string[] = [], unexpected: string[] = [];
 const pending = new Set<() => void>();
 let hold = false;
+let graphStatus = 200, holdGraph = false, malformedGraph = "";
+const subscriptions: string[] = [];
+const errorChild = "failed child /?&";
 let renamed = "";
 let memoryRemoved = false;
 let memoryReadStatus = 200, holdMemoryRead = false;
@@ -57,8 +60,8 @@ const ok = (value: unknown) => new Response(cbor.encode(value) as unknown as Bod
 const fail = (status: number, message: string) => new Response(cbor.encode({_:"Error",message}) as unknown as BodyInit,{status,headers:{"content-type":"application/cbor"}});
 const agent = (id: string, node: string) => ({id,account,definition:{name:renamed || `${node} ${id === "beta" ? "Beta assistant" : "Alpha assistant"}`,systemPrompt:"Fixture",model:"fixture",modelProvider:"fixture",mcpServers:[]},stateDir:"",status:"idle",createdAt:1,updatedAt:2});
 const session = (id: string, node: string) => ({id,account,agentId:"alpha",title:id === "untitled" ? "" : `${node} ${id === "two" ? "Second conversation" : id === "older" ? "Older conversation" : "First conversation"}`,status:"idle",createdAt:1,updatedAt:2,...(childLists && ["one", "two"].includes(id) ? { childSessionCount: id === "one" ? 2 : 1 } : {})});
-const run = (id: string, node: string) => ({id,account,rootRunId:id,depth:0,kind:"workflow",origin:"user",title:`${node} Review navigation`,status:"succeeded",createdAt:1,updatedAt:2,finishedAt:2,...(id === "activity" ? {sourceText:"// Recorded workflow fixture\nreturn 42;"} : {})});
-const server = Bun.serve({hostname:"127.0.0.1",port:0,async fetch(req,server) {
+const run = (id: string, node: string) => ({id,account,rootRunId:id,depth:0,kind:"workflow",origin:"user",title:`${node} Review navigation`,status:"succeeded",createdAt:1,updatedAt:2,finishedAt:2,...(id === "failed-run" ? { status: "failed", error: { code: "FIXTURE_ERROR", message: "Recorded root failure", detail: { fixture: "root detail" }, stack: "Error: recorded failure\n at workflow.js:2" }, plan: { steps: [{ id: "child-step", label: "Recorded child step", status: "failed" }] }, sourceText: "// Recorded source\nthrow new Error('fixture');" } : {}),...(id === "activity" ? {sourceText:"// Recorded workflow fixture\nreturn 42;"} : {})});
+const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch(req,server) {
   const url=new URL(req.url),path=url.pathname;
   if (path.endsWith("/agents/ws") && server.upgrade(req)) return;
   if (path.match(/^\/seed-fixture\/(?:local|peer-a|peer-b|external)\/api\/message$/)) {
@@ -109,6 +112,15 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,async fetch(req,server) {
       if (globalPaged) return ok({ _: "ListSessionsResponse", agents: [agent("alpha", node)],
         sessions: [session(action.cursor === "page-3" ? "older" : action.cursor === "page-2" ? "two" : "one", node)],
         nextCursor: action.cursor === "page-3" || node === "external" && action.cursor === "page-2" ? undefined : action.cursor === "page-2" ? "page-3" : "page-2" });
+    }
+    if (action._ === "ListRuns" && action.rootRunId === "failed-run") {
+      const status = graphStatus, malformed = malformedGraph;
+      if (holdGraph) await new Promise<void>(r => pending.add(r));
+      if (status !== 200) return fail(status, "Recorded run graph failed");
+      if (malformed === "response") return ok({ _: "GetRunResponse" });
+      if (malformed === "array") return ok({ _: "ListRunsResponse", runs: {} });
+      if (malformed === "root") return ok({ _: "ListRunsResponse", runs: [{ ...run(errorChild, node), rootRunId: "other-run" }] });
+      return ok({ _: "ListRunsResponse", runs: [{ ...run(errorChild, node), rootRunId: "failed-run", parentRunId: "failed-run", depth: 1, planStepId: "child-step", title: `${node} Failed child`, status: "failed", error: { code: "CHILD_ERROR", message: "Recorded child failure", detail: { fixture: "child detail" } } }] });
     }
     if (action._ === "GetRun" && id === "review" && runReadStatus !== 200) return fail(runReadStatus, "Run read failed");
     if (action._ === "GetSessionEvent") {
@@ -183,6 +195,11 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,async fetch(req,server) {
   return await file.exists()?new Response(file):new Response("Not found",{status:404});
 },websocket:{open(){},message(ws, message){
  const envelope:any = typeof message === "string" ? JSON.parse(message) : cbor.decode(new Uint8Array(message));
+ if (envelope.action?.key?.startsWith("runs/")) subscriptions.push(envelope.action.key);
+ if(envelope.action?.key === "runs/failed-run") for (let index=1;index<=7;index++) {
+  ws.send(JSON.stringify({_:"append",key:"runs/failed-run",runId:"failed-run",seq:index*2-1,createdAt:index*2-1,entry:{kind:"call",op:"tool",callSeq:index,tool:"read",input:{path:`Recorded run call ${index}`}}}));
+  ws.send(JSON.stringify({_:"append",key:"runs/failed-run",runId:"failed-run",seq:index*2,createdAt:index*2,entry:{kind:"result",callSeq:index,status:"succeeded",output:{content:`Recorded run result ${index}`}}}));
+ }
  if(envelope.action?.key === "runs/activity") for (let seq=1;seq<=2;seq++) ws.send(JSON.stringify({_:"append",key:"runs/activity",runId:"activity",seq,createdAt:seq,entry:{kind:"log",level:"info",message:`Recorded activity ${seq}`,detail:`Full recorded detail ${seq}`}}));
 },close(){}}});
 let browser:Browser;
@@ -193,7 +210,7 @@ async function fresh(fn:(page:Page)=>Promise<void>){
  page.setDefaultNavigationTimeout(process.env.CYBERDECK_TEST_ORIGIN ? 30000 : 12000);
  await page.route("**/*",route=>new URL(route.request().url()).origin===server.url.origin?route.continue():route.abort());
  try{await fn(page);}catch(e){console.error(JSON.stringify({title:await page.title(),body:(await page.locator("body").innerText()).slice(0,1800),errors,actions:actions.slice(-15)}));throw e;}
- finally{serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
+ finally{graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
 }
 const href=(path:string,node="")=>`${server.url}#/seed?${new URLSearchParams({r:path,...(node?{node}:{})})}`;
 const title=(page:Page,value:string)=>page.waitForFunction(value=>document.title===value,value);
@@ -1371,4 +1388,131 @@ test("Seed run late disclosures cannot rename a locked host or replay a run", ()
  for(const release of pending)release();pending.clear();await page.waitForTimeout(150);
  expect(await page.title()).toBe("Locked · Cyberdeck");
  expect(await page.getByText("Workflow source is not available for this run.").count()).toBe(0);
+}), browserBudget);
+
+const selectionHref = (query = "", node = "") => href(`run/failed-run${query ? `?${query}` : ""}`, node);
+const selectionTitle = (prefix = "", node = "") => runTitle(prefix, node);
+const errorTitle = (child = false, node = "") => `Error · ${node || "local"} ${child ? "Failed child" : "Review navigation"} · Seed run${node ? " · Peer A" : ""} · Cyberdeck`;
+const selectedPath = (url: string) => new URLSearchParams(new URL(url).hash.slice(7)).get("r");
+
+test("Seed run selection direct links restore tool calls and root/child errors on reload and fresh tabs", () => fresh(async page => {
+ for (const query of ["calls=open", "calls=closed", "error=failed-run", `error=${encodeURIComponent(errorChild)}`]) {
+  const child = query.includes(encodeURIComponent(errorChild));
+  const expected = query.startsWith("error=") ? errorTitle(child, "peer-a") : selectionTitle(`Tool calls ${query === "calls=open" ? "open" : "collapsed"} · `, "peer-a");
+  await page.goto(selectionHref(query,"peer-a"));await title(page,expected);
+  if(query.startsWith("error=")) await page.getByRole("dialog").getByText(child ? "Recorded child failure" : "Recorded root failure",{exact:true}).waitFor();
+  else expect(await page.getByRole("button",{name:/^Tool calls/}).getAttribute("aria-expanded")).toBe(query === "calls=open" ? "true" : "false");
+  await page.reload();await title(page,expected);
+  const link=page.url();await fresh(async tab=>{await tab.goto(link);await title(tab,expected);});
+ }
+}), browserBudget);
+
+test("Seed run selection history preserves the displayed graph and journal subscription without repeated reads", () => fresh(async page => {
+ await page.goto(selectionHref());await title(page,selectionTitle());
+ const calls=page.getByRole("button",{name:/^Tool calls/});await calls.waitFor();
+ expect(await calls.getAttribute("aria-expanded")).toBe("false");
+ await calls.evaluate(el=>(el as any).__fixtureOwner="same graph");
+ const before=await page.evaluate(()=>history.length), readsBefore=reads.filter(row=>["GetRun","ListRuns"].includes(row.action._)).length;
+ const subscriptionsBefore=subscriptions.length;
+ await calls.click();await title(page,selectionTitle("Tool calls open · "));
+ expect(await page.evaluate(()=>history.length)).toBe(before+1);
+ await page.getByRole("button",{name:"Recorded root failure",exact:true}).click();await title(page,errorTitle());
+ expect(await page.evaluate(()=>history.length)).toBe(before+2);
+ await page.keyboard.press("Escape");await title(page,selectionTitle("Tool calls open · "));
+ expect(await page.evaluate(()=>history.length)).toBe(before+3);
+ await page.goBack();await title(page,errorTitle());await page.getByRole("dialog").waitFor();
+ await page.goBack();await title(page,selectionTitle("Tool calls open · "));
+ await page.goBack();await title(page,selectionTitle());
+ await page.goForward();await title(page,selectionTitle("Tool calls open · "));
+ expect(await calls.evaluate(el=>(el as any).__fixtureOwner)).toBe("same graph");
+ expect(reads.filter(row=>["GetRun","ListRuns"].includes(row.action._)).length).toBe(readsBefore);
+ expect(subscriptions.length).toBe(subscriptionsBefore);
+}), browserBudget);
+
+test("Seed run selection canonicalizes invalid and duplicate parameters without extra history", () => fresh(async page => {
+ await page.goto(selectionHref("calls=invalid&error=&error=failed-run"));await title(page,selectionTitle());
+ expect(selectedPath(page.url())).toBe("run/failed-run");
+ await page.goto(selectionHref(`calls=closed&calls=open&error=${encodeURIComponent("x".repeat(513))}`));
+ await title(page,selectionTitle("Tool calls collapsed · "));
+ expect(selectedPath(page.url())).toBe("run/failed-run?calls=closed");
+ await page.goto(selectionHref("error=gone"));await title(page,"Run error not found · Seed · Cyberdeck");
+ await page.getByRole("alert").getByText("The selected run error is not available in this run.").waitFor();
+ expect(selectedPath(page.url())).toBe("run/failed-run?error=gone");
+ expect(await page.getByRole("dialog").count()).toBe(0);
+}), browserBudget);
+
+test("Seed run selection keeps pending tools honest and primary read failures own selected error titles", () => fresh(async page => {
+ await page.goto(href("run/review?calls=open"));await title(page,runTitle("Waiting for tool calls · Tool calls open · "));
+ await page.getByText("Waiting for recorded tool calls…").waitFor();
+ await page.getByRole("button",{name:/^Tool calls/}).click();await title(page,runTitle("Tool calls collapsed · "));
+ for(const [id,label] of [["missing","Run not found"],["denied","Access denied"],["offline","Run unavailable"]]) {
+  await page.goto(href(`run/${id}?calls=open&error=failed-run`));await title(page,`${label} · Seed · Cyberdeck`);
+ }
+}), browserBudget);
+
+test("Seed run selection child graph failures retry at the same URL and retain selected content", () => fresh(async page => {
+ for(const [status,label] of [[403,"Access denied"],[404,"Run error not found"],[503,"Run error unavailable"]] as const) {
+  await page.goto("about:blank");
+  graphStatus=status;await page.goto(selectionHref(`error=${encodeURIComponent(errorChild)}`,"peer-a"));
+  await title(page,`${label} · Seed · Peer A · Cyberdeck`);
+  const link=page.url();graphStatus=200;
+  await page.getByRole("button",{name:"Retry",exact:true}).click();await title(page,errorTitle(true,"peer-a"));
+  expect(page.url()).toBe(link);await page.getByRole("dialog").getByText("Recorded child failure",{exact:true}).waitFor();
+ }
+}), browserBudget);
+
+test("Seed run selection delayed children cannot reopen a closed error or change the next node", () => fresh(async page => {
+ holdGraph=true;await page.goto(selectionHref(`error=${encodeURIComponent(errorChild)}`));
+ await title(page,`Loading error · ${errorChild} · Seed run · Cyberdeck`);
+ await page.evaluate(url=>location.hash=new URL(url).hash,selectionHref("calls=closed","peer-a"));
+ await title(page,selectionTitle("Tool calls collapsed · ","peer-a"));
+ const link=page.url();holdGraph=false;for(const release of pending)release();pending.clear();await page.waitForTimeout(150);
+ expect(page.url()).toBe(link);expect(await page.title()).toBe(selectionTitle("Tool calls collapsed · ","peer-a"));
+ expect(await page.getByRole("dialog").count()).toBe(0);
+}), browserBudget);
+
+test("Seed run selection late error reads cannot cross the authentication gate", () => fresh(async page => {
+ holdGraph=true;await page.goto(selectionHref(`error=${encodeURIComponent(errorChild)}`));
+ while(!pending.size)await page.waitForTimeout(10);
+ await page.route("**/api/fs/list**",route=>route.fulfill({status:401,json:{error:"Locked"}}));
+ await page.evaluate(()=>location.hash="#/files");await title(page,"Locked · Cyberdeck");
+ holdGraph=false;for(const release of pending)release();pending.clear();await page.waitForTimeout(150);
+ expect(await page.title()).toBe("Locked · Cyberdeck");expect(await page.getByRole("dialog").count()).toBe(0);
+}), browserBudget);
+
+test("Seed run selection error popovers fit phone and desktop in both color schemes", () => fresh(async page => {
+ for(const width of [390,1280])for(const colorScheme of ["light","dark"] as const){
+  await page.setViewportSize({width,height:900});await page.emulateMedia({colorScheme});
+  await page.goto(selectionHref("error=failed-run"));await title(page,errorTitle());
+  const dialog=page.getByRole("dialog");await dialog.waitFor();
+  const bounds=await dialog.boundingBox();expect(bounds).not.toBeNull();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);expect(bounds!.x+bounds!.width).toBeLessThanOrEqual(width);
+  await page.waitForTimeout(180);
+  if(process.env.CYBERDECK_NAV_SHOTS)await page.screenshot({path:join(process.env.CYBERDECK_NAV_SHOTS,`run-error-${width}-${colorScheme}.png`)});
+ }
+}), browserBudget);
+
+test("Seed run selection malformed run graphs remain unavailable and retry without showing another graph", () => fresh(async page => {
+ for(const malformed of ["response","array","root"]){
+  await page.goto("about:blank");malformedGraph=malformed;
+  await page.goto(selectionHref(`error=${encodeURIComponent(errorChild)}`));
+  await title(page,"Run error unavailable · Seed · Cyberdeck");
+  expect(await page.getByRole("dialog").count()).toBe(0);
+  const link=page.url();malformedGraph="";
+  await page.getByRole("button",{name:"Retry",exact:true}).click();await title(page,errorTitle(true));
+  expect(page.url()).toBe(link);
+ }
+}), browserBudget);
+
+test("Seed run selection late children cannot reopen an error closed on the same mounted run", () => fresh(async page => {
+ holdGraph=true;await page.goto(selectionHref(`error=${encodeURIComponent(errorChild)}`));
+ await title(page,`Loading error · ${errorChild} · Seed run · Cyberdeck`);
+ const calls=page.getByRole("button",{name:/^Tool calls/});await calls.waitFor();
+ await calls.evaluate(el=>(el as any).__fixtureOwner="same pending graph");
+ await page.evaluate(url=>location.hash=new URL(url).hash,selectionHref("calls=closed"));
+ await title(page,selectionTitle("Tool calls collapsed · "));
+ holdGraph=false;for(const release of pending)release();pending.clear();await page.waitForTimeout(150);
+ expect(await page.title()).toBe(selectionTitle("Tool calls collapsed · "));
+ expect(await page.getByRole("dialog").count()).toBe(0);
+ expect(await calls.evaluate(el=>(el as any).__fixtureOwner)).toBe("same pending graph");
 }), browserBudget);
