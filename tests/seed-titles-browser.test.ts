@@ -19,6 +19,7 @@ let memoryRemoved = false;
 let memoryReadStatus = 200, holdMemoryRead = false;
 let sessionReadStatus = 200, runReadStatus = 200, listReadStatus = 200, holdListRead = false;
 let payloadStatus = 200, holdPayload = false, malformedPayload = "";
+let detailRunStatus = 200, holdDetailRun = false, malformedDetailRun = "";
 let emptySeedLists = false, childEmpty = false;
 let childLists = false, childReadStatus = 200, holdChildRead = false, malformedChild = false;
 let globalPaged = false, globalListStatus = 200, globalFailCursor = "", holdGlobalList = false, malformedList = "";
@@ -45,7 +46,14 @@ const toolEvents = [
  { type: "tool_result", toolCallId: "continued-call", name: "continue_session", output: { sessionId: "two", title: "Recorded successor" } },
  { type: "message", role: "assistant", content: "These are recorded tool results" },
 ];
-const transcriptEvents = (id: string) => id === "contexts" ? ["context-one", "context two/?&", "no-context"].map((eventId, index) => ({
+const workflowId = "workflow /?&";
+const workflowEvents = [
+ { type: "message", role: "user", content: "Inspect a recorded workflow" },
+ { type: "tool_call", id: workflowId, name: "run_workflow", input: { script: "export default async () => 42", brief: "Recorded workflow brief" } },
+ { type: "tool_result", toolCallId: workflowId, name: "run_workflow", output: { runId: "detail-run", output: { recorded: 42 } } },
+ { type: "message", role: "assistant", content: "Workflow completed" },
+];
+const transcriptEvents = (id: string) => id === "workflow-details" ? workflowEvents.map((event, index) => ({id: `workflow-event-${index + 1}`, sessionId: id, seq: index + 1, createdAt: index + 1, event})) : id === "contexts" ? ["context-one", "context two/?&", "no-context"].map((eventId, index) => ({
  id: eventId, sessionId: id, seq: index + 1, createdAt: index + 1,
  event: { type: "message", role: "user", content: `Context fixture message ${index + 1}`, ...(index < 2 ? { contextLines: [`Recorded window ${index + 1}`, `Recorded project ${index + 1}`] } : {}) },
 })) : id === "thinking" ? thinkingEvents.map((event, index) => ({ id: `thinking-event-${index + 1}`, sessionId: id, seq: index + 1, createdAt: index + 1, event })) : id === "tools" ? toolEvents.map((event, index) => ({
@@ -121,6 +129,16 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch
       if (malformed === "array") return ok({ _: "ListRunsResponse", runs: {} });
       if (malformed === "root") return ok({ _: "ListRunsResponse", runs: [{ ...run(errorChild, node), rootRunId: "other-run" }] });
       return ok({ _: "ListRunsResponse", runs: [{ ...run(errorChild, node), rootRunId: "failed-run", parentRunId: "failed-run", depth: 1, planStepId: "child-step", title: `${node} Failed child`, status: "failed", error: { code: "CHILD_ERROR", message: "Recorded child failure", detail: { fixture: "child detail" } } }] });
+    }
+    if (action._ === "GetRun" && id === "detail-run") {
+      const status = detailRunStatus, malformed = malformedDetailRun;
+      if (holdDetailRun) await new Promise<void>(r => pending.add(r));
+      if (status !== 200) return fail(status, "Recorded workflow read failed");
+      if (malformed === "response") return ok({ _: "GetSessionResponse" });
+      if (malformed === "missing") return ok({ _: "GetRunResponse", run: null });
+      if (malformed === "identity") return ok({ _: "GetRunResponse", run: run("wrong-run", node) });
+      if (malformed === "plan") return ok({ _: "GetRunResponse", run: { ...run(id, node), plan: { steps: {} } } });
+      return ok({ _: "GetRunResponse", run: { ...run(id, node), plan: { steps: [{ id: "recorded-step", label: "Recorded plan step", status: "done" }] } } });
     }
     if (action._ === "GetRun" && id === "review" && runReadStatus !== 200) return fail(runReadStatus, "Run read failed");
     if (action._ === "GetSessionEvent") {
@@ -210,7 +228,7 @@ async function fresh(fn:(page:Page)=>Promise<void>){
  page.setDefaultNavigationTimeout(process.env.CYBERDECK_TEST_ORIGIN ? 30000 : 12000);
  await page.route("**/*",route=>new URL(route.request().url()).origin===server.url.origin?route.continue():route.abort());
  try{await fn(page);}catch(e){console.error(JSON.stringify({title:await page.title(),body:(await page.locator("body").innerText()).slice(0,1800),errors,actions:actions.slice(-15)}));throw e;}
- finally{graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
+ finally{detailRunStatus=200;holdDetailRun=false;malformedDetailRun="";graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
 }
 const href=(path:string,node="")=>`${server.url}#/seed?${new URLSearchParams({r:path,...(node?{node}:{})})}`;
 const title=(page:Page,value:string)=>page.waitForFunction(value=>document.title===value,value);
@@ -1516,3 +1534,128 @@ test("Seed run selection late children cannot reopen an error closed on the same
  expect(await page.getByRole("dialog").count()).toBe(0);
  expect(await calls.evaluate(el=>(el as any).__fixtureOwner)).toBe("same pending graph");
 }), browserBudget);
+
+const detailHref = (view: string, id: string, ids: string[], node = "") => {
+ const query = new URLSearchParams(); for (const value of ids) query.append("detail", value);
+ return view === "Seed" ? href(`session/${id}${query.size ? `?${query}` : ""}`, node)
+  : `${server.url}#/term?${new URLSearchParams({ session: `seed-${id}`, ...(node ? { node } : {}) })}${query.size ? `&${query}` : ""}`;
+};
+const detailTitle = (count = 1, node = "local") => `${count ? `${count} tool detail${count === 1 ? "" : "s"} · ` : ""}${node} First conversation · Seed session${node === "local" ? "" : " · Peer B"} · Cyberdeck`;
+for (const view of ["Seed", "Sessions"]) {
+ test(`${view} recorded tool details restore direct links, reload, fresh tabs and parent groups`, () => fresh(async page => {
+  await page.goto(detailHref(view, "thinking", thinkingIds, "peer-b"));
+  await title(page, detailTitle(2, "peer-b"));
+  expect(await page.locator("[data-tool-detail]").count()).toBe(2);
+  expect(await page.locator('[data-thinking-group] button[title="Hide tool calls"]').count()).toBe(2);
+  await page.reload(); await title(page, detailTitle(2, "peer-b"));
+  const link = page.url(); await fresh(async tab => { await tab.goto(link); await title(tab, detailTitle(2, "peer-b")); expect(await tab.locator("[data-tool-detail]").count()).toBe(2); });
+ }), browserBudget);
+
+ test(`${view} recorded tool details push once and keep the transcript and composer through history`, () => fresh(async page => {
+  await page.goto(detailHref(view, "thinking", []));
+  await page.locator('[data-thinking-group]').first().locator('button[title="Show all tool calls"]').click();
+  await page.getByPlaceholder("Untitled session").evaluate(el => el.setAttribute("data-details-owner", "same owner"));
+  const before = await page.evaluate(() => history.length), start = reads.length, streams = subscriptions.length;
+  await page.getByRole("button", { name: "Show tool details", exact: true }).first().click();
+  await page.waitForFunction(() => document.title.startsWith("1 tool detail"));
+  expect(await page.evaluate(() => history.length)).toBe(before + 1);
+  await page.goBack(); expect(await page.locator("[data-tool-detail]").count()).toBe(0);
+  await page.goForward(); await page.locator("[data-tool-detail]").waitFor();
+  expect(await page.getByPlaceholder("Untitled session").getAttribute("data-details-owner")).toBe("same owner");
+  await page.locator('[data-thinking-group]').first().locator('button[title="Hide tool calls"]').click();
+  await title(page, detailTitle(0)); expect(await page.locator("[data-tool-detail]").count()).toBe(0);
+  await page.goBack(); await page.locator("[data-tool-detail]").waitFor();
+  expect(reads.slice(start).filter(({action}) => action._ === "GetSession").length).toBe(0);
+  expect(subscriptions.length).toBe(streams);
+ }), browserBudget);
+
+ test(`${view} recorded tool detail links canonicalize duplicates and bound selections without hiding missing content`, () => fresh(async page => {
+  await page.goto(detailHref(view, "thinking", [thinkingIds[0], thinkingIds[0], "", "bad\u0001"]));
+  await title(page, detailTitle()); expect(await page.locator("[data-tool-detail]").count()).toBe(1);
+  const query = new URLSearchParams(new URL(page.url()).hash.split("?")[1]);
+  const params = view === "Seed" ? new URLSearchParams(query.get("r")!.split("?")[1]) : query;
+  expect(params.getAll("detail")).toEqual([thinkingIds[0]]);
+  await page.goto(detailHref(view, "thinking", ["missing"])); await title(page, "Tool details not found · Seed · Cyberdeck");
+  await page.getByRole("alert").filter({ hasText: "Selected tool details are not in this transcript." }).waitFor();
+  await page.reload(); await title(page, "Tool details not found · Seed · Cyberdeck");
+  await page.goto(detailHref(view, "thinking", Array.from({ length: 105 }, (_, i) => `missing-${i}`)));
+  await title(page, "Tool details not found · Seed · Cyberdeck");
+  await page.locator('button[title="Show all tool calls"]').first().click();
+  expect(await page.getByRole("button", { name: "Show tool details", exact: true }).first().isDisabled()).toBe(true);
+ }), browserBudget);
+
+ test(`${view} recorded workflow details restore the plan and read failures retry at the same URL`, () => fresh(async page => {
+  for (const [status, expected] of [[403, "Access denied"], [404, "Workflow run not found"], [503, "Workflow run unavailable"]] as const) {
+   detailRunStatus = status;
+   await page.goto("about:blank");
+   await page.goto(detailHref(view, "workflow-details", [workflowId], "peer-b"));
+   await title(page, `${expected} · Seed · Peer B · Cyberdeck`);
+   const link = page.url(), before = await page.evaluate(() => history.length);
+   detailRunStatus = 200;
+   await page.getByRole("button", { name: "Retry", exact: true }).click();
+   await title(page, detailTitle(1, "peer-b")); await page.getByText("Recorded plan step", { exact: true }).waitFor();
+   expect(page.url()).toBe(link); expect(await page.evaluate(() => history.length)).toBe(before);
+   await page.reload(); await title(page, detailTitle(1, "peer-b")); await page.getByText("Recorded plan step", { exact: true }).waitFor();
+  }
+ }), browserBudget);
+}
+
+test("Seed recorded workflow late reads cannot reopen closed details, change owners or cross lock", () => fresh(async page => {
+ holdDetailRun = true; detailRunStatus = 503;
+ await page.goto(detailHref("Seed", "workflow-details", [workflowId]));
+ while (!pending.size) await page.waitForTimeout(10);
+ await title(page, "Loading workflow run · Seed · Cyberdeck");
+ await page.getByRole("button", { name: "Hide tool details", exact: true }).click(); await title(page, detailTitle(0));
+ for (const release of pending) release(); pending.clear(); await page.waitForTimeout(100); expect(await page.title()).toBe(detailTitle(0));
+ await page.evaluate(url => location.hash = new URL(url).hash, detailHref("Seed", "thinking", [thinkingIds[0]], "peer-b"));
+ await title(page, detailTitle(1, "peer-b"));
+ await page.route("**/api/fs/list**", route => route.fulfill({status: 401, json: {error: "Locked"}}));
+ await page.getByTestId("nav-files").click(); await title(page, "Locked · Cyberdeck");
+ expect(await page.locator("[data-tool-detail]").count()).toBe(0);
+}), browserBudget);
+
+for (const view of ["Seed", "Sessions"]) test(`${view} recorded workflow invalid reads preserve selection and recover without history`, () => fresh(async page => {
+ for (const malformed of ["response", "missing", "identity", "plan"]) {
+  malformedDetailRun = malformed;
+  await page.goto("about:blank"); await page.goto(detailHref(view, "workflow-details", [workflowId]));
+  await title(page, `Workflow run ${malformed === "missing" ? "not found" : "unavailable"} · Seed · Cyberdeck`);
+  expect(await page.locator("[data-tool-detail]").count()).toBe(1);
+  const link = page.url(), before = await page.evaluate(() => history.length);
+  malformedDetailRun = ""; await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await title(page, detailTitle()); await page.getByText("Recorded plan step", { exact: true }).waitFor();
+  expect(page.url()).toBe(link); expect(await page.evaluate(() => history.length)).toBe(before);
+ }
+}), browserBudget);
+
+for (const view of ["Seed", "Sessions"]) test(`${view} recorded workflow late failures cannot replace another node or locked screen`, () => fresh(async page => {
+ holdDetailRun = true; detailRunStatus = 403;
+ await page.goto(detailHref(view, "workflow-details", [workflowId]));
+ while (!pending.size) await page.waitForTimeout(10);
+ await title(page, "Loading workflow run · Seed · Cyberdeck");
+ await page.evaluate(link => location.hash = new URL(link).hash, detailHref(view, "thinking", [thinkingIds[0]], "peer-b"));
+ await title(page, detailTitle(1, "peer-b"));
+ for (const release of pending) release(); pending.clear(); await page.waitForTimeout(100);
+ expect(await page.title()).toBe(detailTitle(1, "peer-b"));
+ // Start another outstanding read on the other owner, then authenticate away.
+ await page.evaluate(link => location.hash = new URL(link).hash, detailHref(view, "workflow-details", [workflowId], "peer-b"));
+ while (!pending.size) await page.waitForTimeout(10);
+ await title(page, "Loading workflow run · Seed · Peer B · Cyberdeck");
+ await page.route("**/api/fs/list**", route => route.fulfill({status:401,json:{error:"Locked"}}));
+ await page.getByTestId("nav-files").click(); await title(page,"Locked · Cyberdeck");
+ for (const release of pending) release(); pending.clear(); await page.waitForTimeout(100);
+ expect(await page.title()).toBe("Locked · Cyberdeck");
+ expect(await page.locator("[data-tool-detail]").count()).toBe(0);
+}), browserBudget);
+
+for (const view of ["Seed", "Sessions"]) test(`${view} recorded tool detail message shares preserve canonical details and node`, () => fresh(async page => {
+ await page.goto(detailHref(view,"thinking",[thinkingIds[0]],"peer-b"));
+ await title(page,detailTitle(1,"peer-b"));
+ await page.getByRole("button",{name:"Show markdown sent to the LLM"}).first().click();
+ const dialog=page.getByRole("dialog").filter({hasText:"Message details"}); await dialog.waitFor();
+ const shared=new URL(await dialog.locator("code").innerText()),query=new URLSearchParams(shared.hash.split("?")[1]);
+ expect(query.get("node")).toBe("peer-b");
+ const nested=view==="Seed"?new URLSearchParams(query.get("r")!.split("?")[1]):query;
+ expect(nested.getAll("detail")).toEqual([thinkingIds[0]]);
+ expect(nested.has("panel")).toBe(false);
+ await fresh(async tab=>{await tab.goto(shared.href);await tab.locator("[data-tool-detail]").waitFor();expect(await tab.title()).toContain("peer-b First conversation");});
+}),browserBudget);

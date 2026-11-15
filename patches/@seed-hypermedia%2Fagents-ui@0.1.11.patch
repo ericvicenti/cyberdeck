@@ -1,80 +1,5 @@
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-24020709e73d0033 b/.bun-tag-24020709e73d0033
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-2889b0eabd97381c b/.bun-tag-2889b0eabd97381c
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-2ee0796f63137253 b/.bun-tag-2ee0796f63137253
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-31cae14f4ee4ac5d b/.bun-tag-31cae14f4ee4ac5d
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-32ed8211bf92219e b/.bun-tag-32ed8211bf92219e
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-35d5b4bd31407bad b/.bun-tag-35d5b4bd31407bad
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-366d721dc707f004 b/.bun-tag-366d721dc707f004
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-4c52938f6f02834b b/.bun-tag-4c52938f6f02834b
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-4c9ddf051c1c62cb b/.bun-tag-4c9ddf051c1c62cb
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-67b53ac738766bb4 b/.bun-tag-67b53ac738766bb4
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-7819d7d138553686 b/.bun-tag-7819d7d138553686
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-8243ced5353d1213 b/.bun-tag-8243ced5353d1213
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-98713cec4470d7a8 b/.bun-tag-98713cec4470d7a8
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-9af0aefc1aad43f0 b/.bun-tag-9af0aefc1aad43f0
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-9cd7e73c2f516739 b/.bun-tag-9cd7e73c2f516739
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-a281be0bc8da224b b/.bun-tag-a281be0bc8da224b
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-b80caf15d7670f19 b/.bun-tag-b80caf15d7670f19
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-c7ffd96784dd358f b/.bun-tag-c7ffd96784dd358f
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-d39d25020e83b501 b/.bun-tag-d39d25020e83b501
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-d8da1a769e402f88 b/.bun-tag-d8da1a769e402f88
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-df8fa8b4397e7a70 b/.bun-tag-df8fa8b4397e7a70
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-ebba96f16ffa0d14 b/.bun-tag-ebba96f16ffa0d14
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-ef846d762a1b560f b/.bun-tag-ef846d762a1b560f
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-f33e2f4cb7e83dc0 b/.bun-tag-f33e2f4cb7e83dc0
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/@seed-hypermedia/agents-ui/.bun-tag-f9f119ea13884e4d b/.bun-tag-f9f119ea13884e4d
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/chunks/index-ZHWGA37c.js b/chunks/index-ZHWGA37c.js
-index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e0631dc8c09 100644
+index 46d2a63..50766b5 100644
 --- a/chunks/index-ZHWGA37c.js
 +++ b/chunks/index-ZHWGA37c.js
 @@ -21335,10 +21335,15 @@ const hue = [
@@ -95,7 +20,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
  }), Rq = j({
    key: ne("agent"),
    agentId: $(),
-@@ -21346,15 +21351,27 @@ const hue = [
+@@ -21346,15 +21351,28 @@ const hue = [
    tab: Rt(["sessions", "triggers", "memory", "tools", "prompt", "collaborators", "settings"]).optional(),
    triggerId: $().optional(),
    /** Memory tab: the file to open, so a `~/memory/…` link in a tool row lands on that file. */
@@ -107,6 +32,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
    key: ne("agent-session"),
    sessionId: $(),
 +  expandedThinking: $().array().max(100).optional(),
++  expandedDetails: $().array().max(100).optional(),
    serverUrl: $().optional(),
 -  agentId: $().optional()
 +  agentId: $().optional(),
@@ -125,7 +51,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
    serverUrl: $().optional(),
    agentId: $().optional()
  }), Xue = j({
-@@ -22466,20 +22483,20 @@ function SN(e, t) {
+@@ -22466,20 +22484,20 @@ function SN(e, t) {
    if (typeof e != "string" && e.key === "notifications")
      return `/hm/notifications${e.view ? `?view=${e.view}` : ""}`;
    if (typeof e != "string" && e.key === "agents")
@@ -142,7 +68,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
    if (typeof e != "string" && e.key === "agent-session") {
      const s = [];
 -    return e.serverUrl && s.push(`server=${encodeURIComponent(e.serverUrl)}`), e.agentId && s.push(`agent=${encodeURIComponent(e.agentId)}`), `/hm/agents/session/${encodeURIComponent(e.sessionId)}${s.length ? `?${s.join("&")}` : ""}`;
-+    return e.serverUrl && s.push(`server=${encodeURIComponent(e.serverUrl)}`), e.agentId && s.push(`agent=${encodeURIComponent(e.agentId)}`), s.push(...seedThinkingIds(e.expandedThinking || []).map(id => `thinking=${encodeURIComponent(id)}`)), e.panel && s.push(`panel=${e.panel}`), e.eventId && s.push(`event=${encodeURIComponent(e.eventId)}`), e.panel === "tool" && e.toolId && s.push(`tool=${encodeURIComponent(e.toolId)}`), e.panel === "tool" && e.toolId && ["input", "output", "both"].includes(e.fullPayload) && s.push(`full=${e.fullPayload}`), `/hm/agents/session/${encodeURIComponent(e.sessionId)}${s.length ? `?${s.join("&")}` : ""}`;
++    return e.serverUrl && s.push(`server=${encodeURIComponent(e.serverUrl)}`), e.agentId && s.push(`agent=${encodeURIComponent(e.agentId)}`), s.push(...seedThinkingIds(e.expandedThinking || []).map(id => `thinking=${encodeURIComponent(id)}`)), s.push(...seedThinkingIds(e.expandedDetails || []).map(id => `detail=${encodeURIComponent(id)}`)), e.panel && s.push(`panel=${e.panel}`), e.eventId && s.push(`event=${encodeURIComponent(e.eventId)}`), e.panel === "tool" && e.toolId && s.push(`tool=${encodeURIComponent(e.toolId)}`), e.panel === "tool" && e.toolId && ["input", "output", "both"].includes(e.fullPayload) && s.push(`full=${e.fullPayload}`), `/hm/agents/session/${encodeURIComponent(e.sessionId)}${s.length ? `?${s.join("&")}` : ""}`;
    }
    if (typeof e != "string" && e.key === "agent-run") {
      const s = [];
@@ -151,7 +77,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
    }
    if (typeof e != "string" && e.key === "site-settings")
      return t?.hmUrlHref ? $v(e) : Ob(e, { hostname: null, originHomeId: t?.originHomeId });
-@@ -22709,11 +22726,33 @@ function yde(e) {
+@@ -22709,11 +22727,33 @@ function yde(e) {
    }, t;
  }
  const vde = Rq.shape.tab.unwrap().options;
@@ -186,7 +112,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
    }
    if (r[0] === "agent" && r[1]) {
      const i = t.get("tab"), s = vde.find((o) => o === i);
-@@ -22723,20 +22762,32 @@ function Bq(e, t) {
+@@ -22723,20 +22763,33 @@ function Bq(e, t) {
        serverUrl: t.get("server") || void 0,
        tab: s,
        triggerId: t.get("trigger") || void 0,
@@ -200,6 +126,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      key: "agent-session",
      sessionId: r[1],
 +    expandedThinking: seedThinkingIds(t.getAll("thinking")),
++    expandedDetails: seedThinkingIds(t.getAll("detail")),
      serverUrl: t.get("server") || void 0,
 -    agentId: t.get("agent") || void 0
 +    agentId: t.get("agent") || void 0,
@@ -222,7 +149,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
  }
  function bde(e) {
    return /^https?:\/\/[^/?#]+\/hm\/agents(?:[/?#]|$)/.test(e);
-@@ -69610,13 +69661,15 @@ function fDe(e) {
+@@ -69610,13 +69663,15 @@ function fDe(e) {
    const n = e.match(/<trigger_instructions>\n?([\s\S]*?)\n?<\/trigger_instructions>/)?.[1]?.trim();
    return n || void 0;
  }
@@ -235,48 +162,48 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      )}`;
  }
 -function xv(e, t, n, r) {
-+function xv(e, t, n, r, routeUrl, expandedThinking) {
-+  if (routeUrl) return routeUrl({ key: "agent-session", serverUrl: e, agentId: t, sessionId: n, eventId: r, expandedThinking });
++function xv(e, t, n, r, routeUrl, expandedThinking, expandedDetails) {
++  if (routeUrl) return routeUrl({ key: "agent-session", serverUrl: e, agentId: t, sessionId: n, eventId: r, expandedThinking, expandedDetails });
    const i = _P(e, t, n);
    return i ? `${i}#event=${encodeURIComponent(r)}` : void 0;
  }
-@@ -69696,7 +69749,7 @@ function sQ(e, t) {
+@@ -69696,7 +69751,7 @@ function sQ(e, t) {
            eventId: u.id,
            sessionId: u.sessionId,
            seq: u.seq,
 -          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id)
-+          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id, t.routeUrl, t.expandedThinking)
++          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id, t.routeUrl, t.expandedThinking, t.expandedDetails)
          }
        });
        continue;
-@@ -69723,7 +69776,7 @@ function sQ(e, t) {
+@@ -69723,7 +69778,7 @@ function sQ(e, t) {
            eventId: u.id,
            sessionId: u.sessionId,
            seq: u.seq,
 -          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id)
-+          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id, t.routeUrl, t.expandedThinking)
++          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id, t.routeUrl, t.expandedThinking, t.expandedDetails)
          }
        };
        n.push(x), r.set(y.id, x);
-@@ -69760,7 +69813,7 @@ function sQ(e, t) {
+@@ -69760,7 +69815,7 @@ function sQ(e, t) {
              eventId: u.id,
              sessionId: u.sessionId,
              seq: u.seq,
 -            shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id)
-+            shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id, t.routeUrl, t.expandedThinking)
++            shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id, t.routeUrl, t.expandedThinking, t.expandedDetails)
            }
          };
          n.push(w), r.set(y.toolCallId, w);
-@@ -69794,7 +69847,7 @@ function sQ(e, t) {
+@@ -69794,7 +69849,7 @@ function sQ(e, t) {
            eventId: u.id,
            sessionId: u.sessionId,
            seq: u.seq,
 -          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id)
-+          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id, t.routeUrl, t.expandedThinking)
++          shareUrl: xv(t.serverUrl, t.agentId, t.sessionId, u.id, t.routeUrl, t.expandedThinking, t.expandedDetails)
          }
        });
        continue;
-@@ -70669,7 +70722,8 @@ function Aa(e, t, n) {
+@@ -70669,7 +70724,8 @@ function Aa(e, t, n) {
          accountUid: t,
          action: { _: "ListModelProviders", ...n ? { agentId: n } : {} }
        });
@@ -286,7 +213,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
        return r.providers;
      },
      enabled: !!e && !!t,
-@@ -70735,7 +70789,8 @@ function $P(e, t, n) {
+@@ -70735,7 +70791,8 @@ function $P(e, t, n) {
          accountUid: t,
          action: { _: "ListSigningIdentities", ...n ? { agentId: n } : {} }
        });
@@ -296,7 +223,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
        return r.identities;
      },
      enabled: !!e && !!t,
-@@ -71178,8 +71233,17 @@ async function wQ(e, t, n) {
+@@ -71178,8 +71235,17 @@ async function wQ(e, t, n) {
    if (r._ !== "GetAgentResponse") throw new Error("Unexpected GetAgent response");
    return Gt().setQueryData(["agents", "detail", e, t, n], r), r;
  }
@@ -315,7 +242,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      queryKey: ["agents", "detail", e, t, n],
      queryFn: async () => {
        if (!e || !t || !n) return null;
-@@ -71188,12 +71252,15 @@ function zP(e, t, n) {
+@@ -71188,12 +71254,15 @@ function zP(e, t, n) {
        return r;
      },
      enabled: !!e && !!t && !!n,
@@ -332,7 +259,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
  }
  function xQ(e, t, n, { excludeTriggered: r = !1 } = {}) {
    return Ele({
-@@ -71240,7 +71307,7 @@ function kQ(e, t, n) {
+@@ -71240,7 +71309,7 @@ function kQ(e, t, n) {
    });
  }
  function tMe(e, t, n) {
@@ -341,7 +268,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      queryKey: ["agents", "trigger", e, t, n],
      queryFn: async () => {
        if (!e || !t || !n) return null;
-@@ -71249,9 +71316,13 @@ function tMe(e, t, n) {
+@@ -71249,9 +71318,13 @@ function tMe(e, t, n) {
        return r;
      },
      enabled: !!e && !!t && !!n,
@@ -355,7 +282,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
  }
  function nMe(e, t, n, r) {
    return Pr({
-@@ -71268,6 +71339,8 @@ function nMe(e, t, n, r) {
+@@ -71268,6 +71341,8 @@ function nMe(e, t, n, r) {
          return s;
        },
        enabled: !!e && !!t && !!n,
@@ -364,7 +291,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
        retry: !1,
        useErrorBoundary: !1
      }))
-@@ -71426,7 +71499,8 @@ function lMe(e, t) {
+@@ -71426,7 +71501,8 @@ function lMe(e, t) {
    });
  }
  function SQ(e, t, n, r) {
@@ -374,7 +301,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      queryKey: ["agents", "memory", e, t, n, "file", r],
      queryFn: async () => {
        if (!e || !t || !n || !r) return null;
-@@ -71442,6 +71516,14 @@ function SQ(e, t, n, r) {
+@@ -71442,6 +71518,14 @@ function SQ(e, t, n, r) {
      retry: !1,
      useErrorBoundary: !1
    });
@@ -389,7 +316,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
  }
  function cMe(e, t) {
    return ft({
-@@ -71649,7 +71731,7 @@ function yMe(e, t) {
+@@ -71649,7 +71733,7 @@ function yMe(e, t) {
    });
  }
  function Rg(e, t, n) {
@@ -398,7 +325,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      queryKey: ["agents", "session", e, t, n],
      queryFn: async () => {
        if (!e || !t || !n) return null;
-@@ -71658,9 +71740,13 @@ function Rg(e, t, n) {
+@@ -71658,9 +71742,13 @@ function Rg(e, t, n) {
        return r;
      },
      enabled: !!e && !!t && !!n,
@@ -412,7 +339,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
  }
  function vMe(e, t, n, r, i) {
    return qt({
-@@ -71671,7 +71757,7 @@ function vMe(e, t, n, r, i) {
+@@ -71671,7 +71759,7 @@ function vMe(e, t, n, r, i) {
          accountUid: t,
          action: { _: "GetSessionEvent", sessionId: n, seq: r }
        });
@@ -421,7 +348,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
        return s.event;
      },
      enabled: i && !!e && !!t && !!n && r !== void 0,
-@@ -71680,85 +71766,92 @@ function vMe(e, t, n, r, i) {
+@@ -71680,85 +71768,92 @@ function vMe(e, t, n, r, i) {
      useErrorBoundary: !1
    });
  }
@@ -589,7 +516,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
  function bMe(e, t, n, r) {
    const i = r?.enabled !== !1 && !!e && !!t && !!n;
    return qt({
-@@ -71766,16 +71859,17 @@ function bMe(e, t, n, r) {
+@@ -71766,30 +71861,42 @@ function bMe(e, t, n, r) {
      queryFn: async () => {
        if (!e || !t || !n) return [];
        const s = await Be({ serverUrl: e, accountUid: t, action: { _: "ListSessions", parentSessionId: n } });
@@ -610,7 +537,20 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      queryKey: ["agents", "runs", "run", e, t, n],
      queryFn: async () => {
        if (!e || !t || !n) return null;
-@@ -71787,9 +71881,13 @@ function Dy(e, t, n) {
+       const r = await Be({ serverUrl: e, accountUid: t, action: { _: "GetRun", runId: n } });
+-      if (r._ !== "GetRunResponse") throw new Error("Unexpected GetRun response");
+-      return r.run;
++      if (r._ !== "GetRunResponse") throw Object.assign(new Error("Invalid run response"), { status: 502 });
++      const run = r.run;
++      if (run == null) throw Object.assign(new Error("Run not found"), { status: 404 });
++      if (run.id !== n || typeof run.rootRunId !== "string" || !run.rootRunId || typeof run.title !== "string" || typeof run.status !== "string" || typeof run.kind !== "string"
++        || run.sourceText != null && typeof run.sourceText !== "string"
++        || run.error != null && (typeof run.error.message !== "string" || run.error.stack != null && typeof run.error.stack !== "string" || run.error.code != null && typeof run.error.code !== "string")
++        || run.plan != null && (!Array.isArray(run.plan.steps) || run.plan.steps.some(step => !step || typeof step.id !== "string" || typeof step.label !== "string" || typeof step.status !== "string")))
++        throw Object.assign(new Error("Invalid run content"), { status: 502 });
++      return run;
+     },
+     enabled: !!e && !!t && !!n,
      // Run changes stream over the WebSocket; this slow poll is only a safety net while the run is
      // live, in case an event is dropped. A finished run never changes again, so it stops entirely.
      refetchInterval: (r) => r && IQ.includes(r.status) ? !1 : cQ,
@@ -624,7 +564,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
  }
  const IQ = ["succeeded", "failed", "canceled"];
  function K0(e, t, n) {
-@@ -71817,7 +71915,7 @@ function CQ(e, t, n) {
+@@ -71817,7 +71924,7 @@ function CQ(e, t, n) {
      queryFn: async () => {
        if (!e || !t || !n) return [];
        const r = await Be({ serverUrl: e, accountUid: t, action: { _: "ListRuns", rootRunId: n } });
@@ -633,7 +573,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
        return r.runs;
      },
      enabled: !!e && !!t && !!n,
-@@ -73292,10 +73390,29 @@ function $F(e) {
+@@ -73292,10 +73399,29 @@ function $F(e) {
      }
    ];
  }
@@ -663,7 +603,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
    async function s(o) {
      try {
        if ((await n.mutateAsync(o))._ !== "DeleteModelProviderResponse") throw new Error("Unexpected delete response");
-@@ -73310,7 +73427,9 @@ function KQ({
+@@ -73310,7 +73436,9 @@ function KQ({
        /* @__PURE__ */ f(wn, { children: "Model providers connect your agents to AI models like Claude, GPT, and Gemini. Add a provider to make its models available when configuring agents." })
      ] }),
      /* @__PURE__ */ A("div", { className: "grid gap-3", children: [
@@ -674,7 +614,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
          /* @__PURE__ */ A("div", { className: "flex items-center justify-between gap-3", children: [
            /* @__PURE__ */ A("div", { className: "flex items-center gap-3", children: [
              /* @__PURE__ */ f(My, { type: o.type, className: "text-muted-foreground size-5" }),
-@@ -73346,7 +73465,7 @@ function KQ({
+@@ -73346,7 +73474,7 @@ function KQ({
            ) : r.data?.subscriptionAuth === !0 ? /* @__PURE__ */ f(W, { size: "sm", color: "muted", children: "Subscription sign-in is only available from the desktop app. Sign in again there, or delete this provider and use an API key instead." }) : /* @__PURE__ */ f(W, { size: "sm", color: "muted", children: "This server no longer offers subscription sign-in. Delete this provider and use an API key instead." })
          ] }) : null
        ] }, o.id)),
@@ -683,7 +623,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      ] }),
      /* @__PURE__ */ f("div", { className: "flex justify-end gap-2", children: /* @__PURE__ */ A(fe, { onClick: () => i.open(e), children: [
        /* @__PURE__ */ f(fr, { className: "size-4" }),
-@@ -73498,6 +73617,7 @@ function WQ({
+@@ -73498,6 +73626,7 @@ function WQ({
    input: e
  }) {
    const t = $P(e.serverUrl, e.selectedAccountId), n = qP(e.serverUrl, e.selectedAccountId), r = FDe(e.serverUrl, e.selectedAccountId), i = Or(), s = Qi(), o = _y(e.serverUrl, s.data), a = Ot(iBe), l = Ot(oBe, { isAlert: !0 }), [c, d] = ee({}), [u, h] = ee({}), [m, p] = ee(!1), [g, y] = ee(null), v = ge(null);
@@ -691,7 +631,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
    xe(() => {
      const I = {};
      for (const k of t.data || [])
-@@ -73563,7 +73683,9 @@ function WQ({
+@@ -73563,7 +73692,9 @@ function WQ({
        /* @__PURE__ */ f(wn, { children: "To give an agent access to write content, invite these accounts as collaborators on your spaces or documents." })
      ] }),
      /* @__PURE__ */ A("div", { className: "grid gap-3", children: [
@@ -702,7 +642,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
          aBe,
          {
            identity: I,
-@@ -73582,7 +73704,7 @@ function WQ({
+@@ -73582,7 +73713,7 @@ function WQ({
          },
          I.id
        )),
@@ -711,7 +651,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      ] }),
      /* @__PURE__ */ A("div", { className: "flex justify-end gap-2", children: [
        /* @__PURE__ */ A(fe, { variant: "outline", onClick: () => p(!0), children: [
-@@ -74541,6 +74663,41 @@ function yBe(e) {
+@@ -74541,6 +74672,41 @@ function yBe(e) {
    if (e?.length)
      return e.some((t) => t.status === "error") ? "error" : e.some((t) => t.status === "streaming") ? "streaming" : "idle";
  }
@@ -753,7 +693,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
  function vBe({
    serverUrl: e,
    accountUid: t,
-@@ -74548,15 +74705,23 @@ function vBe({
+@@ -74548,15 +74714,23 @@ function vBe({
    childSessionCount: r,
    compact: i,
    selectedSessionId: s,
@@ -779,7 +719,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
          className: `text-muted-foreground hover:text-foreground flex items-center gap-1.5 self-start rounded px-1 py-0.5 max-sm:min-h-10 ${u}`,
          onClick: (h) => {
            h.stopPropagation(), l((m) => !m);
-@@ -74673,7 +74838,7 @@ function $y(e, t, n, r, i) {
+@@ -74673,7 +74847,7 @@ function $y(e, t, n, r, i) {
      r && !l[r.id] && (l[r.id] = r);
      for (const c of Object.values(o.runs)) l[c.id] = c;
      return l;
@@ -788,7 +728,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
  }
  function nx(e, t) {
    const n = (r) => {
-@@ -74769,6 +74934,7 @@ function SBe(e) {
+@@ -74769,6 +74943,7 @@ function SBe(e) {
    const t = /workflow\.js:(\d+)/.exec(e);
    return t ? Number(t[1]) : void 0;
  }
@@ -796,7 +736,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
  function c_({
    run: e,
    error: t,
-@@ -74776,12 +74942,14 @@ function c_({
+@@ -74776,12 +74951,14 @@ function c_({
    renderToolPart: r,
    onOpen: i
  }) {
@@ -812,7 +752,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      /* @__PURE__ */ f(Pd, { asChild: !0, children: /* @__PURE__ */ f(
        "span",
        {
-@@ -74993,8 +75161,14 @@ function u_({
+@@ -74993,8 +75170,14 @@ function u_({
        onCancel: l ? () => l(T.id) : void 0,
        cancelPending: c
      }
@@ -829,7 +769,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      r?.steps.length || v.length ? /* @__PURE__ */ A("div", { className: "flex min-w-0 flex-col gap-0.5", children: [
        (r?.steps ?? []).flatMap((T) => {
          const O = y.get(T.id) ?? [], M = O.length > 1, U = M ? void 0 : O[0], F = M ? O : [];
-@@ -75023,7 +75197,7 @@ function u_({
+@@ -75023,7 +75206,7 @@ function u_({
        }),
        v.map((T) => /* @__PURE__ */ f(pe.Fragment, { children: k(T) }, T.id))
      ] }) : null,
@@ -838,7 +778,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
        /* @__PURE__ */ A(
          "button",
          {
-@@ -75038,7 +75212,7 @@ function u_({
+@@ -75038,7 +75221,7 @@ function u_({
            ]
          }
        ),
@@ -847,7 +787,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      ] }) : null
    ] });
  }
-@@ -75114,9 +75288,16 @@ const uK = pe.memo(function({
+@@ -75114,9 +75297,16 @@ const uK = pe.memo(function({
    accountUid: s,
    agentId: o
  }) {
@@ -867,7 +807,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
    );
    return /* @__PURE__ */ f(CP.Provider, { value: p, children: /* @__PURE__ */ A("div", { className: "group/message my-1.5", "data-message-kind": c ? "system" : d ? "user" : "assistant", children: [
      c ? /* @__PURE__ */ f(
-@@ -75309,8 +75490,18 @@ function _Be({
+@@ -75309,8 +75499,18 @@ function _Be({
    agentId: s,
    sessionId: o
  }) {
@@ -875,20 +815,20 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
 -  return /* @__PURE__ */ A("div", { className: "my-1.5 mr-6", "data-thinking-group": c ? "active" : "done", children: [
 +  const route = Xye(), navigate = N8e(), [local, setLocal] = ee(false);
 +  const owned = route.key === "agent-session" && route.sessionId === o;
-+  const id = e[0]?.id, a = owned ? !!route.expandedThinking?.includes(id) : local;
++  const id = e[0]?.id, a = owned ? !!route.expandedThinking?.includes(id) || e.some(item => route.expandedDetails?.includes(item.id)) : local;
 +  const l = update => {
 +    const open = typeof update === "function" ? update(a) : update;
 +    if (!owned) return setLocal(open);
 +    if (open === a || open && (route.expandedThinking || []).length >= 100) return;
 +    const expandedThinking = seedThinkingIds(open ? [...(route.expandedThinking || []), id] : (route.expandedThinking || []).filter(value => value !== id));
-+    navigate({ ...route, expandedThinking });
++    navigate({ ...route, expandedThinking, ...(!open ? { expandedDetails: (route.expandedDetails || []).filter(id => !e.some(item => item.id === id)) } : {}) });
 +  };
 +  const c = t || e.some(PP), d = ge(Yv(r)), u = e[0]?.stepStartedAt ?? e[0]?.calledAt ?? d.current, h = Cy(r, c), m = c ? void 0 : iDe(e), p = c ? Math.max(0, h - u) : m !== void 0 ? Math.max(0, m - u) : void 0, g = c ? `Thinking (${n_(p ?? 0)})` : p !== void 0 ? `Thought for ${dBe(p)}` : "Finished thinking", y = a ? e : c ? e.slice(-1) : [], v = a ? Rz : fi;
 +  return /* @__PURE__ */ A("div", { className: "my-1.5 mr-6", "data-thinking-group": c ? "active" : "done", "data-thinking-id": id, children: [
      y.length ? /* @__PURE__ */ f("div", { children: y.map((x, w) => {
        const I = a ? oDe(x, e[e.indexOf(x) - 1]) : void 0;
        return /* @__PURE__ */ A(fT, { children: [
-@@ -75334,6 +75525,7 @@ function _Be({
+@@ -75334,6 +75534,7 @@ function _Be({
          type: "button",
          "aria-expanded": a,
          title: a ? "Hide tool calls" : "Show all tool calls",
@@ -896,7 +836,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
          onClick: () => l((x) => !x),
          className: "text-muted-foreground hover:text-foreground hover:bg-muted/60 my-2 flex w-full items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs select-none",
          children: [
-@@ -75366,7 +75558,7 @@ function OBe({ durationMs: e, first: t }) {
+@@ -75366,7 +75567,7 @@ function OBe({ durationMs: e, first: t }) {
    );
  }
  function RBe({ item: e }) {
@@ -905,7 +845,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
    return /* @__PURE__ */ A(
      "div",
      {
-@@ -75408,7 +75600,7 @@ function RBe({ item: e }) {
+@@ -75408,7 +75609,7 @@ function RBe({ item: e }) {
    );
  }
  function DBe({ item: e, serverUrl: t }) {
@@ -914,7 +854,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
    return /* @__PURE__ */ A(ze, { children: [
      /* @__PURE__ */ f(
        GRe,
-@@ -75424,9 +75616,10 @@ function DBe({ item: e, serverUrl: t }) {
+@@ -75424,9 +75625,10 @@ function DBe({ item: e, serverUrl: t }) {
  function MBe({
    item: e,
    open: t,
@@ -927,7 +867,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
    return /* @__PURE__ */ f(ya, { open: t, onOpenChange: n, children: /* @__PURE__ */ A(va, { className: "max-h-[85vh] w-[min(44rem,calc(100vw-2rem))]", children: [
      /* @__PURE__ */ A(Ad, { children: [
        /* @__PURE__ */ A(Ut, { children: [
-@@ -75451,11 +75644,13 @@ function MBe({
+@@ -75451,11 +75653,13 @@ function MBe({
        ] }) : null,
        /* @__PURE__ */ A("div", { className: "space-y-1", children: [
          /* @__PURE__ */ f("div", { className: "text-muted-foreground text-[10px] font-medium tracking-[0.18em] uppercase", children: "Call" }),
@@ -943,7 +883,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
        ] })
      ] })
    ] }) });
-@@ -75497,7 +75692,36 @@ function dK(e, t) {
+@@ -75497,7 +75701,36 @@ function dK(e, t) {
    });
  }
  function LBe({ lines: e }) {
@@ -981,7 +921,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      /* @__PURE__ */ f(Pd, { asChild: !0, children: /* @__PURE__ */ A(
        "button",
        {
-@@ -75510,7 +75734,7 @@ function LBe({ lines: e }) {
+@@ -75510,7 +75743,7 @@ function LBe({ lines: e }) {
          ]
        }
      ) }),
@@ -990,11 +930,31 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
        /* @__PURE__ */ f("div", { className: "text-muted-foreground mb-2 text-xs font-medium", children: "Context shared with the agent" }),
        /* @__PURE__ */ f("pre", { className: "bg-muted max-h-64 overflow-auto rounded-md p-2 font-mono text-[11px] whitespace-pre-wrap", children: e.join(`
  `) })
-@@ -75688,12 +75912,88 @@ function qBe({ args: e }) {
+@@ -75688,12 +75921,108 @@ function qBe({ args: e }) {
      ] }, s.label)) })
    ] });
  }
 +// Navigable inspectors describe recorded content; opening one never executes a tool.
++const SeedDetailScope = pe.createContext(null);
++function useSeedToolDetails(item, sessionId) {
++  const route = Xye(), navigate = N8e(), [local, setLocal] = ee(false);
++  const owned = route.key === "agent-session" && route.sessionId === sessionId;
++  const open = owned ? !!route.expandedDetails?.includes(item.id) : local;
++  return [open, update => {
++    const next = typeof update === "function" ? update(open) : update;
++    if (!owned) return setLocal(next);
++    if (next === open || next && (route.expandedDetails || []).length >= 100) return;
++    navigate({ ...route, expandedDetails: seedThinkingIds(next ? [...(route.expandedDetails || []), item.id] : (route.expandedDetails || []).filter(id => id !== item.id)) });
++  }, owned && !open && (route.expandedDetails || []).length >= 100, owned ? { sessionId: route.sessionId, detailId: item.id } : null];
++}
++function SeedDetailSelection({ rows, serverUrl, accountUid, sessionId }) {
++  const route = Xye(), host = T8e(), selected = route.expandedDetails || [], path = JSON.stringify(selected);
++  const available = rows.flatMap(row => row.message && row.message.role === "assistant" && row.message.actor !== "system" ? FBe(row.message).filter(item => item.type === "tool" && !["status", "continue_session"].includes(item.name)).map(item => item.id) : []);
++  const missing = selected.filter(id => !available.includes(id));
++  const error = Ce(() => missing.length ? { status: 404 } : undefined, [JSON.stringify(missing)]);
++  xe(() => { if (selected.length) host.onReadOutcome?.({ kind: "session-details", serverUrl, accountUid, sessionId, path, error }); }, [host, serverUrl, accountUid, sessionId, path, error]);
++  return missing.length ? /* @__PURE__ */ f(W, { role: "alert", children: "Selected tool details are not in this transcript." }) : null;
++}
 +function useSeedToolInspector(item, sessionId) {
 +  const route = Xye(), navigate = N8e(), scope = pe.useContext(CP);
 +  const [local, setLocal] = ee(false);
@@ -1081,7 +1041,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
    return /* @__PURE__ */ f(ya, { open: t, onOpenChange: n, children: /* @__PURE__ */ A(va, { className: "max-h-[85vh] w-[min(44rem,calc(100vw-2rem))]", children: [
      /* @__PURE__ */ A(Ad, { children: [
        /* @__PURE__ */ f(Ut, { children: e.name }),
-@@ -75715,12 +76015,12 @@ function hK({
+@@ -75715,12 +76044,12 @@ function hK({
        /* @__PURE__ */ A("div", { className: "min-h-0 space-y-1", children: [
          /* @__PURE__ */ f("div", { className: "text-muted-foreground text-[10px] font-medium tracking-[0.18em] uppercase", children: "Input" }),
          /* @__PURE__ */ f("pre", { className: "bg-muted max-h-48 overflow-auto rounded-xl p-3 text-[11px] whitespace-pre-wrap", children: ca(a) }),
@@ -1096,16 +1056,64 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
        ] })
      ] })
    ] }) });
-@@ -76389,7 +76689,7 @@ function Lg({
+@@ -76340,7 +76669,11 @@ function f3e({
+   seed: r
+ }) {
+   const i = Ul(), s = Dy(e, t, r ? void 0 : n), o = r ?? s.data ?? void 0, a = !!o && !Tr(o.status), { runsById: l, liveState: c } = $y(e, t, o?.rootRunId, o, a), d = o ? l[o.id] ?? o : void 0, u = Ce(() => d ? nx(l, d.id) : [], [l, d?.id]);
+-  return d ? /* @__PURE__ */ A("div", { className: "flex min-w-0 flex-col gap-2", children: [
++  const detailScope = pe.useContext(SeedDetailScope), host = T8e();
++  xe(() => {
++    if (detailScope) host.onReadOutcome?.({ kind: "session-detail-read", sessionId: detailScope.sessionId, path: detailScope.detailId, serverUrl: e, accountUid: t, pending: !d && !s.error, error: s.error });
++  }, [host, detailScope?.sessionId, detailScope?.detailId, e, t, d, s.error]);
++  return s.error ? /* @__PURE__ */ f(W$e, { error: s.error, onRetry: () => s.refetch(), retryPending: s.isFetching }) : d ? /* @__PURE__ */ A("div", { className: "flex min-w-0 flex-col gap-2", children: [
+     /* @__PURE__ */ f(d_, { run: d, serverUrl: e, accountUid: t }),
+     /* @__PURE__ */ f(oK, { run: d, journal: c.journal, serverUrl: e, wide: !0 }),
+     /* @__PURE__ */ f(
+@@ -76389,7 +76722,7 @@ function Lg({
    agentId: i,
    sessionId: s
  }) {
 -  const [o, a] = ee(!1), [l, c] = ee(!1), d = Ul(), u = kK(e), m = rx(e)?.render, p = kv(e.name) ? Pt(e.args, "script") : void 0, g = !!p, y = e.name === "execute_code" || e.name === "call" && Pt(e.args, "tool") === "execute", v = !!p && /\bctx\.(?:sleep|minutes|hours)\s*\(/.test(p), x = v ? d2 : g ? kg : y ? pE : s3e[e.name] ?? i3e[m?.kind || "generic"], w = e.result === void 0 && e.rawOutput === void 0, I = v ? w ? "Waiting" : "Waited" : g ? "Workflow" : m?.label || e.name, k = xK(
-+  const [o, a] = ee(!1), [l, c] = useSeedToolInspector(e, s), d = Ul(), u = kK(e), m = rx(e)?.render, p = kv(e.name) ? Pt(e.args, "script") : void 0, g = !!p, y = e.name === "execute_code" || e.name === "call" && Pt(e.args, "tool") === "execute", v = !!p && /\bctx\.(?:sleep|minutes|hours)\s*\(/.test(p), x = v ? d2 : g ? kg : y ? pE : s3e[e.name] ?? i3e[m?.kind || "generic"], w = e.result === void 0 && e.rawOutput === void 0, I = v ? w ? "Waiting" : "Waited" : g ? "Workflow" : m?.label || e.name, k = xK(
++  const [o, a, detailLimited, detailScope] = useSeedToolDetails(e, s), [l, c] = useSeedToolInspector(e, s), d = Ul(), u = kK(e), m = rx(e)?.render, p = kv(e.name) ? Pt(e.args, "script") : void 0, g = !!p, y = e.name === "execute_code" || e.name === "call" && Pt(e.args, "tool") === "execute", v = !!p && /\bctx\.(?:sleep|minutes|hours)\s*\(/.test(p), x = v ? d2 : g ? kg : y ? pE : s3e[e.name] ?? i3e[m?.kind || "generic"], w = e.result === void 0 && e.rawOutput === void 0, I = v ? w ? "Waiting" : "Waited" : g ? "Workflow" : m?.label || e.name, k = xK(
      n,
      r,
      s,
-@@ -78014,11 +78314,25 @@ function N3e(e) {
+@@ -76399,7 +76732,7 @@ function Lg({
+     () => ({ serverUrl: n, accountUid: r, agentId: i, sessionId: s }),
+     [n, r, i, s]
+   ), z = w && t?.phase === "tool" && (t.toolCallId ? t.toolCallId === e.id : t.toolName === e.name) ? t : void 0, Y = z?.outputTail ? o3e(z.outputTail) : "";
+-  return /* @__PURE__ */ A(Uy.Provider, { value: B, children: [
++  return /* @__PURE__ */ f(SeedDetailScope.Provider, { value: detailScope, children: /* @__PURE__ */ A(Uy.Provider, { value: B, children: [
+     /* @__PURE__ */ A(
+       "div",
+       {
+@@ -76423,6 +76756,7 @@ function Lg({
+                   {
+                     type: "button",
+                     title: o ? "Hide tool details" : "Show tool details",
++                    disabled: detailLimited,
+                     "aria-expanded": o,
+                     onClick: (J) => {
+                       J.stopPropagation(), a((Q) => !Q);
+@@ -76486,7 +76820,7 @@ function Lg({
+             }
+           ),
+           !o && Y ? /* @__PURE__ */ f("pre", { className: "bg-background/60 text-foreground/80 mt-1.5 overflow-hidden rounded-md border p-2 font-mono text-[10px] leading-4 break-all whitespace-pre-wrap", children: Y }) : null,
+-          o ? /* @__PURE__ */ A("div", { className: "mt-2 space-y-2 border-t pt-2", children: [
++          o ? /* @__PURE__ */ A("div", { "data-tool-detail": e.id, className: "mt-2 space-y-2 border-t pt-2", children: [
+             e.isError && e.result ? /* @__PURE__ */ f("pre", { className: "border-destructive/30 bg-destructive/5 text-destructive max-h-48 overflow-auto rounded-md border p-2 text-[11px] whitespace-pre-wrap", children: e.result }) : null,
+             kv(e.name) ? /* @__PURE__ */ f(c3e, { item: e, serverUrl: n, accountUid: r }) : y ? /* @__PURE__ */ f(l3e, { item: e, liveTail: z?.outputTail }) : e.name === "read" && T ? /* @__PURE__ */ f(ZBe, { item: e }) : F?.kind === "write-command" ? /* @__PURE__ */ f(n3e, { item: e }) : e.name === "write" && T ? /* @__PURE__ */ f(e3e, { item: e }) : /* @__PURE__ */ A(ze, { children: [
+               E.map((J) => /* @__PURE__ */ A("div", { className: "space-y-1", children: [
+@@ -76503,7 +76837,7 @@ function Lg({
+       }
+     ),
+     /* @__PURE__ */ f(hK, { item: e, open: l, onOpenChange: c })
+-  ] });
++  ] }) });
+ }
+ function AK({
+   item: e,
+@@ -78014,11 +78348,25 @@ function N3e(e) {
      entry: e
    } : null;
  }
@@ -1133,7 +1141,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      /* @__PURE__ */ A(
        "button",
        {
-@@ -78039,13 +78353,13 @@ function P3e({ journal: e }) {
+@@ -78039,13 +78387,13 @@ function P3e({ journal: e }) {
          ref: r,
          "aria-label": "Run activity",
          className: "bg-muted/40 mt-1 max-h-40 overflow-y-auto rounded p-1.5 font-mono text-[10px] leading-4",
@@ -1149,7 +1157,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
    return /* @__PURE__ */ A("div", { children: [
      /* @__PURE__ */ f(
        "button",
-@@ -78053,6 +78367,7 @@ function _3e({ line: e }) {
+@@ -78053,6 +78401,7 @@ function _3e({ line: e }) {
          type: "button",
          "aria-expanded": t,
          title: t ? "Hide full entry" : "Show full entry",
@@ -1157,7 +1165,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
          className: `hover:bg-muted block w-full truncate rounded px-0.5 text-left ${r}`,
          onClick: () => n((i) => !i),
          children: e.text
-@@ -78062,8 +78377,8 @@ function _3e({ line: e }) {
+@@ -78062,8 +78411,8 @@ function _3e({ line: e }) {
    ] });
  }
  function O3e({ runs: e }) {
@@ -1168,7 +1176,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      /* @__PURE__ */ A(
        "button",
        {
-@@ -78077,7 +78392,7 @@ function O3e({ runs: e }) {
+@@ -78077,7 +78426,7 @@ function O3e({ runs: e }) {
          ]
        }
      ),
@@ -1177,7 +1185,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
        r.length > 1 ? /* @__PURE__ */ f("span", { className: "text-muted-foreground text-[10px]", children: Jr(i) }) : null,
        /* @__PURE__ */ f(
          "pre",
-@@ -78400,8 +78715,11 @@ function jK({
+@@ -78400,8 +78749,11 @@ function jK({
    onOpenTrigger: s,
    agentName: o,
    activity: a,
@@ -1190,7 +1198,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
    const c = e.title || "Untitled session", d = ga(new Date(e.updatedAt)), u = a ? /* @__PURE__ */ f(pw, { tone: a.tone, label: a.label, className: l ? "size-2" : void 0 }) : /* @__PURE__ */ f(gw, { status: e.status, className: l ? "size-2" : void 0 }), h = e.startedByTrigger ? /* @__PURE__ */ A(
      "button",
      {
-@@ -78415,13 +78733,14 @@ function jK({
+@@ -78415,13 +78767,14 @@ function jK({
          e.startedByTrigger.triggerName
        ]
      }
@@ -1207,7 +1215,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
        onOpenSession: i
      }
    ) }) : null;
-@@ -78507,13 +78826,18 @@ function x_({
+@@ -78507,13 +78860,18 @@ function x_({
    compact: l = !1,
    showAgentName: c = !0,
    readState: d,
@@ -1228,7 +1236,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      y ? /* @__PURE__ */ f(W, { size: l ? "sm" : void 0, color: "muted", className: l ? "px-2 py-1" : void 0, children: "Loading sessions…" }) : null,
      o.map((v) => /* @__PURE__ */ f(
        On,
-@@ -78535,6 +78859,7 @@ function x_({
+@@ -78535,6 +78893,7 @@ function x_({
          serverUrl: v,
          accountUid: t,
          compact: l,
@@ -1236,7 +1244,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
          agentName: c ? w?.definition.name || x.agentId : void 0,
          activity: d ? LMe(x, v, d, w?.activity) : void 0,
          onOpen: (I) => g({ serverUrl: v, agentId: x.agentId, sessionId: x.id }, I),
-@@ -78549,6 +78874,7 @@ function x_({
+@@ -78549,6 +78908,7 @@ function x_({
        },
        `${v}:${x.id}`
      )) }),
@@ -1244,7 +1252,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      /* @__PURE__ */ f("div", { ref: p, "aria-hidden": "true", className: "h-px" }),
      i && e.length ? /* @__PURE__ */ f(W, { size: "sm", color: "muted", className: "text-center", children: "Loading more…" }) : null
    ] });
-@@ -85436,6 +85762,14 @@ function z5e({
+@@ -85436,6 +85796,14 @@ function z5e({
      G ? void 0 : k ?? void 0
    ), ye = m?.data?.totals, Ne = Ot(J5e), de = Ot(V5e), ce = ge(null), ae = ge(null), Pe = ge({ tree: l?.treeScrollTop ?? 0, file: l?.fileScrollTop ?? 0 }), He = ge(null), q = ge({ selectedPath: k, expandedDirs: c });
    q.current = { selectedPath: k, expandedDirs: c };
@@ -1259,7 +1267,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
    function N() {
      U5e(e, n, {
        selectedPath: q.current.selectedPath,
-@@ -86747,11 +87081,23 @@ function a$e({
+@@ -86747,11 +87115,23 @@ function a$e({
    triggerId: r,
    memoryPath: i
  }) {
@@ -1285,7 +1293,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
    const F = m.data?.agent.accessRole ?? "owner", B = tx(F), z = Ly(F), Y = F === "owner", [J, Q] = ee(""), [R, X] = ee(""), [re, L] = ee(""), [ie, ue] = ee(void 0), [le, G] = ee(void 0), [te, ye] = ee([]), Ne = FP(u, s, R, e), de = T.data?.find((Se) => Se.name === R)?.type, [ce, ae] = ee([]), [Pe, He] = ee(0), [q, N] = ee(!1), [_, H] = ee(!1), [V, se] = ee("idle"), [Z, De] = ee("idle"), rt = ge(0), ut = ge(0), oe = ge(null), be = ge(null), We = ge(null);
    xe(() => {
      n !== "sessions" || !u || _K(u, e, null);
-@@ -86947,11 +87293,14 @@ function a$e({
+@@ -86947,11 +87327,14 @@ function a$e({
              U.content,
              D.content,
              n === "sessions" ? /* @__PURE__ */ f("section", { className: "flex min-h-0 flex-1 flex-col", children: /* @__PURE__ */ A("div", { className: "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1", children: [
@@ -1301,7 +1309,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
                    serverUrl: u,
                    accountUid: s,
                    onOpen: (at) => l({ key: "agent-session", agentId: e, sessionId: Se.id, serverUrl: u }, at),
-@@ -86969,14 +87318,14 @@ function a$e({
+@@ -86969,14 +87352,14 @@ function a$e({
                  },
                  Se.id
                )),
@@ -1318,7 +1326,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
                    },
                    children: p.isFetchingNextPage ? "Loading…" : "Load more"
                  }
-@@ -88824,7 +89173,7 @@ function O$e() {
+@@ -88824,7 +89207,7 @@ function O$e() {
  }
  function R$e({ selectedAccountId: e }) {
    V0();
@@ -1327,7 +1335,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      () => r.flatMap(
        (O, M) => (s[M]?.data || []).map((U) => ({ ...U, serverUrl: O }))
      ),
-@@ -88839,7 +89188,7 @@ function R$e({ selectedAccountId: e }) {
+@@ -88839,7 +89222,7 @@ function R$e({ selectedAccountId: e }) {
        (O) => !m.some((M) => M.serverUrl === O.serverUrl && M.id === O.agent.id)
      ),
      [m, g.agents]
@@ -1336,7 +1344,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      const O = new Set(v.entries.map((U) => `${U.serverUrl}:${U.session.id}`)), M = g.sessions.filter((U) => !O.has(`${U.serverUrl}:${U.session.id}`));
      return M.length ? [...v.entries, ...M].sort((U, F) => F.session.updatedAt - U.session.updatedAt) : v.entries;
    }, [v.entries, g.sessions]), w = v.isLoading || g.isLoading && !x.length, I = Ce(
-@@ -88904,11 +89253,11 @@ function R$e({ selectedAccountId: e }) {
+@@ -88904,11 +89287,11 @@ function R$e({ selectedAccountId: e }) {
                            /* @__PURE__ */ f(u2, {}),
                            "Open Server"
                          ] }),
@@ -1350,7 +1358,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
                            /* @__PURE__ */ f(p2, {}),
                            "Providers"
                          ] })
-@@ -88944,8 +89293,6 @@ function R$e({ selectedAccountId: e }) {
+@@ -88944,8 +89327,6 @@ function R$e({ selectedAccountId: e }) {
              ] })
            ] }),
            r.map((O) => /* @__PURE__ */ f(B$e, { serverUrl: O, selectedAccountId: e }, O)),
@@ -1359,7 +1367,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
            d.content,
            u.content,
            p.length ? /* @__PURE__ */ A("section", { className: "flex flex-col gap-3", children: [
-@@ -88963,6 +89310,7 @@ function R$e({ selectedAccountId: e }) {
+@@ -88963,6 +89344,7 @@ function R$e({ selectedAccountId: e }) {
                `${O.serverUrl}:${O.agentId}`
              )) })
            ] }) : null,
@@ -1367,7 +1375,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
            D ? (
              // Nothing to list and nobody to talk to yet: the page's one job is getting a first agent.
              /* @__PURE__ */ f(
-@@ -88997,6 +89345,9 @@ function R$e({ selectedAccountId: e }) {
+@@ -88997,6 +89379,9 @@ function R$e({ selectedAccountId: e }) {
                  hasNextPage: v.hasNextPage,
                  isFetchingNextPage: v.isFetchingNextPage,
                  fetchNextPage: v.fetchNextPage,
@@ -1377,7 +1385,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
                  problems: E,
                  emptyText: r.length ? "No sessions yet. Start one below." : "No sessions yet."
                }
-@@ -89087,7 +89438,7 @@ function $$e({
+@@ -89087,7 +89472,7 @@ function $$e({
    routeAgentId: n,
    selectedAccountId: r
  }) {
@@ -1386,7 +1394,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      const k = u?.error?.callSeq;
      if (!(!u || typeof k != "number"))
        return l_(d.journal.filter((S) => S.runId === u.id)).find(
-@@ -89103,7 +89454,18 @@ function $$e({
+@@ -89103,7 +89488,18 @@ function $$e({
        return k ? `${r_(k)} tokens` : null;
      })()
    ].filter(Boolean).join(" · ") : "";
@@ -1406,7 +1414,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      /* @__PURE__ */ f(
        v_,
        {
-@@ -89170,6 +89532,7 @@ function $$e({
+@@ -89170,6 +89566,7 @@ function $$e({
            renderToolPart: w
          }
        ) }) : null,
@@ -1414,7 +1422,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
        /* @__PURE__ */ f(d_, { run: u, serverUrl: o, accountUid: r }),
        /* @__PURE__ */ f("section", { className: "border-border bg-card flex flex-col gap-2 rounded-lg border p-3", children: /* @__PURE__ */ f(
          u_,
-@@ -89189,7 +89552,7 @@ function $$e({
+@@ -89189,7 +89586,7 @@ function $$e({
        /* @__PURE__ */ f(O3e, { runs: [u, ...h] }),
        /* @__PURE__ */ f(P3e, { journal: d.journal })
      ] }) : null
@@ -1423,7 +1431,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
  }
  function U$e({ error: e, onRetry: t, retryPending: n }) {
    const r = si(e, { failed: "Couldn’t load this run" });
-@@ -89222,9 +89585,10 @@ function J$e() {
+@@ -89222,9 +89619,10 @@ function J$e() {
  }
  function H$e({ routeServerUrl: e, selectedAccountId: t }) {
    V0();
@@ -1436,7 +1444,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
      serverUrl: g.serverUrl,
      notice: si(g.error, { failed: "Couldn’t load sessions" }),
      refetch: g.refetch,
-@@ -89264,7 +89628,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
+@@ -89264,7 +89662,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
              {
                variant: "outline",
                className: "max-sm:min-h-10",
@@ -1445,7 +1453,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
                children: [
                  /* @__PURE__ */ f(Bz, { className: "size-4" }),
                  "Accounts"
-@@ -89276,7 +89640,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
+@@ -89276,7 +89674,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
              {
                variant: "outline",
                className: "max-sm:min-h-10",
@@ -1454,7 +1462,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
                children: [
                  /* @__PURE__ */ f(p2, { className: "size-4" }),
                  "Providers"
-@@ -89285,8 +89649,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
+@@ -89285,8 +89683,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
            )
          ] })
        ] }),
@@ -1464,7 +1472,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
        l.content,
        s.isError ? /* @__PURE__ */ f(
          z$e,
-@@ -89308,6 +89671,9 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
+@@ -89308,6 +89705,9 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
            hasNextPage: d.hasNextPage,
            isFetchingNextPage: d.isFetchingNextPage,
            fetchNextPage: d.fetchNextPage,
@@ -1474,7 +1482,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
            problems: u,
            emptyText: s.data?.length ? "No sessions on this server yet. Start one below." : "No sessions on this server yet."
          }
-@@ -89330,9 +89696,11 @@ function j$e({
+@@ -89330,9 +89730,11 @@ function j$e({
    routeServerUrl: t,
    routeAgentId: n
  }) {
@@ -1489,25 +1497,27 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
    UQ(o, e, qQ(a.data?.events));
    const v = Zu(
      o,
-@@ -89353,6 +89721,8 @@ function j$e({
+@@ -89353,6 +89755,9 @@ function j$e({
            agentId: l,
            sessionId: e,
            triggerContext: a.data?.triggerContext ?? null,
 +          routeUrl: displayedHost.routeUrl,
 +          expandedThinking: selectedRoute.expandedThinking,
++          expandedDetails: selectedRoute.expandedDetails,
            runs: O.data
          }),
          O.data || [],
-@@ -89367,6 +89737,8 @@ function j$e({
+@@ -89367,6 +89772,9 @@ function j$e({
        a.data?.events,
        a.data?.session.plan,
        a.data?.triggerContext,
 +      displayedHost.routeUrl,
 +      JSON.stringify(selectedRoute.expandedThinking),
++      JSON.stringify(selectedRoute.expandedDetails),
        e,
        O.data
      ]
-@@ -89416,9 +89788,14 @@ function j$e({
+@@ -89416,9 +89824,14 @@ function j$e({
    }, [D, T, w]), xe(() => {
      E.resetToBottom();
    }, [e]), xe(() => {
@@ -1525,7 +1535,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
    function N() {
      if (!a.data) return;
      const Z = a.data.session;
-@@ -89537,7 +89914,7 @@ function j$e({
+@@ -89537,7 +89950,7 @@ function j$e({
                    label: "Copy session URL",
                    disabled: !l,
                    onClick: () => {
@@ -1534,12 +1544,13 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
                      Z && (navigator.clipboard?.writeText(Z), we.success("Session URL copied"));
                    }
                  },
-@@ -89596,12 +89973,17 @@ function j$e({
+@@ -89596,12 +90009,18 @@ function j$e({
              onScroll: E.handleScroll,
              className: "min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-1",
              children: /* @__PURE__ */ A("div", { ref: E.contentRef, className: "flex min-h-full flex-col gap-3 pt-4", children: [
 +              selectedRoute.panel === "context" ? /* @__PURE__ */ f(SeedContextSelection, { rows: M, serverUrl: o, accountUid: r, sessionId: e }) : null,
 +              /* @__PURE__ */ f(SeedThinkingSelection, { rows: M, serverUrl: o, accountUid: r, sessionId: e }),
++              /* @__PURE__ */ f(SeedDetailSelection, { rows: M, serverUrl: o, accountUid: r, sessionId: e }),
 +              selectedRoute.panel === "tool" ? /* @__PURE__ */ f(SeedSessionToolInspector, { rows: M, serverUrl: o, accountUid: r, sessionId: e, agentId: l }) : null,
 +              selectedRoute.eventId && !M.some(row => row.key === selectedRoute.eventId) ? /* @__PURE__ */ f(W, { role: "alert", children: "Selected message is not in this transcript." }) : null,
                M.length ? null : /* @__PURE__ */ f(W, { color: "muted", children: "No messages yet." }),
@@ -1554,7 +1565,7 @@ index 46d2a63607a75cc74548b660fb72e79cb665942f..4d15c1cd74435d58bee41faa7f4e3e06
                      G$e,
                      {
 diff --git a/host.d.ts b/host.d.ts
-index ee1c082fffbe395f63ddcf81630997454cf7804d..9bb7324e344a25123a069f99f8837c3bd9fe045b 100644
+index ee1c082..272b596 100644
 --- a/host.d.ts
 +++ b/host.d.ts
 @@ -96,6 +96,29 @@ export type SeedAgentsNavigationMode = 'push' | 'replace' | 'spawn';
@@ -1581,14 +1592,14 @@ index ee1c082fffbe395f63ddcf81630997454cf7804d..9bb7324e344a25123a069f99f8837c3b
 +        | { kind: 'run-disclosure' | 'run-error' | 'run-tools'; runId: string; path: string }
 +        | { kind: 'trigger'; triggerId: string }
 +        | { kind: 'session-context'; sessionId: string; path: string }
-+        | { kind: 'session-thinking'; sessionId: string; path: string }
++        | { kind: 'session-thinking' | 'session-details' | 'session-detail-read'; sessionId: string; path: string }
 +        | { kind: 'session-event'; sessionId: string; path: string }
 +        | { kind: 'session-tool'; sessionId: string; toolId: string; path: string })) => void;
      /**
       * Base URL of the agents server, as the browser can reach it. A canonical base ends in
       * `/hm/api/agents` (a site serving agents on its own origin, or `https://agentic.seed.hyper.media/hm/api/agents`)
 diff --git a/routes.d.ts b/routes.d.ts
-index aa408f2f19a1f10e10e4f10ae0decf6cfd147015..16ce9e8da61e80386e0db61f26ff37b02c84bf32 100644
+index aa408f2..e7824a3 100644
 --- a/routes.d.ts
 +++ b/routes.d.ts
 @@ -5,11 +5,20 @@ export type SeedAgentsRoute =
@@ -1612,7 +1623,7 @@ index aa408f2f19a1f10e10e4f10ae0decf6cfd147015..16ce9e8da61e80386e0db61f26ff37b0
  }
  /** One agent, on one of its tabs. */
   | {
-@@ -20,18 +29,36 @@ export type SeedAgentsRoute =
+@@ -20,18 +29,38 @@ export type SeedAgentsRoute =
      triggerId?: string;
      /** Memory tab: the file to open. */
      memoryPath?: string;
@@ -1627,6 +1638,8 @@ index aa408f2f19a1f10e10e4f10ae0decf6cfd147015..16ce9e8da61e80386e0db61f26ff37b0
      sessionId: string;
 +    /** Expanded transcript tool groups, identified by their first recorded call. */
 +    expandedThinking?: string[];
++    /** Expanded recorded tool details, identified by tool call ID. */
++    expandedDetails?: string[];
      serverUrl?: string;
      agentId?: string;
 +    /** Navigable transcript content; no actions are replayed. */

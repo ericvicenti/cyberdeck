@@ -31,6 +31,8 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       case "session-event": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && selected.eventId === outcome.path;
       case "session-context": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && selected.panel === "context" && selected.eventId === outcome.path;
       case "session-thinking": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && !!selected.expandedThinking?.length && JSON.stringify(selected.expandedThinking) === outcome.path;
+      case "session-details": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && !!selected.expandedDetails?.length && JSON.stringify(selected.expandedDetails) === outcome.path;
+      case "session-detail-read": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && !!selected.expandedDetails?.includes(outcome.path);
       case "session-tool": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && selected.panel === "tool" && selected.toolId === outcome.toolId && (selected.fullPayload || "") === outcome.path;
       case "trigger": return selected.key === "agent" && selected.triggerId === outcome.triggerId;
       case "run-error": return selected.key === "agent-run" && selected.runId === outcome.runId && selected.errorRunId === outcome.path;
@@ -46,7 +48,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       if (!mounted.current || owner.host !== host || !owns(owner.route, outcome)) return;
       setResults(previous => {
         const values = previous?.host === host ? previous.values : {};
-        const key = outcome.kind === "child-session-list" ? `${outcome.kind}:${outcome.listOwner}:${outcome.path}` : outcome.kind;
+        const key = outcome.kind === "child-session-list" ? `${outcome.kind}:${outcome.listOwner}:${outcome.path}` : outcome.kind === "session-detail-read" ? `${outcome.kind}:${outcome.sessionId}:${outcome.path}` : outcome.kind;
         const old = values[key];
         if (old && old.error === outcome.error) {
           const { error: _oldError, ...oldValue } = old;
@@ -68,6 +70,9 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
   const children = results?.host === host ? Object.values(results.values).filter((value): value is Outcome => !!value && value.kind === "child-session-list" && owns(route, value)) : [];
   const child = children.find(value => value.error) || children.find(value => value.pending);
   const dialog = get("server-dialog"), disclosure = get("run-disclosure"), runError = get("run-error"), runTools = get("run-tools");
+  const details = get("session-details");
+  const detailReads = results?.host === host ? Object.values(results.values).filter((value): value is Outcome => !!value && value.kind === "session-detail-read" && owns(route, value)) : [];
+  const detailRead = detailReads.find(value => value.error) || detailReads.find(value => value.pending);
   if (route.key === "agent-server" && route.serverDialog) {
     const label = route.serverDialog === "accounts" ? "Server accounts" : "Model providers";
     title = dialog?.error ? failure(dialog.error, label)
@@ -95,7 +100,10 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       : context?.error ? failure(context.error, "Message context")
       : event?.error ? failure(event.error, "Message")
       : thinking?.error ? failure(thinking.error, "Tool group")
-      : `${route.panel === "prompt" ? "Current system prompt · " : route.panel === "context" ? "Message context · " : route.panel === "tool" ? `${!tool || tool.pending ? "Loading tool payload · " : route.fullPayload ? `Full ${route.fullPayload === "both" ? "input/output" : route.fullPayload} · ` : "Tool input/output · "}${tool?.name || route.toolId} · ` : route.eventId ? "Message · " : ""}${!route.panel && route.expandedThinking?.length ? `${route.expandedThinking.length} expanded tool group${route.expandedThinking.length === 1 ? "" : "s"} · ` : ""}${session.name?.trim() || "Untitled session"} · Seed session`;
+      : details?.error ? failure(details.error, "Tool details")
+      : detailRead?.error ? failure(detailRead.error, "Workflow run")
+      : detailRead?.pending ? "Loading workflow run · Seed"
+      : `${route.panel === "prompt" ? "Current system prompt · " : route.panel === "context" ? "Message context · " : route.panel === "tool" ? `${!tool || tool.pending ? "Loading tool payload · " : route.fullPayload ? `Full ${route.fullPayload === "both" ? "input/output" : route.fullPayload} · ` : "Tool input/output · "}${tool?.name || route.toolId} · ` : route.eventId ? "Message · " : ""}${route.expandedDetails?.length ? `${route.expandedDetails.length} tool detail${route.expandedDetails.length === 1 ? "" : "s"} · ` : ""}${!route.panel && route.expandedThinking?.length ? `${route.expandedThinking.length} expanded tool group${route.expandedThinking.length === 1 ? "" : "s"} · ` : ""}${session.name?.trim() || "Untitled session"} · Seed session`;
   } else if (run && route.key === "agent-run") {
     title = run.error ? failure(run.error, "Run")
       : runError?.error ? failure(runError.error, "Run error")
