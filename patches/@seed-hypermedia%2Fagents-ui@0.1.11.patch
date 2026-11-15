@@ -1,5 +1,5 @@
 diff --git a/chunks/index-ZHWGA37c.js b/chunks/index-ZHWGA37c.js
-index 46d2a63..ff0b43b 100644
+index 46d2a63..73db088 100644
 --- a/chunks/index-ZHWGA37c.js
 +++ b/chunks/index-ZHWGA37c.js
 @@ -21335,10 +21335,15 @@ const hue = [
@@ -1155,7 +1155,7 @@ index 46d2a63..ff0b43b 100644
 +  xe(() => {
 +    if (detailScope) host.onReadOutcome?.({ kind: "session-detail-read", sessionId: detailScope.sessionId, path: detailScope.detailId, serverUrl: e, accountUid: t, pending: !d && !s.error, error: s.error });
 +  }, [host, detailScope?.sessionId, detailScope?.detailId, e, t, d, s.error]);
-+  return s.error ? /* @__PURE__ */ f(W$e, { error: s.error, onRetry: () => s.refetch(), retryPending: s.isFetching }) : d ? /* @__PURE__ */ A("div", { className: "flex min-w-0 flex-col gap-2", children: [
++  return s.error ? /* @__PURE__ */ f(U$e, { error: s.error, onRetry: () => s.refetch(), retryPending: s.isFetching }) : d ? /* @__PURE__ */ A("div", { className: "flex min-w-0 flex-col gap-2", children: [
      /* @__PURE__ */ f(d_, { run: d, serverUrl: e, accountUid: t }),
      /* @__PURE__ */ f(oK, { run: d, journal: c.journal, serverUrl: e, wide: !0 }),
      /* @__PURE__ */ f(

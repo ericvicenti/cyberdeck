@@ -1614,6 +1614,7 @@ for (const view of ["Seed", "Sessions"]) {
    await page.goto("about:blank");
    await page.goto(detailHref(view, "workflow-details", [workflowId], "peer-b"));
    await title(page, `${expected} · Seed · Peer B · Cyberdeck`);
+   if (status === 503) { await page.getByRole("alert").filter({hasText:"Couldn’t load this run"}).waitFor(); expect(await page.getByText("Couldn’t load this session",{exact:true}).count()).toBe(0); }
    const link = page.url(), before = await page.evaluate(() => history.length);
    detailRunStatus = 200;
    await page.getByRole("button", { name: "Retry", exact: true }).click();
