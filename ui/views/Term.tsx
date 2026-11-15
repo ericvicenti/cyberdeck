@@ -97,7 +97,7 @@ function TermPane({ session, onStatus, onRemove }: { session: LiveSession; onSta
   );
 }
 /** A Seed session in Seed's UI: tool calls, runs, plan, sub-sessions, model and stop/retry. */
-const transcriptKeys = ["panel", "event", "tool", "full", "thinking", "detail"];
+const transcriptKeys = ["panel", "event", "tool", "full", "thinking", "detail", "handoff"];
 function transcriptParams(params: URLSearchParams, next: Extract<SeedAgentsRoute, { key: "agent-session" }>) {
   const result = new URLSearchParams(params);
   for (const key of transcriptKeys) result.delete(key);
@@ -107,6 +107,7 @@ function transcriptParams(params: URLSearchParams, next: Extract<SeedAgentsRoute
   if (next.panel === "tool" && next.fullPayload) result.set("full", next.fullPayload);
   for (const id of next.expandedThinking || []) result.append("thinking", id);
   for (const id of next.expandedDetails || []) result.append("detail", id);
+  for (const id of next.expandedHandoffs || []) result.append("handoff", id);
   return result;
 }
 function NativeSeedSession({ id, node, params }: { id: string; node: string; params: URLSearchParams }) {
@@ -117,13 +118,14 @@ function NativeSeedSession({ id, node, params }: { id: string; node: string; par
     : undefined, [id, sessionId, node, filter]);
   const eventId = params.get("event") || undefined, toolId = params.get("tool") || undefined;
   const selectedPanel = params.get("panel"), full = params.get("full");
-  const panel = selectedPanel === "prompt" ? "prompt" : (selectedPanel === "message" || selectedPanel === "context") && eventId ? selectedPanel : selectedPanel === "tool" && toolId ? "tool" : undefined;
+  const panel = selectedPanel === "prompt" ? "prompt" : (selectedPanel === "message" || selectedPanel === "context" || selectedPanel === "handoff") && eventId ? selectedPanel : selectedPanel === "tool" && toolId ? "tool" : undefined;
   // Match the pinned Seed route contract without eagerly loading the full UI in
   // ordinary terminal tabs. Browser cases exercise both adapters together.
   const expandedThinking = [...new Set(params.getAll("thinking").filter(value => value.length > 0 && value.length <= 512 && !/[\u0000-\u001f]/.test(value)))].sort().slice(0, 100);
   const expandedDetails = [...new Set(params.getAll("detail").filter(value => value.length > 0 && value.length <= 512 && !/[\u0000-\u001f]/.test(value)))].sort().slice(0, 100);
+  const expandedHandoffs = [...new Set(params.getAll("handoff").filter(value => /^[pt]:./.test(value) && value.length <= 514 && !/[\u0000-\u001f]/.test(value)))].sort().slice(0, 100);
   const route: Extract<SeedAgentsRoute, { key: "agent-session" }> = {
-    key: "agent-session", sessionId, eventId, panel, expandedThinking, expandedDetails,
+    key: "agent-session", sessionId, eventId, panel, expandedThinking, expandedDetails, expandedHandoffs,
     toolId: panel === "tool" ? toolId : undefined,
     fullPayload: panel === "tool" && (full === "input" || full === "output" || full === "both") ? full : undefined,
   };

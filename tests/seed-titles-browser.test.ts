@@ -20,6 +20,7 @@ let memoryReadStatus = 200, holdMemoryRead = false;
 let sessionReadStatus = 200, runReadStatus = 200, listReadStatus = 200, holdListRead = false;
 let payloadStatus = 200, holdPayload = false, malformedPayload = "";
 let detailRunStatus = 200, holdDetailRun = false, malformedDetailRun = "";
+let holdHandoffRead = false, handoffReadStatus = 200;
 let emptySeedLists = false, childEmpty = false;
 let childLists = false, childReadStatus = 200, holdChildRead = false, malformedChild = false;
 let globalPaged = false, globalListStatus = 200, globalFailCursor = "", holdGlobalList = false, malformedList = "";
@@ -53,7 +54,25 @@ const workflowEvents = [
  { type: "tool_result", toolCallId: workflowId, name: "run_workflow", output: { runId: "detail-run", output: { recorded: 42 } } },
  { type: "message", role: "assistant", content: "Workflow completed" },
 ];
-const transcriptEvents = (id: string) => id === "workflow-details" ? workflowEvents.map((event, index) => ({id: `workflow-event-${index + 1}`, sessionId: id, seq: index + 1, createdAt: index + 1, event})) : id === "contexts" ? ["context-one", "context two/?&", "no-context"].map((eventId, index) => ({
+const projectionId = "projection /?&", continuationId = "continued /?&";
+const projection = `<session_continuation>
+<origin session="original" />
+<predecessor session="previous" title="Recorded predecessor" edge="recorded-edge" />
+<initiating_event seq="2" />
+<projection reason="context_limit" />
+<handoff>## Recorded incoming handoff
+Keep the canonical navigation</handoff>
+<sources>- memory facts.md — recorded source</sources>
+<excerpt>Recorded source excerpt</excerpt>
+</session_continuation>`;
+const handoffEvents = [
+ { type: "message", role: "user", actor: "system", content: projection },
+ { type: "message", role: "user", content: "Continue the recorded fixture" },
+ { type: "tool_call", id: continuationId, name: "continue_session", input: { title: "Recorded successor", reason: "context_limit", handoff: { purpose: "Recorded outgoing handoff", establishedFacts: ["Preserve the composer"] } } },
+ { type: "tool_result", toolCallId: continuationId, name: "continue_session", output: { successorSessionId: "two", title: "Recorded successor" } },
+ { type: "message", role: "assistant", content: "Recorded continuation complete" },
+];
+const transcriptEvents = (id: string) => id === "handoffs" ? handoffEvents.map((event,index)=>({id:index?`handoff-event-${index+1}`:projectionId,sessionId:id,seq:index+1,createdAt:index+1,event})) : id === "workflow-details" ? workflowEvents.map((event, index) => ({id: `workflow-event-${index + 1}`, sessionId: id, seq: index + 1, createdAt: index + 1, event})) : id === "contexts" ? ["context-one", "context two/?&", "no-context"].map((eventId, index) => ({
  id: eventId, sessionId: id, seq: index + 1, createdAt: index + 1,
  event: { type: "message", role: "user", content: `Context fixture message ${index + 1}`, ...(index < 2 ? { contextLines: [`Recorded window ${index + 1}`, `Recorded project ${index + 1}`] } : {}) },
 })) : id === "thinking" ? thinkingEvents.map((event, index) => ({ id: `thinking-event-${index + 1}`, sessionId: id, seq: index + 1, createdAt: index + 1, event })) : id === "tools" ? toolEvents.map((event, index) => ({
@@ -95,6 +114,11 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch
       if (status !== 200) return fail(status, "Memory content read failed");
     }
     if(hold && (id === "slow" || (node === "peer-a" && action._ === "GetAgent"))) await new Promise<void>(r=>pending.add(r));
+    if (action._ === "GetSession" && id === "handoffs") {
+      const status = handoffReadStatus;
+      if (holdHandoffRead) await new Promise<void>(r=>pending.add(r));
+      if (status !== 200) return fail(status,"Recorded handoff read failed");
+    }
     if (action._ === "GetSession" && id === "transcript" && !action.limit && sessionReadStatus !== 200) return fail(sessionReadStatus, "Transcript read failed");
     if (action._ === "ListSessions" && action.agentId === "paged" && action.cursor) {
       const status = listReadStatus;
@@ -213,7 +237,7 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch
   return await file.exists()?new Response(file):new Response("Not found",{status:404});
 },websocket:{open(){},message(ws, message){
  const envelope:any = typeof message === "string" ? JSON.parse(message) : cbor.decode(new Uint8Array(message));
- if (envelope.action?.key?.startsWith("runs/")) subscriptions.push(envelope.action.key);
+ if (/^(runs|sessions)\//.test(envelope.action?.key || "")) subscriptions.push(envelope.action.key);
  if(envelope.action?.key === "runs/failed-run") for (let index=1;index<=7;index++) {
   ws.send(JSON.stringify({_:"append",key:"runs/failed-run",runId:"failed-run",seq:index*2-1,createdAt:index*2-1,entry:{kind:"call",op:"tool",callSeq:index,tool:"read",input:{path:`Recorded run call ${index}`}}}));
   ws.send(JSON.stringify({_:"append",key:"runs/failed-run",runId:"failed-run",seq:index*2,createdAt:index*2,entry:{kind:"result",callSeq:index,status:"succeeded",output:{content:`Recorded run result ${index}`}}}));
@@ -228,7 +252,7 @@ async function fresh(fn:(page:Page)=>Promise<void>){
  page.setDefaultNavigationTimeout(process.env.CYBERDECK_TEST_ORIGIN ? 30000 : 12000);
  await page.route("**/*",route=>new URL(route.request().url()).origin===server.url.origin?route.continue():route.abort());
  try{await fn(page);}catch(e){console.error(JSON.stringify({title:await page.title(),body:(await page.locator("body").innerText()).slice(0,1800),errors,actions:actions.slice(-15)}));throw e;}
- finally{detailRunStatus=200;holdDetailRun=false;malformedDetailRun="";graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
+ finally{holdHandoffRead=false;handoffReadStatus=200;detailRunStatus=200;holdDetailRun=false;malformedDetailRun="";graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
 }
 const href=(path:string,node="")=>`${server.url}#/seed?${new URLSearchParams({r:path,...(node?{node}:{})})}`;
 const title=(page:Page,value:string)=>page.waitForFunction(value=>document.title===value,value);
@@ -1659,3 +1683,74 @@ for (const view of ["Seed", "Sessions"]) test(`${view} recorded tool detail mess
  expect(nested.has("panel")).toBe(false);
  await fresh(async tab=>{await tab.goto(shared.href);await tab.locator("[data-tool-detail]").waitFor();expect(await tab.title()).toContain("peer-b First conversation");});
 }),browserBudget);
+
+const handoffHref = (view:string,tokens:string[]=[],node="",panel="",event="")=>{
+ const query = new URLSearchParams();for(const token of tokens)query.append("handoff",token);
+ if(panel)query.set("panel",panel);if(event)query.set("event",event);
+ return view==="Seed"?href(`session/handoffs${query.size?`?${query}`:""}`,node)
+  :`${server.url}#/term?${new URLSearchParams({session:"seed-handoffs",filter:"peer-b",...(node?{node}:{})})}${query.size?`&${query}`:""}`;
+};
+const handoffTitle=(count=0,node="local",panel=false)=>`${panel?"Handoff projection · ":""}${count?`${count} expanded handoff${count===1?"":"s"} · `:""}${node} First conversation · Seed session${node==="local"?"":" · Peer B"} · Cyberdeck`;
+const handoffTokens=[`p:${projectionId}`,`t:${continuationId}`];
+for(const view of ["Seed","Sessions"]){
+ test(`${view} handoff summaries restore direct links, reload, new tabs and selected node`,()=>fresh(async page=>{
+  await page.goto(handoffHref(view,handoffTokens,"peer-b"));await title(page,handoffTitle(2,"peer-b"));
+  await page.getByText("Recorded incoming handoff",{exact:true}).waitFor();await page.getByText("Recorded outgoing handoff",{exact:true}).waitFor();
+  const link=page.url();await page.reload();await title(page,handoffTitle(2,"peer-b"));
+  await fresh(async tab=>{await tab.goto(link);await title(tab,handoffTitle(2,"peer-b"));await tab.getByText("Recorded outgoing handoff",{exact:true}).waitFor();});
+  expect(reads.filter(({action})=>action._==="CreateSession"||action._==="MessageSession").length).toBe(0);
+ }),browserBudget);
+ test(`${view} handoff summary history retains the transcript, composer and subscriptions`,()=>fresh(async page=>{
+  await page.goto(handoffHref(view));await title(page,handoffTitle());
+  await page.getByPlaceholder("Untitled session").evaluate(el=>el.setAttribute("data-handoff-owner","retained"));
+  const before=await page.evaluate(()=>history.length),start=reads.length,streams=subscriptions.length;
+  await page.locator('[data-handoff-token]').first().locator('button[title="Show handoff"]').click();await title(page,handoffTitle(1));
+  expect(await page.evaluate(()=>history.length)).toBe(before+1);
+  await page.goBack();await title(page,handoffTitle());await page.goForward();await title(page,handoffTitle(1));
+  expect(await page.getByPlaceholder("Untitled session").getAttribute("data-handoff-owner")).toBe("retained");
+  expect(reads.slice(start).filter(({action})=>action._==="GetSession").length).toBe(0);expect(subscriptions.length).toBe(streams);
+ }),browserBudget);
+ test(`${view} handoff projection dialogs restore direct links and close through parent history`,()=>fresh(async page=>{
+  await page.goto(handoffHref(view,handoffTokens,"peer-b","handoff",projectionId));await title(page,handoffTitle(2,"peer-b",true));
+  const dialog=page.getByRole("dialog");await dialog.getByText("Lineage",{exact:true}).waitFor();await dialog.getByText("Loaded excerpts",{exact:true}).waitFor();
+  const link=page.url();await page.reload();await title(page,handoffTitle(2,"peer-b",true));
+  await fresh(async tab=>{await tab.goto(link);await title(tab,handoffTitle(2,"peer-b",true));await tab.getByRole("dialog").waitFor();});
+  const before=await page.evaluate(()=>history.length);await page.keyboard.press("Escape");await title(page,handoffTitle(2,"peer-b"));expect(await page.evaluate(()=>history.length)).toBe(before+1);
+  await page.goBack();await title(page,handoffTitle(2,"peer-b",true));await page.getByRole("dialog").waitFor();await page.goForward();await page.getByRole("dialog").waitFor({state:"hidden"});
+  const start=reads.length,streams=subscriptions.length,length=await page.evaluate(()=>history.length);
+  await page.locator('button[title="View every detail of this handoff"]').first().click();await title(page,handoffTitle(2,"peer-b",true));expect(await page.evaluate(()=>history.length)).toBe(length+1);
+  expect(reads.slice(start).filter(({action})=>action._==="GetSession").length).toBe(0);expect(subscriptions.length).toBe(streams);
+ }),browserBudget);
+ test(`${view} handoff malformed and missing selections have canonical URLs and honest titles`,()=>fresh(async page=>{
+  await page.goto(handoffHref(view,[handoffTokens[1],handoffTokens[0],handoffTokens[0],"invalid","p:","p:bad\u0001"]));await title(page,handoffTitle(2));
+  const outer=new URLSearchParams(new URL(page.url()).hash.split("?")[1]),query=view==="Seed"?new URLSearchParams(outer.get("r")!.split("?")[1]):outer;
+  expect(query.getAll("handoff")).toEqual(handoffTokens);
+  for(const [tokens,panel,event] of [[["p:missing"],"",""],[[],"handoff","handoff-event-2"],[[],"handoff","missing"]] as [string[],string,string][]){
+   await page.goto(handoffHref(view,tokens,"",panel,event));await title(page,"Handoff not found · Seed · Cyberdeck");await page.getByRole("alert").filter({hasText:"Selected handoff is not in this transcript."}).waitFor();
+  }
+  await page.goto(handoffHref(view,[],"","handoff"));await title(page,handoffTitle());
+  const current=new URLSearchParams(new URL(page.url()).hash.split("?")[1]),canonical=view==="Seed"?new URLSearchParams(current.get("r")!.split("?")[1]):current;expect(canonical.has("panel")).toBe(false);
+  await page.goto(handoffHref(view,Array.from({length:105},(_,index)=>`p:missing-${index}`)));await title(page,"Handoff not found · Seed · Cyberdeck");
+  expect(await page.locator('button[title="Show handoff"]').first().isDisabled()).toBe(true);
+ }),browserBudget);
+ test(`${view} handoff message shares preserve summaries and node without following a successor`,()=>fresh(async page=>{
+  await page.goto(handoffHref(view,handoffTokens,"peer-b"));await title(page,handoffTitle(2,"peer-b"));
+  await page.getByRole("button",{name:"Show markdown sent to the LLM"}).first().click();
+  const dialog=page.getByRole("dialog").filter({hasText:"Message details"});await dialog.waitFor();
+  const shared=new URL(await dialog.locator("code").innerText()),outer=new URLSearchParams(shared.hash.split("?")[1]);expect(outer.get("node")).toBe("peer-b");
+  const query=view==="Seed"?new URLSearchParams(outer.get("r")!.split("?")[1]):outer;expect(query.getAll("handoff")).toEqual(handoffTokens);
+  await fresh(async tab=>{await tab.goto(shared.href);await tab.getByText("Recorded outgoing handoff",{exact:true}).waitFor();});
+  expect(page.url()).toContain("handoffs");
+ }),browserBudget);
+ test(`${view} handoff late denied reads cannot reopen a hidden dialog or rename a locked owner`,()=>fresh(async page=>{
+  holdHandoffRead=true;handoffReadStatus=403;await page.goto(handoffHref(view,[],"","handoff",projectionId));while(!pending.size)await page.waitForTimeout(10);
+  await page.evaluate(link=>location.hash=new URL(link).hash,handoffHref(view,handoffTokens,"peer-b"));while(pending.size<2)await page.waitForTimeout(10);
+  holdHandoffRead=false;handoffReadStatus=200;for(const release of pending)release();pending.clear();
+  await title(page,"Access denied · Seed · Peer B · Cyberdeck");
+  holdHandoffRead=true;
+  await page.evaluate(link=>location.hash=new URL(link).hash,handoffHref(view,[],"","handoff",projectionId));while(!pending.size)await page.waitForTimeout(10);
+  await page.route("**/api/fs/list**",route=>route.fulfill({status:401,json:{error:"Locked"}}));await page.getByTestId("nav-files").click();await title(page,"Locked · Cyberdeck");
+  for(const release of pending)release();pending.clear();await page.waitForTimeout(100);
+  expect(await page.title()).toBe("Locked · Cyberdeck");expect(await page.getByRole("dialog").count()).toBe(0);
+ }),browserBudget);
+}
