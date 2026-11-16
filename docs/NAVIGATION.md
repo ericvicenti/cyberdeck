@@ -70,7 +70,7 @@ credentials should not be replayed from a link.
 | GamesSection / Games | installed native games and import form | Part of Applications. Play/import are actions; no automatic execution from links. |
 | CaseworkConsole | selected device, events, camera/media/QR, calls, native scene actions | Selected device is covered by `device=<id>`, including canonical default, reload/history, missing-device error/title and no action replay. Visited consoles retain their socket, calls and previews across apps, primary views, node URLs and history; lock tears them down. `media=<stored-name>` fetches only an existing authenticated upload: fresh open, reload and history never capture, upload or autoplay. Invalid, missing and denied previews have matching errors/titles. Tests use synthetic devices/tracks only. |
 | `applications?app=afterglow&tab=music` / Spotify (the listening room), SpotifyRecordings, SpotifyVisualizer | shelves, entities, query, pagination, recordings, immersive mode | One player everywhere, inside Afterglow: `shelf`, `id`, `q`, `radio`, `page`, `immersive` and `shelf=history&recording=<id>` restore through direct links, reload and history; OAuth returns to the requested content, including saved recordings; read failures and unavailable pages retain the link with an honest title and read-only retry. Late or hidden reads cannot replace another view; no link starts playback; the SDK/player stays mounted through URL and primary-view changes. Legacy `#/spotify` links are rewritten. |
-| `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session/message/tool/prompt, list pages, run, server, node | Nested paths, canonical defaults/errors, Back/Forward and node-preserving new-window links covered. Titles observe the displayed authenticated reads, including external servers; late responses are bound to the signing host/account, server and entity. Session message/prompt/tool inspectors and full tool input/output restore without replacing the transcript or composer. Agent session-list page counts restore and retry. Global/server list rounds and sub-session disclosures also restore (November 9). Server account/provider read dialogs restore through `dialog=accounts|providers`, with route-owned loading/errors and retry (November 10); write forms and credentials stay transient. Expanded transcript tool groups and recorded message Context popovers restore in Seed and Sessions (November 10). Run Code/Activity/full-entry disclosures restore from URLs and history (November 11). Run Tool calls open/collapsed state and root/child error popovers restore with displayed-read titles and graph retry (November 14). Recorded transcript tool details now restore with bounded, sorted `detail=<tool-call-id>` parameters in both Seed and Sessions (November 15). Selected details open their containing group; collapsing the group clears its details in one history transition. Composer, transcript and subscriptions survive disclosure/history edits. Workflow-plan reads have owned loading, denied/missing/unavailable/invalid states and read-only retry at the same URL. Message-share links retain selected details, server and signing node. Incoming continuation summaries, outgoing handoff summaries and full incoming projection dialogs now restore in both Seed and Sessions (November 15); namespaced, bounded `handoff=p:<event-id>|t:<call-id>` values and `panel=handoff&event=<event-id>` reconstruct recorded content without following or creating a successor. Missing handoffs keep honest titles, invalid/default values canonicalize, and history retains the composer and subscription. Remaining: tool disclosures within standalone run graphs, nested workflow/plan/activity disclosures, attachment state and older-message history outside returned events. |
+| `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session/message/tool/prompt, list pages, run, server, node | Nested paths, canonical defaults/errors, Back/Forward and node-preserving new-window links covered. Titles observe the displayed authenticated reads, including external servers; late responses are bound to the signing host/account, server and entity. Session message/prompt/tool inspectors and full tool input/output restore without replacing the transcript or composer. Agent session-list page counts restore and retry. Global/server list rounds and sub-session disclosures also restore (November 9). Server account/provider read dialogs restore through `dialog=accounts|providers`, with route-owned loading/errors and retry (November 10); write forms and credentials stay transient. Expanded transcript tool groups and recorded message Context popovers restore in Seed and Sessions (November 10). Run Code/Activity/full-entry disclosures restore from URLs and history (November 11). Run Tool calls open/collapsed state and root/child error popovers restore with displayed-read titles and graph retry (November 14). Recorded transcript tool details now restore with bounded, sorted `detail=<tool-call-id>` parameters in both Seed and Sessions (November 15). Selected details open their containing group; collapsing the group clears its details in one history transition. Composer, transcript and subscriptions survive disclosure/history edits. Workflow-plan reads have owned loading, denied/missing/unavailable/invalid states and read-only retry at the same URL. Message-share links retain selected details, server and signing node. Incoming continuation summaries, outgoing handoff summaries and full incoming projection dialogs now restore in both Seed and Sessions (November 15); namespaced, bounded `handoff=p:<event-id>|t:<call-id>` values and `panel=handoff&event=<event-id>` reconstruct recorded content without following or creating a successor. Missing handoffs keep honest titles, invalid/default values canonicalize, and history retains the composer and subscription. Standalone run graph tool details and input/output inspectors restore from recorded journal IDs (November 16), including descendant tools and workflow read/retry ownership. Remaining: deeper nested workflow/plan/activity disclosures, journal availability/subscription diagnostics, attachment state and older-message history outside returned events. |
 | `desktop` / Desktop | selected node and connection | Primary route/title and URL-selected node covered; connect/input/credentials remain explicit runtime actions. |
 | `desk` / Desk + voice | Fleet/Services/Agents glance tab, voice call, transcript, setup, mute | `tab=services` / `tab=agents` restore from fresh links and history; default fleet ignores stale local preferences, invalid tabs replace to the default, and titles match. Tab transitions retain the voice subtree without reconnecting. Calls and permissions stay explicit. The call owner now stays mounted across primary views, node changes and screen-remote navigation. Voice requests stay on the serving daemon’s hub relay; idle configuration refreshes on return. Simulated live-room tests prove no disconnect/reconnect during navigation, release of push-to-talk when hidden, and disconnect on authentication lock. Real calls/microphones are not used by tests. |
 | `projects` / Projects | selected project, nested slug, unassigned repos, query | URL selection, canonical default, filter, title, missing project covered. Nested slugs use the same `p` key. Editing launches Files/Editor. |
@@ -964,3 +964,42 @@ new-tab/history links, canonical bounds, missing selections, retained owners and
 late denied reads across signer and lock changes. The fixture records both run and
 session subscriptions and rejects message/session mutations. Original-source/native
 file opening, attachment previews and nested standalone run details remain pending.
+
+
+## 2026-11-16: Standalone run tool details and input/output inspectors
+
+Nested `r=run/<id>` routes accept repeated `detail=<recorded-tool-id>` and a
+single `tool=<recorded-tool-id>`. IDs use the existing journal identity
+`wf-<owning-run-id>:<call-sequence>`; reserved characters are encoded normally.
+Selections are sorted, deduplicated and bounded at 100 details/512 characters
+per ID. Invalid values replace in place. Details imply `calls=open`; collapsing
+the tool list clears its details in the same transition. Input/output is a
+single inspector, independent of tool-list expansion. Its selection takes
+precedence over the error popover, so direct links canonicalize to one modal.
+
+Direct opens, reload/new tabs and Back/Forward retain the signer node and
+selected server. Explicit opens/closes push once. URL changes retain the mounted
+run graph and journal subscription without repeating the root/graph reads.
+Titles describe the displayed inspector before background disclosures, and
+workflow detail reads own their loading, denied, missing, unavailable and
+malformed outcomes. Retry keeps the same URL and never executes a workflow.
+Late results cannot name a different run, node, selection or locked view.
+
+Only tools recorded in the displayed run or its known descendants can render.
+Unknown selections remain visible as waiting, with no arbitrary tool/event read.
+If the graph read fails before resolving a selection, the same URL offers a
+read-only retry. The journal protocol still has no completion marker, so this
+slice does not claim historical availability or distinguish every absent tool
+from one that has not arrived. Subscription failure diagnostics, deeper nested
+plan/activity controls, attachment/original-file and older-message windows,
+Commander/live-seat and native/device cases remain pending.
+
+Repeat after typecheck/build:
+`bun test tests/seed-titles-browser.test.ts --test-name-pattern 'Seed standalone run tools' --timeout 30000`.
+The production UI and actual pinned package use synthetic read-only signed
+responses. The fixture rejects mutations and covers reserved descendant IDs,
+external servers, direct/reload/new-tab/history restoration, normalization and
+limits, retained owners/read counts, loading/failures/retry, late reads and lock,
+and phone/desktop dialog bounds. `CYBERDECK_TEST_ORIGIN` selects private installed
+assets; `CYBERDECK_NAV_SHOTS` saves settled screenshots. Keep the agents-ui
+0.1.11 patch and verify byte parity from a disposable frozen install.

@@ -36,6 +36,8 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       case "session-detail-read": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && !!selected.expandedDetails?.includes(outcome.path);
       case "session-tool": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && selected.panel === "tool" && selected.toolId === outcome.toolId && (selected.fullPayload || "") === outcome.path;
       case "trigger": return selected.key === "agent" && selected.triggerId === outcome.triggerId;
+      case "run-details": return selected.key === "agent-run" && selected.runId === outcome.runId && JSON.stringify([selected.expandedDetails || [], selected.toolId || ""]) === outcome.path;
+      case "run-detail-read": return selected.key === "agent-run" && selected.runId === outcome.runId && !!selected.expandedDetails?.includes(outcome.path);
       case "run-error": return selected.key === "agent-run" && selected.runId === outcome.runId && selected.errorRunId === outcome.path;
       case "run-tools": return selected.key === "agent-run" && selected.runId === outcome.runId && selected.runTools === outcome.path;
       case "run-disclosure": return selected.key === "agent-run" && selected.runId === outcome.runId && JSON.stringify([!!selected.runCode, !!selected.runActivity, selected.activityEntries || []]) === outcome.path;
@@ -49,7 +51,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       if (!mounted.current || owner.host !== host || !owns(owner.route, outcome)) return;
       setResults(previous => {
         const values = previous?.host === host ? previous.values : {};
-        const key = outcome.kind === "child-session-list" ? `${outcome.kind}:${outcome.listOwner}:${outcome.path}` : outcome.kind === "session-detail-read" ? `${outcome.kind}:${outcome.sessionId}:${outcome.path}` : outcome.kind;
+        const key = outcome.kind === "child-session-list" ? `${outcome.kind}:${outcome.listOwner}:${outcome.path}` : outcome.kind === "session-detail-read" ? `${outcome.kind}:${outcome.sessionId}:${outcome.path}` : outcome.kind === "run-detail-read" ? `${outcome.kind}:${outcome.runId}:${outcome.path}` : outcome.kind;
         const old = values[key];
         if (old && old.error === outcome.error) {
           const { error: _oldError, ...oldValue } = old;
@@ -71,6 +73,9 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
   const children = results?.host === host ? Object.values(results.values).filter((value): value is Outcome => !!value && value.kind === "child-session-list" && owns(route, value)) : [];
   const child = children.find(value => value.error) || children.find(value => value.pending);
   const dialog = get("server-dialog"), disclosure = get("run-disclosure"), runError = get("run-error"), runTools = get("run-tools");
+  const runDetails = get("run-details");
+  const runDetailReads = results?.host === host ? Object.values(results.values).filter((value): value is Outcome => !!value && value.kind === "run-detail-read" && owns(route, value)) : [];
+  const runDetailRead = runDetailReads.find(value => value.error) || runDetailReads.find(value => value.pending);
   const details = get("session-details"), handoff = get("session-handoff");
   const detailReads = results?.host === host ? Object.values(results.values).filter((value): value is Outcome => !!value && value.kind === "session-detail-read" && owns(route, value)) : [];
   const detailRead = detailReads.find(value => value.error) || detailReads.find(value => value.pending);
@@ -110,8 +115,13 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
     title = run.error ? failure(run.error, "Run")
       : runError?.error ? failure(runError.error, "Run error")
       : route.errorRunId ? `${runError && !runError.pending ? "Error" : "Loading error"} · ${runError?.name || route.errorRunId} · Seed run`
+      : route.toolId ? runDetails?.error && !runDetails.name ? failure(runDetails.error, "Run tools")
+        : `${runDetails?.name ? "Tool input/output" : "Waiting for tool"} · ${runDetails?.name || route.toolId} · ${run.name?.trim() || route.runId} · Seed run`
+      : runDetails?.error ? failure(runDetails.error, "Run tools")
+      : runDetailRead?.error ? failure(runDetailRead.error, "Workflow run")
+      : runDetailRead?.pending ? "Loading workflow run · Seed"
       : disclosure?.error ? failure(disclosure.error, "Workflow source")
-      : `${runTools?.pending ? "Waiting for tool calls · " : ""}${disclosure?.pending ? "Waiting for activity · " : ""}${route.runCode ? "Code · " : ""}${route.runTools ? `Tool calls ${route.runTools === "open" ? "open" : "collapsed"} · ` : ""}${route.runActivity ? route.activityEntries?.length ? `${route.activityEntries.length} activity entr${route.activityEntries.length === 1 ? "y" : "ies"} · ` : "Activity · " : ""}${run.name?.trim() || route.runId} · Seed run`;
+      : `${runDetails?.pending ? "Waiting for selected tools · " : ""}${route.expandedDetails?.length ? `${route.expandedDetails.length} tool detail${route.expandedDetails.length === 1 ? "" : "s"} · ` : ""}${runTools?.pending ? "Waiting for tool calls · " : ""}${disclosure?.pending ? "Waiting for activity · " : ""}${route.runCode ? "Code · " : ""}${route.runTools ? `Tool calls ${route.runTools === "open" ? "open" : "collapsed"} · ` : ""}${route.runActivity ? route.activityEntries?.length ? `${route.activityEntries.length} activity entr${route.activityEntries.length === 1 ? "y" : "ies"} · ` : "Activity · " : ""}${run.name?.trim() || route.runId} · Seed run`;
   }
   return { host: observed, title };
 }
