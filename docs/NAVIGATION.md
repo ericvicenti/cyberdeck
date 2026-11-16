@@ -1,8 +1,8 @@
 # Cyberdeck navigation coverage
 
-Updated 2026-11-15. This is an implementation inventory, not a completion claim.
+Updated 2026-11-16. This is an implementation inventory, not a completion claim.
 The nightly routine and fleet deployment status live in Deck's
-`handoff/routines/cyberdeck-navigation/2026-11-15.md`.
+`handoff/routines/cyberdeck-navigation/2026-11-16.md`.
 
 ## Source and rollout status
 
