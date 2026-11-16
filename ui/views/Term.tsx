@@ -97,7 +97,7 @@ function TermPane({ session, onStatus, onRemove }: { session: LiveSession; onSta
   );
 }
 /** A Seed session in Seed's UI: tool calls, runs, plan, sub-sessions, model and stop/retry. */
-const transcriptKeys = ["panel", "event", "tool", "full", "thinking", "detail", "handoff"];
+const transcriptKeys = ["panel", "event", "tool", "full", "thinking", "detail", "handoff", "trigger-context"];
 function transcriptParams(params: URLSearchParams, next: Extract<SeedAgentsRoute, { key: "agent-session" }>) {
   const result = new URLSearchParams(params);
   for (const key of transcriptKeys) result.delete(key);
@@ -108,6 +108,7 @@ function transcriptParams(params: URLSearchParams, next: Extract<SeedAgentsRoute
   for (const id of next.expandedThinking || []) result.append("thinking", id);
   for (const id of next.expandedDetails || []) result.append("detail", id);
   for (const id of next.expandedHandoffs || []) result.append("handoff", id);
+  for (const field of next.expandedTriggerContext || []) result.append("trigger-context", field);
   return result;
 }
 function NativeSeedSession({ id, node, params }: { id: string; node: string; params: URLSearchParams }) {
@@ -124,8 +125,9 @@ function NativeSeedSession({ id, node, params }: { id: string; node: string; par
   const expandedThinking = [...new Set(params.getAll("thinking").filter(value => value.length > 0 && value.length <= 512 && !/[\u0000-\u001f]/.test(value)))].sort().slice(0, 100);
   const expandedDetails = [...new Set(params.getAll("detail").filter(value => value.length > 0 && value.length <= 512 && !/[\u0000-\u001f]/.test(value)))].sort().slice(0, 100);
   const expandedHandoffs = [...new Set(params.getAll("handoff").filter(value => /^[pt]:./.test(value) && value.length <= 514 && !/[\u0000-\u001f]/.test(value)))].sort().slice(0, 100);
+  const expandedTriggerContext = [...new Set(params.getAll("trigger-context").filter((value): value is "activity" | "instructions" | "prompt" => ["activity", "instructions", "prompt"].includes(value)))].sort();
   const route: Extract<SeedAgentsRoute, { key: "agent-session" }> = {
-    key: "agent-session", sessionId, eventId, panel, expandedThinking, expandedDetails, expandedHandoffs,
+    key: "agent-session", sessionId, eventId, panel, expandedThinking, expandedDetails, expandedHandoffs, expandedTriggerContext,
     toolId: panel === "tool" ? toolId : undefined,
     fullPayload: panel === "tool" && (full === "input" || full === "output" || full === "both") ? full : undefined,
   };

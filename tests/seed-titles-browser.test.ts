@@ -22,6 +22,7 @@ let sessionReadStatus = 200, runReadStatus = 200, listReadStatus = 200, holdList
 let payloadStatus = 200, holdPayload = false, malformedPayload = "";
 let detailRunStatus = 200, holdDetailRun = false, malformedDetailRun = "";
 let holdHandoffRead = false, handoffReadStatus = 200;
+let holdTriggerRead = false, triggerReadStatus = 200;
 let emptySeedLists = false, childEmpty = false;
 let childLists = false, childReadStatus = 200, holdChildRead = false, malformedChild = false;
 let globalPaged = false, globalListStatus = 200, globalFailCursor = "", holdGlobalList = false, malformedList = "";
@@ -73,7 +74,7 @@ const handoffEvents = [
  { type: "tool_result", toolCallId: continuationId, name: "continue_session", output: { successorSessionId: "two", title: "Recorded successor" } },
  { type: "message", role: "assistant", content: "Recorded continuation complete" },
 ];
-const transcriptEvents = (id: string) => id === "handoffs" ? handoffEvents.map((event,index)=>({id:index?`handoff-event-${index+1}`:projectionId,sessionId:id,seq:index+1,createdAt:index+1,event})) : id === "workflow-details" ? workflowEvents.map((event, index) => ({id: `workflow-event-${index + 1}`, sessionId: id, seq: index + 1, createdAt: index + 1, event})) : id === "contexts" ? ["context-one", "context two/?&", "no-context"].map((eventId, index) => ({
+const transcriptEvents = (id: string) => id.startsWith("triggered") ? [{ id: "trigger-message", sessionId: id, seq: 1, createdAt: 1, event: { type: "message", role: "user", content: id === "triggered-no-instructions" ? "Recorded trigger session" : "Recorded trigger session\n<trigger_context>\n<trigger_instructions>\nRecorded instructions body\n</trigger_instructions>\n</trigger_context>" } }] : id === "handoffs" ? handoffEvents.map((event,index)=>({id:index?`handoff-event-${index+1}`:projectionId,sessionId:id,seq:index+1,createdAt:index+1,event})) : id === "workflow-details" ? workflowEvents.map((event, index) => ({id: `workflow-event-${index + 1}`, sessionId: id, seq: index + 1, createdAt: index + 1, event})) : id === "contexts" ? ["context-one", "context two/?&", "no-context"].map((eventId, index) => ({
  id: eventId, sessionId: id, seq: index + 1, createdAt: index + 1,
  event: { type: "message", role: "user", content: `Context fixture message ${index + 1}`, ...(index < 2 ? { contextLines: [`Recorded window ${index + 1}`, `Recorded project ${index + 1}`] } : {}) },
 })) : id === "thinking" ? thinkingEvents.map((event, index) => ({ id: `thinking-event-${index + 1}`, sessionId: id, seq: index + 1, createdAt: index + 1, event })) : id === "tools" ? toolEvents.map((event, index) => ({
@@ -115,6 +116,11 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch
       if (status !== 200) return fail(status, "Memory content read failed");
     }
     if(hold && (id === "slow" || (node === "peer-a" && action._ === "GetAgent"))) await new Promise<void>(r=>pending.add(r));
+    if (action._ === "GetSession" && id.startsWith("triggered")) {
+      const status=triggerReadStatus;
+      if(holdTriggerRead)await new Promise<void>(resolve=>pending.add(resolve));
+      if(status!==200)return fail(status,"Recorded trigger transcript read failed");
+    }
     if (action._ === "GetSession" && id === "handoffs") {
       const status = handoffReadStatus;
       if (holdHandoffRead) await new Promise<void>(r=>pending.add(r));
@@ -192,7 +198,7 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch
     }
     switch(action._){
       case "GetAgent":return ok({_:"GetAgentResponse",agent:agent(id,node),sessionCount:0});
-      case "GetSession":return ok({_:"GetSessionResponse",session:session(id,node),events:transcriptEvents(id),systemPromptMarkdown:"Fixture system prompt — read only"});
+      case "GetSession":return ok({_:"GetSessionResponse",session:session(id,node),events:transcriptEvents(id),systemPromptMarkdown:"Fixture system prompt — read only", ...(id.startsWith("triggered") ? { triggerContext: {triggerId:"fixture-trigger",triggerName:"Recorded schedule",firingId:"firing /?&",source:{type:"schedule",schedule:{kind:"weekly",daysOfWeek:[1],timeOfDay:"09:00",timezone:"UTC"}},activityKey:"recorded:activity",activitySummary:"Recorded schedule tick",activity:{kind:"fixture",value:"Recorded activity payload"},firedAt:1,status:"fired",...(id!=="triggered-no-prompt" ? {prompt:"Recorded prompt body"} : {})} } : {})});
       case "GetRun":return ok({_:"GetRunResponse",run:run(id,node)});
       case "GetAgentTrigger":return ok({_:"GetAgentTriggerResponse",trigger:{id,agentId:"alpha",account,name:"Morning review",enabled:true,source:{type:"schedule",schedule:{kind:"weekly",daysOfWeek:[1],timeOfDay:"09:00",timezone:"UTC"}},prompt:"Fixture",createdAt:1,updatedAt:2},sessions:[],firings:[]});
       case "ListAgents":return ok({_:"ListAgentsResponse",agents:emptySeedLists ? [] : [agent("alpha",node),agent("beta",node)]});
@@ -260,7 +266,7 @@ async function fresh(fn:(page:Page)=>Promise<void>){
  page.setDefaultNavigationTimeout(process.env.CYBERDECK_TEST_ORIGIN ? 30000 : 12000);
  await page.route("**/*",route=>new URL(route.request().url()).origin===server.url.origin?route.continue():route.abort());
  try{await fn(page);}catch(e){console.error(JSON.stringify({title:await page.title(),body:(await page.locator("body").innerText()).slice(0,1800),errors,actions:actions.slice(-15)}));throw e;}
- finally{nestedRunTools=false;holdRunJournal=false;holdHandoffRead=false;handoffReadStatus=200;detailRunStatus=200;holdDetailRun=false;malformedDetailRun="";graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
+ finally{holdTriggerRead=false;triggerReadStatus=200;nestedRunTools=false;holdRunJournal=false;holdHandoffRead=false;handoffReadStatus=200;detailRunStatus=200;holdDetailRun=false;malformedDetailRun="";graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
 }
 const href=(path:string,node="")=>`${server.url}#/seed?${new URLSearchParams({r:path,...(node?{node}:{})})}`;
 const title=(page:Page,value:string)=>page.waitForFunction(value=>document.title===value,value);
@@ -1815,13 +1821,14 @@ test("Seed standalone run tools canonicalize duplicate, invalid, bounded and hid
 }), browserBudget);
 
 test("Seed standalone run tools wait for journal entries without fetching arbitrary content", () => fresh(async page => {
+ const readsBefore=reads.filter(row=>row.action._==="GetSessionEvent" || row.action._==="GetRunJournal").length;
  holdRunJournal=true;await page.goto(selectionHref(runToolQuery()));
  await title(page,`Waiting for tool · ${runDetailId} · local Review navigation · Seed run · Cyberdeck`);
  await page.getByText("Waiting for selected recorded tools…").waitFor();
  expect(await page.getByRole("dialog").count()).toBe(0);const link=page.url();
  holdRunJournal=false;for(const release of pending)release();pending.clear();
  await title(page,runInspectorTitle());expect(page.url()).toBe(link);
- expect(reads.filter(row=>row.action._==="GetSessionEvent" || row.action._==="GetRunJournal").length).toBe(0);
+ expect(reads.filter(row=>row.action._==="GetSessionEvent" || row.action._==="GetRunJournal").length).toBe(readsBefore);
 }), browserBudget);
 
 test("Seed standalone run tools preserve absent journal selections and graph errors retry at the same URL", () => fresh(async page => {
@@ -1939,3 +1946,98 @@ test("Seed standalone run tools give the visible inspector title ownership over 
  await page.keyboard.press("Escape");await title(page,selectionTitle("Waiting for selected tools · 1 tool detail · Tool calls open · "));
  await page.getByText("Waiting for selected recorded tools…").waitFor();
 }), browserBudget);
+
+const triggerSections=["activity","instructions","prompt"] as const;
+const triggerLabels={activity:"Activity details",instructions:"Trigger instructions",prompt:"Trigger prompt"};
+const triggerHref=(view:string,sections:readonly string[]=triggerSections,node="",id="triggered")=>{
+ const q=new URLSearchParams();for(const field of sections)q.append("trigger-context",field);
+ return view==="Seed" ? href(`session/${id}${q.size?`?${q}`:""}`,node) : `${server.url}#/term?${new URLSearchParams({session:`seed-${id}`,filter:"retained",...(node?{node}:{})})}${q.size?`&${q}`:""}`;
+};
+const triggerTitle=(sections:readonly string[]=triggerSections,node="local")=>`${sections.length?`${[...sections].sort().map(field=>triggerLabels[field as keyof typeof triggerLabels]).join(" + ")} · Recorded schedule · `:""}${node} First conversation · Seed session${node!=="local"?" · Peer B":""} · Cyberdeck`;
+for(const view of ["Seed","Sessions"]){
+ test(`${view} recorded trigger context restores direct links, reload, fresh tabs and selected nodes`,()=>fresh(async page=>{
+  await page.goto(triggerHref(view,triggerSections,"peer-b"));await title(page,triggerTitle(triggerSections,"peer-b"));
+  for(const field of triggerSections)expect(await page.getByRole("button",{name:triggerLabels[field],exact:true}).getAttribute("aria-expanded")).toBe("true");
+  await page.getByText("Recorded prompt body",{exact:true}).waitFor();await page.getByText("Recorded instructions body",{exact:true}).waitFor();await page.getByText(/Recorded activity payload/).waitFor();
+  await page.reload();await title(page,triggerTitle(triggerSections,"peer-b"));
+  const link=page.url();await fresh(async tab=>{await tab.goto(link);await title(tab,triggerTitle(triggerSections,"peer-b"));});
+ }),browserBudget);
+ test(`${view} recorded trigger context pushes once and retains the transcript, composer and subscription`,()=>fresh(async page=>{
+  await page.goto(triggerHref(view,[]));await title(page,triggerTitle([]));
+  const button=page.getByRole("button",{name:"Trigger prompt",exact:true});await button.waitFor();
+  const composer=page.locator("textarea").first();await composer.evaluate(el=>(el as any).__fixtureOwner="same trigger composer");await composer.fill("Keep this unsent draft");
+  const count=await page.evaluate(()=>history.length),readCount=reads.length,subCount=subscriptions.length;
+  await button.click();await title(page,triggerTitle(["prompt"]));expect(await page.evaluate(()=>history.length)).toBe(count+1);
+  await page.getByRole("button",{name:"Activity details",exact:true}).click();await title(page,triggerTitle(["activity","prompt"]));
+  await page.goBack();await title(page,triggerTitle(["prompt"]));await page.goBack();await title(page,triggerTitle([]));
+  await page.goForward();await title(page,triggerTitle(["prompt"]));
+  expect(await composer.evaluate(el=>(el as any).__fixtureOwner)).toBe("same trigger composer");expect(await composer.inputValue()).toBe("Keep this unsent draft");
+  expect(reads.length).toBe(readCount);expect(subscriptions.length).toBe(subCount);
+  if(view==="Sessions")expect(new URLSearchParams(new URL(page.url()).hash.slice(7)).get("filter")).toBe("retained");
+ }),browserBudget);
+ test(`${view} recorded trigger context canonicalizes duplicates and unsupported selections with replace`,()=>fresh(async page=>{
+  await page.goto(triggerHref(view,["prompt","activity","prompt","","unknown","PROMPT","instructions"]));await title(page,triggerTitle());
+  const q=view==="Seed"?new URLSearchParams(selectedPath(page.url())!.split("?")[1]):new URLSearchParams(new URL(page.url()).hash.split("?")[1]);
+  expect(q.getAll("trigger-context")).toEqual([...triggerSections]);
+  await page.goto(triggerHref(view,["unknown"]));await title(page,triggerTitle([]));
+  expect(page.url()).not.toContain("trigger-context");
+ }),browserBudget);
+ test(`${view} recorded trigger context keeps absent prompt, instructions and context honest`,()=>fresh(async page=>{
+  for(const [id,sections] of [["one",["activity"]],["triggered-no-prompt",["prompt"]],["triggered-no-instructions",["instructions"]]] as const){
+   await page.goto(triggerHref(view,sections,"",id));await title(page,"Trigger context not found · Seed · Cyberdeck");
+   await page.getByRole("alert").getByText("Selected trigger context is not in this transcript.",{exact:true}).waitFor();
+   expect(page.url()).toContain("trigger-context");
+  }
+ }),browserBudget);
+ test(`${view} recorded trigger context read failures retry at the same URL without firing anything`,()=>fresh(async page=>{
+  for(const [status,label] of [[403,"Access denied"],[404,"Session not found"],[503,"Session unavailable"]] as const){
+   await page.goto("about:blank");triggerReadStatus=status;await page.goto(triggerHref(view,["activity"]));await title(page,`${label} · Seed · Cyberdeck`);
+   const link=page.url(),count=await page.evaluate(()=>history.length);triggerReadStatus=200;
+   await page.getByRole("button",{name:"Retry",exact:true}).click();await title(page,triggerTitle(["activity"]));
+   expect(page.url()).toBe(link);expect(await page.evaluate(()=>history.length)).toBe(count);
+  }
+ }),browserBudget);
+ test(`${view} recorded trigger context ignores late denied transcripts after node and lock changes`,()=>fresh(async page=>{
+  holdTriggerRead=true;triggerReadStatus=403;await page.goto(triggerHref(view,["prompt"]));while(!pending.size)await page.waitForTimeout(10);
+  holdTriggerRead=false;triggerReadStatus=200;
+  await page.evaluate(url=>location.hash=new URL(url).hash,triggerHref(view,["activity"],"peer-b"));await title(page,triggerTitle(["activity"],"peer-b"));
+  for(const release of pending)release();pending.clear();await page.waitForTimeout(100);expect(await page.title()).toBe(triggerTitle(["activity"],"peer-b"));
+  await page.route("**/api/fs/list**",route=>route.fulfill({status:401,json:{error:"Locked"}}));
+  await page.evaluate(()=>location.hash="#/files");await title(page,"Locked · Cyberdeck");expect(await page.getByText("Recorded activity payload",{exact:false}).count()).toBe(0);
+ }),browserBudget);
+}
+
+for(const view of ["Seed","Sessions"])test(`${view} recorded trigger context message links retain the selected fields and signer`,()=>fresh(async page=>{
+ await page.goto(triggerHref(view,["activity"],"peer-b"));await title(page,triggerTitle(["activity"],"peer-b"));
+ await page.getByRole("button",{name:"Show markdown sent to the LLM",exact:true}).first().click();
+ const share=await page.getByRole("dialog").locator("code").innerText();
+ const outer=new URLSearchParams(new URL(share).hash.slice(7));
+ expect(outer.get("node")).toBe("peer-b");
+ const query=view==="Seed"?new URLSearchParams(outer.get("r")!.split("?")[1]):outer;
+ expect(query.getAll("trigger-context")).toEqual(["activity"]);
+ await page.keyboard.press("Escape");
+ await page.getByRole("button",{name:"Trigger prompt",exact:true}).click();await title(page,"Message · "+triggerTitle(["activity","prompt"],"peer-b"));
+ await page.getByRole("button",{name:"Show markdown sent to the LLM",exact:true}).first().click();
+ const updated=new URLSearchParams(new URL(await page.getByRole("dialog").locator("code").innerText()).hash.slice(7));
+ expect((view==="Seed"?new URLSearchParams(updated.get("r")!.split("?")[1]):updated).getAll("trigger-context")).toEqual(["activity","prompt"]);
+}),browserBudget);
+
+test("Seed recorded trigger context cannot publish delayed contents after authentication lock",()=>fresh(async page=>{
+ holdTriggerRead=true;await page.goto(triggerHref("Seed",["activity"]));while(!pending.size)await page.waitForTimeout(10);
+ await page.route("**/api/fs/list**",route=>route.fulfill({status:401,json:{error:"Locked"}}));
+ await page.evaluate(()=>location.hash="#/files");await title(page,"Locked · Cyberdeck");
+ holdTriggerRead=false;for(const release of pending)release();pending.clear();await page.waitForTimeout(100);
+ expect(await page.title()).toBe("Locked · Cyberdeck");expect(await page.getByText("Recorded prompt body",{exact:true}).count()).toBe(0);
+}),browserBudget);
+
+test("Seed recorded trigger context and missing-field states fit phone and desktop in both color schemes",()=>fresh(async page=>{
+ for(const width of [390,1280])for(const colorScheme of ["light","dark"] as const){
+  await page.setViewportSize({width,height:1000});await page.emulateMedia({colorScheme});
+  for(const state of ["expanded","missing"]){
+   await page.goto(triggerHref("Seed",state==="expanded"?triggerSections:["prompt"],"",state==="expanded"?"triggered":"triggered-no-prompt"));
+   await title(page,state==="expanded"?triggerTitle():"Trigger context not found · Seed · Cyberdeck");await page.waitForTimeout(180);
+   expect(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)).toBe(false);
+   if(process.env.CYBERDECK_NAV_SHOTS)await page.screenshot({path:join(process.env.CYBERDECK_NAV_SHOTS,`trigger-context-${state}-${width}-${colorScheme}.png`)});
+  }
+ }
+}),browserBudget);
