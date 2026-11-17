@@ -42,6 +42,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       case "run-error": return selected.key === "agent-run" && selected.runId === outcome.runId && selected.errorRunId === outcome.path;
       case "run-tools": return selected.key === "agent-run" && selected.runId === outcome.runId && selected.runTools === outcome.path;
       case "run-disclosure": return selected.key === "agent-run" && selected.runId === outcome.runId && JSON.stringify([!!selected.runCode, !!selected.runActivity, selected.activityEntries || []]) === outcome.path;
+      case "run-journal":
       case "run": return selected.key === "agent-run" && selected.runId === outcome.runId;
     }
   };
@@ -74,7 +75,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
   const children = results?.host === host ? Object.values(results.values).filter((value): value is Outcome => !!value && value.kind === "child-session-list" && owns(route, value)) : [];
   const child = children.find(value => value.error) || children.find(value => value.pending);
   const dialog = get("server-dialog"), disclosure = get("run-disclosure"), runError = get("run-error"), runTools = get("run-tools");
-  const runDetails = get("run-details");
+  const runDetails = get("run-details"), journal = get("run-journal");
   const runDetailReads = results?.host === host ? Object.values(results.values).filter((value): value is Outcome => !!value && value.kind === "run-detail-read" && owns(route, value)) : [];
   const runDetailRead = runDetailReads.find(value => value.error) || runDetailReads.find(value => value.pending);
   const triggerContext = get("session-trigger-context");
@@ -116,6 +117,8 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       : `${route.panel === "handoff" ? "Handoff projection · " : route.panel === "prompt" ? "Current system prompt · " : route.panel === "context" ? "Message context · " : route.panel === "tool" ? `${!tool || tool.pending ? "Loading tool payload · " : route.fullPayload ? `Full ${route.fullPayload === "both" ? "input/output" : route.fullPayload} · ` : "Tool input/output · "}${tool?.name || route.toolId} · ` : route.eventId ? "Message · " : ""}${route.expandedTriggerContext?.length ? `${route.expandedTriggerContext.map(field => ({ activity: "Activity details", instructions: "Trigger instructions", prompt: "Trigger prompt" })[field]).join(" + ")} · ${triggerContext?.name ? `${triggerContext.name} · ` : ""}` : ""}${route.expandedHandoffs?.length ? `${route.expandedHandoffs.length} expanded handoff${route.expandedHandoffs.length === 1 ? "" : "s"} · ` : ""}${route.expandedDetails?.length ? `${route.expandedDetails.length} tool detail${route.expandedDetails.length === 1 ? "" : "s"} · ` : ""}${!route.panel && route.expandedThinking?.length ? `${route.expandedThinking.length} expanded tool group${route.expandedThinking.length === 1 ? "" : "s"} · ` : ""}${session.name?.trim() || "Untitled session"} · Seed session`;
   } else if (run && route.key === "agent-run") {
     title = run.error ? failure(run.error, "Run")
+      : journal?.error ? failure(journal.error, "Run updates")
+      : journal?.pending ? "Reconnecting run updates · Seed"
       : runError?.error ? failure(runError.error, "Run error")
       : route.errorRunId ? `${runError && !runError.pending ? "Error" : "Loading error"} · ${runError?.name || route.errorRunId} · Seed run`
       : route.toolId ? runDetails?.error && !runDetails.name ? failure(runDetails.error, "Run tools")

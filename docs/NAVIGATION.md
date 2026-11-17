@@ -1,8 +1,8 @@
 # Cyberdeck navigation coverage
 
-Updated 2026-11-16. This is an implementation inventory, not a completion claim.
+Updated 2026-11-17. This is an implementation inventory, not a completion claim.
 The nightly routine and fleet deployment status live in Deck's
-`handoff/routines/cyberdeck-navigation/2026-11-16.md`.
+`handoff/routines/cyberdeck-navigation/2026-11-17.md`.
 
 ## Source and rollout status
 
@@ -70,7 +70,7 @@ credentials should not be replayed from a link.
 | GamesSection / Games | installed native games and import form | Part of Applications. Play/import are actions; no automatic execution from links. |
 | CaseworkConsole | selected device, events, camera/media/QR, calls, native scene actions | Selected device is covered by `device=<id>`, including canonical default, reload/history, missing-device error/title and no action replay. Visited consoles retain their socket, calls and previews across apps, primary views, node URLs and history; lock tears them down. `media=<stored-name>` fetches only an existing authenticated upload: fresh open, reload and history never capture, upload or autoplay. Invalid, missing and denied previews have matching errors/titles. Tests use synthetic devices/tracks only. |
 | `applications?app=afterglow&tab=music` / Spotify (the listening room), SpotifyRecordings, SpotifyVisualizer | shelves, entities, query, pagination, recordings, immersive mode | One player everywhere, inside Afterglow: `shelf`, `id`, `q`, `radio`, `page`, `immersive` and `shelf=history&recording=<id>` restore through direct links, reload and history; OAuth returns to the requested content, including saved recordings; read failures and unavailable pages retain the link with an honest title and read-only retry. Late or hidden reads cannot replace another view; no link starts playback; the SDK/player stays mounted through URL and primary-view changes. Legacy `#/spotify` links are rewritten. |
-| `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session/message/tool/prompt, list pages, run, server, node | Nested paths, canonical defaults/errors, Back/Forward and node-preserving new-window links covered. Titles observe the displayed authenticated reads, including external servers; late responses are bound to the signing host/account, server and entity. Session message/prompt/tool inspectors and full tool input/output restore without replacing the transcript or composer. Agent session-list page counts restore and retry. Global/server list rounds and sub-session disclosures also restore (November 9). Server account/provider read dialogs restore through `dialog=accounts|providers`, with route-owned loading/errors and retry (November 10); write forms and credentials stay transient. Expanded transcript tool groups and recorded message Context popovers restore in Seed and Sessions (November 10). Run Code/Activity/full-entry disclosures restore from URLs and history (November 11). Run Tool calls open/collapsed state and root/child error popovers restore with displayed-read titles and graph retry (November 14). Recorded transcript tool details now restore with bounded, sorted `detail=<tool-call-id>` parameters in both Seed and Sessions (November 15). Selected details open their containing group; collapsing the group clears its details in one history transition. Composer, transcript and subscriptions survive disclosure/history edits. Workflow-plan reads have owned loading, denied/missing/unavailable/invalid states and read-only retry at the same URL. Message-share links retain selected details, server and signing node. Incoming continuation summaries, outgoing handoff summaries and full incoming projection dialogs now restore in both Seed and Sessions (November 15); namespaced, bounded `handoff=p:<event-id>|t:<call-id>` values and `panel=handoff&event=<event-id>` reconstruct recorded content without following or creating a successor. Missing handoffs keep honest titles, invalid/default values canonicalize, and history retains the composer and subscription. Standalone run graph tool details and input/output inspectors restore from recorded journal IDs (November 16), including descendant tools and workflow read/retry ownership. Recorded trigger prompt, activity and instructions disclosures restore in Seed and Sessions (November 16), including message links, missing-field titles and read-only retry. Remaining: deeper nested workflow/plan/activity disclosures, journal availability/subscription diagnostics, attachment state and older-message history outside returned events. |
+| `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session/message/tool/prompt, list pages, run, server, node | Nested paths, canonical defaults/errors, Back/Forward and node-preserving new-window links covered. Titles observe the displayed authenticated reads, including external servers; late responses are bound to the signing host/account, server and entity. Session message/prompt/tool inspectors and full tool input/output restore without replacing the transcript or composer. Agent session-list page counts restore and retry. Global/server list rounds and sub-session disclosures also restore (November 9). Server account/provider read dialogs restore through `dialog=accounts|providers`, with route-owned loading/errors and retry (November 10); write forms and credentials stay transient. Expanded transcript tool groups and recorded message Context popovers restore in Seed and Sessions (November 10). Run Code/Activity/full-entry disclosures restore from URLs and history (November 11). Run Tool calls open/collapsed state and root/child error popovers restore with displayed-read titles and graph retry (November 14). Recorded transcript tool details now restore with bounded, sorted `detail=<tool-call-id>` parameters in both Seed and Sessions (November 15). Selected details open their containing group; collapsing the group clears its details in one history transition. Composer, transcript and subscriptions survive disclosure/history edits. Workflow-plan reads have owned loading, denied/missing/unavailable/invalid states and read-only retry at the same URL. Message-share links retain selected details, server and signing node. Incoming continuation summaries, outgoing handoff summaries and full incoming projection dialogs now restore in both Seed and Sessions (November 15); namespaced, bounded `handoff=p:<event-id>|t:<call-id>` values and `panel=handoff&event=<event-id>` reconstruct recorded content without following or creating a successor. Missing handoffs keep honest titles, invalid/default values canonicalize, and history retains the composer and subscription. Standalone run graph tool details and input/output inspectors restore from recorded journal IDs (November 16), including descendant tools and workflow read/retry ownership. Recorded trigger prompt, activity and instructions disclosures restore in Seed and Sessions (November 16), including message links, missing-field titles and read-only retry. Standalone run journal subscription/signing/connection errors now own visible interruption, reconnect/retry states and titles while retaining recorded content and links (November 17). Remaining: deeper nested workflow/plan/activity disclosures, historical journal completion and inline subscription diagnostics, attachment state and older-message history outside returned events. |
 | `desktop` / Desktop | selected node and connection | Primary route/title and URL-selected node covered; connect/input/credentials remain explicit runtime actions. |
 | `desk` / Desk + voice | Fleet/Services/Agents glance tab, voice call, transcript, setup, mute | `tab=services` / `tab=agents` restore from fresh links and history; default fleet ignores stale local preferences, invalid tabs replace to the default, and titles match. Tab transitions retain the voice subtree without reconnecting. Calls and permissions stay explicit. The call owner now stays mounted across primary views, node changes and screen-remote navigation. Voice requests stay on the serving daemon’s hub relay; idle configuration refreshes on return. Simulated live-room tests prove no disconnect/reconnect during navigation, release of push-to-talk when hidden, and disconnect on authentication lock. Real calls/microphones are not used by tests. |
 | `projects` / Projects | selected project, nested slug, unassigned repos, query | URL selection, canonical default, filter, title, missing project covered. Nested slugs use the same `p` key. Editing launches Files/Editor. |
@@ -1028,3 +1028,37 @@ read-only fixture supports installed assets through `CYBERDECK_TEST_ORIGIN` and
 settled screenshots through `CYBERDECK_NAV_SHOTS`. Broader journal, nested plan,
 attachment/older-window, Commander/live-seat and native/original-file acceptance
 remains open; this delivery does not disable the routine.
+
+
+## 2026-11-17: Standalone Seed run update failures
+
+The existing run URL remains authoritative when its journal subscription fails.
+Socket interruptions, explicit server errors, signing failures, invalid messages
+and a missing subscription acknowledgement after 15 seconds now show a visible
+interruption and an owned failure title. Retry reconnects only that read-only
+subscription, retains recorded content and the graph, and shows a reconnecting
+state. A matching subscription acknowledgement restores ordinary titles; an
+unrelated acknowledgement cannot clear the error. Automatic reconnection stays
+active. Neither retry nor reconnect writes history, executes a run, fetches an
+arbitrary selected tool, or restarts a transcript/session.
+
+Callbacks are bound to the server, signer, root and connection attempt, including
+async message decoding and signing. A previous connection cannot rename another
+run, node, view or Locked. Query edits and Back/Forward retain the current stream;
+explicit retry adds exactly one replacement subscription without another graph
+read. Authentication and primary run failures retain title precedence.
+
+Repeat after building: `bun test tests/seed-titles-browser.test.ts
+--test-name-pattern 'Seed run journal' --timeout 30000`. These production-bundle
+Chromium cases use synthetic read-only subscriptions and signing, including
+external-server/signing-node ownership, direct/reload/new-tab/history links,
+timeout, interruption/recovery, retained records and lock cleanup.
+`CYBERDECK_TEST_ORIGIN` selects private installed assets and
+`CYBERDECK_NAV_SHOTS` records phone/desktop screenshots under both color settings.
+Keep the pinned agents-ui 0.1.11 patch and check fresh frozen dependency parity.
+
+Historical replay still has no completion marker; an absent selected tool on a
+healthy stream remains waiting rather than falsely missing. Inline transcript
+subscription diagnostics, deeper nested plan/activity controls, attachments,
+older-message windows, Commander/live-seat and native/original-file boundaries
+remain open. This slice does not complete overall navigation acceptance.
