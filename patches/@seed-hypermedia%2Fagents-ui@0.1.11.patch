@@ -1,5 +1,5 @@
 diff --git a/chunks/index-ZHWGA37c.js b/chunks/index-ZHWGA37c.js
-index 46d2a63..077aa0c 100644
+index 46d2a63..2303989 100644
 --- a/chunks/index-ZHWGA37c.js
 +++ b/chunks/index-ZHWGA37c.js
 @@ -21335,10 +21335,15 @@ const hue = [
@@ -1712,7 +1712,7 @@ index 46d2a63..077aa0c 100644
          }
        ) }) : null,
 +      selected.errorRunId && !selectedError ? pendingError ? /* @__PURE__ */ f(W, { role: "status", children: "Loading selected run error…" }) : runGraphRead.error ? /* @__PURE__ */ f(z$e, { error: runGraphRead.error, failed: "Couldn’t load the selected run error", onRetry: () => runGraphRead.refetch(), retryPending: runGraphRead.isFetching }) : /* @__PURE__ */ f(W, { role: "alert", children: "The selected run error is not available in this run." }) : null,
-+      journalError ? /* @__PURE__ */ f("div", { className: "max-sm:[&_button]:min-h-11", children: /* @__PURE__ */ f(z$e, { error: journalError, failed: "Run updates interrupted", onRetry: d.retryJournal, retryPending: false }) }) : journalRetrying ? /* @__PURE__ */ f(W, { role: "status", children: "Reconnecting run updates…" }) : null,
++      journalError ? /* @__PURE__ */ f("div", { "data-run-journal-error": true, children: /* @__PURE__ */ f(z$e, { error: journalError, failed: "Run updates interrupted", onRetry: d.retryJournal, retryPending: false }) }) : journalRetrying ? /* @__PURE__ */ f(W, { role: "status", children: "Reconnecting run updates…" }) : null,
 +      /* @__PURE__ */ f(SeedRunToolSelection, { run: u, children: h, journal: d.journal, graphRead: runGraphRead, serverUrl: o, accountUid: r, journalError }),
        /* @__PURE__ */ f(d_, { run: u, serverUrl: o, accountUid: r }),
        /* @__PURE__ */ f("section", { className: "border-border bg-card flex flex-col gap-2 rounded-lg border p-3", children: /* @__PURE__ */ f(

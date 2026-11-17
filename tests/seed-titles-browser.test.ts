@@ -2103,7 +2103,7 @@ test("Seed run journal disconnected sockets report failure and recover automatic
 
 test("Seed run journal malformed stream messages are visible and retryable", () => fresh(async page => {
  runStreamMode="malformed";await page.goto(runHref("activity=1"));await title(page,interruptedTitle());
- await page.getByText("Run updates interrupted",{exact:true}).waitFor();runStreamMode="";
+ await page.getByText("Run updates interrupted",{exact:true}).waitFor();await page.getByText("Recorded activity could not be loaded.",{exact:true}).waitFor();runStreamMode="";
  await page.getByRole("button",{name:"Retry",exact:true}).click();await title(page,runTitle("Activity · "));
 }),browserBudget);
 
@@ -2139,6 +2139,10 @@ test("Seed run journal failure and recovery fit desktop and phone in both color 
   await page.goto(selectionHref(runDetailQuery()));await title(page,interruptedTitle());await page.waitForTimeout(200);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)).toBe(false);
   if(process.env.CYBERDECK_NAV_SHOTS)await page.screenshot({path:join(process.env.CYBERDECK_NAV_SHOTS,`journal-error-${width}-${colorScheme}.png`)});
+  if(width===390)expect((await page.getByRole("button",{name:"Retry",exact:true}).boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  runStreamMode="silent";await page.getByRole("button",{name:"Retry",exact:true}).click();await title(page,"Reconnecting run updates · Seed · Cyberdeck");await page.waitForTimeout(200);
+  if(process.env.CYBERDECK_NAV_SHOTS)await page.screenshot({path:join(process.env.CYBERDECK_NAV_SHOTS,`journal-reconnecting-${width}-${colorScheme}.png`)});
+  interruptRunSockets();await title(page,interruptedTitle());
   runStreamMode="";await page.getByRole("button",{name:"Retry",exact:true}).click();await title(page,runDetailsTitle());await page.waitForTimeout(200);
   if(process.env.CYBERDECK_NAV_SHOTS)await page.screenshot({path:join(process.env.CYBERDECK_NAV_SHOTS,`journal-recovered-${width}-${colorScheme}.png`)});
  }
