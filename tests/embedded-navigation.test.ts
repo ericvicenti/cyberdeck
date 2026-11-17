@@ -97,9 +97,9 @@ test("hidden apps retain timers but cannot change parent URL/title; return resto
   await page.evaluate(() => { location.hash = '#/controls'; }); await page.getByRole('heading', {name:'Controller & keyboard'}).waitFor();
   await f.evaluate(() => (window as any).bridge.navigate('/detail?id=hidden'));
   expect(new URL(page.url()).hash).toBe('#/controls'); expect(await page.title()).toBe('Controls · Cyberdeck');
-  // Chromium may throttle timers in hidden frames. Observe an actual hidden tick
-  // instead of assuming that a fast navigation round trip crosses an interval.
-  await f.waitForFunction(ticks => (window as any).ticks > ticks, ticks, {timeout: 5000});
+  // Hidden frames may throttle timers and pause animation frames entirely.
+  // Poll with timers so this wait can observe the retained hidden interval.
+  await f.waitForFunction(ticks => (window as any).ticks > ticks, ticks, {polling: 100, timeout: 5000});
   await page.goBack(); await settled('/library');
   expect(await f.evaluate(() => (window as any).identity)).toBe(identity);
   expect(await f.evaluate(() => (window as any).ticks)).toBeGreaterThan(ticks);
