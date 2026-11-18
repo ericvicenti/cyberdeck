@@ -14,6 +14,9 @@ let hold = false;
 let graphStatus = 200, holdGraph = false, malformedGraph = "";
 let holdRunJournal = false, nestedRunTools = false;
 let runStreamMode = "";
+let inlineListStatus = 200, inlineCardStatus = 200, holdInlineList = false, malformedInlineList = "", inlineSucceeded = false, malformedInlineCard = "";
+const inlineIds = ["inline-run /?&", "inline-second"];
+const inlineRun = (id: string, node: string) => ({...run(id,node),sessionId:"inline",status:inlineSucceeded ? "succeeded" : "failed",title:`Recorded ${id === inlineIds[0] ? "first" : "second"} run`,plan:{steps:[{id:"inline-step",label:"Recorded inline step",status:inlineSucceeded ? "done" : "failed"}]}});
 const runSockets = new Map<any, { node: string; key: string }>();
 const subscriptions: string[] = [];
 const errorChild = "failed child /?&";
@@ -76,7 +79,7 @@ const handoffEvents = [
  { type: "tool_result", toolCallId: continuationId, name: "continue_session", output: { successorSessionId: "two", title: "Recorded successor" } },
  { type: "message", role: "assistant", content: "Recorded continuation complete" },
 ];
-const transcriptEvents = (id: string) => id.startsWith("triggered") ? [{ id: "trigger-message", sessionId: id, seq: 1, createdAt: 1, event: { type: "message", role: "user", content: id === "triggered-no-instructions" ? "Recorded trigger session" : "Recorded trigger session\n<trigger_context>\n<trigger_instructions>\nRecorded instructions body\n</trigger_instructions>\n</trigger_context>" } }] : id === "handoffs" ? handoffEvents.map((event,index)=>({id:index?`handoff-event-${index+1}`:projectionId,sessionId:id,seq:index+1,createdAt:index+1,event})) : id === "workflow-details" ? workflowEvents.map((event, index) => ({id: `workflow-event-${index + 1}`, sessionId: id, seq: index + 1, createdAt: index + 1, event})) : id === "contexts" ? ["context-one", "context two/?&", "no-context"].map((eventId, index) => ({
+const transcriptEvents = (id: string) => id === "inline" ? [{id:"inline-message",sessionId:id,seq:1,createdAt:1,event:{type:"message",role:"user",content:"Inspect the recorded inline runs"}}] : id.startsWith("triggered") ? [{ id: "trigger-message", sessionId: id, seq: 1, createdAt: 1, event: { type: "message", role: "user", content: id === "triggered-no-instructions" ? "Recorded trigger session" : "Recorded trigger session\n<trigger_context>\n<trigger_instructions>\nRecorded instructions body\n</trigger_instructions>\n</trigger_context>" } }] : id === "handoffs" ? handoffEvents.map((event,index)=>({id:index?`handoff-event-${index+1}`:projectionId,sessionId:id,seq:index+1,createdAt:index+1,event})) : id === "workflow-details" ? workflowEvents.map((event, index) => ({id: `workflow-event-${index + 1}`, sessionId: id, seq: index + 1, createdAt: index + 1, event})) : id === "contexts" ? ["context-one", "context two/?&", "no-context"].map((eventId, index) => ({
  id: eventId, sessionId: id, seq: index + 1, createdAt: index + 1,
  event: { type: "message", role: "user", content: `Context fixture message ${index + 1}`, ...(index < 2 ? { contextLines: [`Recorded window ${index + 1}`, `Recorded project ${index + 1}`] } : {}) },
 })) : id === "thinking" ? thinkingEvents.map((event, index) => ({ id: `thinking-event-${index + 1}`, sessionId: id, seq: index + 1, createdAt: index + 1, event })) : id === "tools" ? toolEvents.map((event, index) => ({
@@ -153,6 +156,16 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch
       if (globalPaged) return ok({ _: "ListSessionsResponse", agents: [agent("alpha", node)],
         sessions: [session(action.cursor === "page-3" ? "older" : action.cursor === "page-2" ? "two" : "one", node)],
         nextCursor: action.cursor === "page-3" || node === "external" && action.cursor === "page-2" ? undefined : action.cursor === "page-2" ? "page-3" : "page-2" });
+    }
+    if (action._ === "ListRuns" && action.sessionId === "inline") {
+      const status=inlineListStatus, malformed=malformedInlineList;
+      if(holdInlineList) await new Promise<void>(resolve=>pending.add(resolve));
+      if(status!==200)return fail(status,"Recorded inline run list failed");
+      return ok(malformed === "response" ? {_:"GetRunResponse"} : {_:"ListRunsResponse",runs:malformed === "list" ? {} : malformed === "owner" ? [{...inlineRun(inlineIds[0],node),sessionId:"other"}] : malformed === "plan" ? [{...inlineRun(inlineIds[0],node),plan:{steps:{}}}] : inlineIds.map(id=>inlineRun(id,node))});
+    }
+    if(action._ === "GetRun" && inlineIds.includes(id)) {
+      if(inlineCardStatus!==200)return fail(inlineCardStatus,"Recorded inline run read failed");
+      return ok({_:"GetRunResponse",run:malformedInlineCard === "owner" ? {...inlineRun(id,node),sessionId:"other"} : malformedInlineCard === "id" ? inlineRun("other-run",node) : inlineRun(id,node)});
     }
     if (action._ === "ListRuns" && action.rootRunId === "failed-run") {
       const status = graphStatus, malformed = malformedGraph;
@@ -255,6 +268,13 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch
   if (runStreamMode === "silent") return;
  }
  ws.send(JSON.stringify({_:"subscribed",key:envelope.action.key,accountId:account}));
+ if(inlineIds.some(id=>envelope.action?.key === `runs/${id}`)) {
+  const id=envelope.action.key.slice(5);
+  for(let callSeq=1;callSeq<=7;callSeq++) {
+   ws.send(JSON.stringify({_:"append",key:envelope.action.key,runId:id,seq:callSeq*2-1,createdAt:callSeq*2-1,entry:{kind:"call",op:"tool",callSeq,tool:"read",input:{path:`Recorded inline call ${callSeq}`}}}));
+   ws.send(JSON.stringify({_:"append",key:envelope.action.key,runId:id,seq:callSeq*2,createdAt:callSeq*2,entry:{kind:"result",callSeq,status:"succeeded",output:{content:`Recorded inline result ${callSeq}`}}}));
+  }
+ }
  if(holdRunJournal && envelope.action?.key === "runs/failed-run") await new Promise<void>(resolve=>pending.add(resolve));
  if(envelope.action?.key === "runs/failed-run") for (let index=1;index<=7;index++) {
   ws.send(JSON.stringify({_:"append",key:"runs/failed-run",runId:"failed-run",seq:index*2-1,createdAt:index*2-1,entry:{kind:"call",op:"tool",callSeq:index,tool:"read",input:{path:`Recorded run call ${index}`}}}));
@@ -276,7 +296,7 @@ async function fresh(fn:(page:Page)=>Promise<void>){
  page.setDefaultNavigationTimeout(process.env.CYBERDECK_TEST_ORIGIN ? 30000 : 12000);
  await page.route("**/*",route=>new URL(route.request().url()).origin===server.url.origin?route.continue():route.abort());
  try{await fn(page);}catch(e){console.error(JSON.stringify({title:await page.title(),body:(await page.locator("body").innerText()).slice(0,1800),errors,actions:actions.slice(-15)}));throw e;}
- finally{runStreamMode="";holdTriggerRead=false;triggerReadStatus=200;nestedRunTools=false;holdRunJournal=false;holdHandoffRead=false;handoffReadStatus=200;detailRunStatus=200;holdDetailRun=false;malformedDetailRun="";graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
+ finally{malformedInlineCard="";inlineListStatus=200;inlineCardStatus=200;holdInlineList=false;malformedInlineList="";inlineSucceeded=false;runStreamMode="";holdTriggerRead=false;triggerReadStatus=200;nestedRunTools=false;holdRunJournal=false;holdHandoffRead=false;handoffReadStatus=200;detailRunStatus=200;holdDetailRun=false;malformedDetailRun="";graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
 }
 const href=(path:string,node="")=>`${server.url}#/seed?${new URLSearchParams({r:path,...(node?{node}:{})})}`;
 const title=(page:Page,value:string)=>page.waitForFunction(value=>document.title===value,value);
@@ -2190,4 +2210,108 @@ test("Seed run journal delayed signing cannot publish failure into a later signi
  await page.evaluate(link=>location.hash=new URL(link).hash,selectionHref(runToolQuery(),"peer-a"));await title(page,runInspectorTitle("peer-a"));
  release();await page.waitForTimeout(150);expect(await page.title()).toBe(runInspectorTitle("peer-a"));
  await page.getByRole("dialog").getByText(/Recorded run result 2/).waitFor();
+}),browserBudget);
+
+const inlineHref = (view: string, states: string[] = [], node = "", external = false) => {
+ const query=new URLSearchParams();for(const value of states)query.append("inline-calls",value);
+ if(external)query.set("server",`${server.url}seed-fixture/external`);
+ return view === "Seed" ? href(`session/inline${query.size ? `?${query}` : ""}`,node)
+  : `${server.url}#/term?${new URLSearchParams({session:"seed-inline",...(node ? {node} : {})})}${query.size ? `&${query}` : ""}`;
+};
+const inlineTitle = (states: string[] = [], node = "", external = false) => `${states.length === 1 ? `Run tool calls ${states[0].startsWith("open:") ? "open" : "collapsed"} · ` : states.length ? `${states.length} run tool lists · ` : ""}${external ? "external" : node || "local"} First conversation · Seed session${node ? ` · ${node === "peer-a" ? "Peer A" : "Peer B"}` : ""} · Cyberdeck`;
+const runCalls = (page: Page, id = inlineIds[0]) => page.locator(`[data-inline-run-calls=${JSON.stringify(id)}]`);
+const inlineParams = (page: Page, view: string) => {
+ const outer=new URLSearchParams(new URL(page.url()).hash.slice(7));
+ return view === "Seed" ? new URLSearchParams(outer.get("r")!.split("?")[1]) : outer;
+};
+for(const view of ["Seed","Sessions"]) {
+ test(`Seed inline run ${view} direct links, reload and fresh tabs restore independent lists and the signing node`,()=>fresh(async page=>{
+  const states=[`open:${inlineIds[0]}`,`closed:${inlineIds[1]}`];
+  await page.goto(inlineHref(view,states,"peer-b"));await title(page,inlineTitle(states,"peer-b"));
+  expect(await runCalls(page).getAttribute("aria-expanded")).toBe("true");
+  expect(await runCalls(page,inlineIds[1]).getAttribute("aria-expanded")).toBe("false");
+  await page.getByLabel("Run tool calls",{exact:true}).getByText("Recorded inline result 7",{exact:false}).waitFor();
+  await page.reload();await title(page,inlineTitle(states,"peer-b"));
+  const link=page.url();await fresh(async tab=>{await tab.goto(link);await title(tab,inlineTitle(states,"peer-b"));expect(await runCalls(tab).getAttribute("aria-expanded")).toBe("true");});
+ }),browserBudget);
+ test(`Seed inline run ${view} pushes once per card and history retains the composer, transcript and subscriptions`,()=>fresh(async page=>{
+  await page.goto(inlineHref(view,[`closed:${inlineIds[0]}`]));await title(page,inlineTitle([`closed:${inlineIds[0]}`]));
+  await runCalls(page).waitFor();await page.getByPlaceholder("Untitled session").evaluate(el=>(el as any).__inlineOwner="same transcript");
+  const streamCount=subscriptions.length, readCount=reads.length, length=await page.evaluate(()=>history.length);
+  await runCalls(page).click();await title(page,inlineTitle([`open:${inlineIds[0]}`]));expect(await page.evaluate(()=>history.length)).toBe(length+1);
+  await runCalls(page,inlineIds[1]).click();await title(page,inlineTitle(["one","two"]));expect(await page.evaluate(()=>history.length)).toBe(length+2);
+  await page.goBack();await title(page,inlineTitle([`open:${inlineIds[0]}`]));await page.goBack();await title(page,inlineTitle([`closed:${inlineIds[0]}`]));
+  await page.goForward();await title(page,inlineTitle([`open:${inlineIds[0]}`]));
+  expect(await page.getByPlaceholder("Untitled session").evaluate(el=>(el as any).__inlineOwner)).toBe("same transcript");
+  expect(reads.slice(readCount).filter(({action})=>["GetSession","GetRun","ListRuns"].includes(action._))).toEqual([]);expect(subscriptions.length).toBe(streamCount);
+ }),browserBudget);
+ test(`Seed inline run ${view} normalizes bounded conflicting states and preserves honest missing titles`,()=>fresh(async page=>{
+  const id=inlineIds[0];await page.goto(inlineHref(view,[`closed:${id}`,`open:${id}`,`open:${id}`,"open:","OPEN:other","open:bad\u0001"]));
+  await title(page,inlineTitle([`open:${id}`]));expect(inlineParams(page,view).getAll("inline-calls")).toEqual([`open:${id}`]);
+  const length=await page.evaluate(()=>history.length);await page.waitForTimeout(100);expect(await page.evaluate(()=>history.length)).toBe(length);
+  await page.goto(inlineHref(view,["open:missing"]));await title(page,"Run cards not found · Seed · Cyberdeck");await page.getByRole("alert").filter({hasText:"Selected run cards are not in this session."}).waitFor();
+  await page.reload();await title(page,"Run cards not found · Seed · Cyberdeck");
+  await page.goto(inlineHref(view,Array.from({length:105},(_,i)=>`closed:missing-${i}`)));await title(page,"Run cards not found · Seed · Cyberdeck");
+  expect(inlineParams(page,view).getAll("inline-calls").length).toBe(100);expect(await runCalls(page).isDisabled()).toBe(true);
+ }),browserBudget);
+ test(`Seed inline run ${view} selected completed cards reveal recorded tools without replaying execution`,()=>fresh(async page=>{
+  inlineSucceeded=true;await page.goto(inlineHref(view,[`open:${inlineIds[0]}`]));await title(page,inlineTitle([`open:${inlineIds[0]}`]));
+  await page.getByLabel("Run tool calls",{exact:true}).getByText("Recorded inline result 7",{exact:false}).waitFor();
+  expect(await runCalls(page).getAttribute("aria-expanded")).toBe("true");expect(await runCalls(page,inlineIds[1]).count()).toBe(0);
+  await page.reload();await title(page,inlineTitle([`open:${inlineIds[0]}`]));await runCalls(page).waitFor();
+ }),browserBudget);
+ test(`Seed inline run ${view} list errors and malformed data retry at the selected URL without history changes`,()=>fresh(async page=>{
+  for(const [status,malformed,label] of [[403,"","Access denied"],[404,"","Run cards not found"],[503,"","Run cards unavailable"],[200,"response","Run cards unavailable"],[200,"list","Run cards unavailable"],[200,"owner","Run cards unavailable"],[200,"plan","Run cards unavailable"]] as const){
+   inlineListStatus=status;malformedInlineList=malformed;await page.goto("about:blank");await page.goto(inlineHref(view,[`open:${inlineIds[0]}`]));await title(page,`${label} · Seed · Cyberdeck`);
+   const link=page.url(),length=await page.evaluate(()=>history.length);inlineListStatus=200;malformedInlineList="";
+   await page.getByRole("button",{name:"Retry",exact:true}).click();await title(page,inlineTitle([`open:${inlineIds[0]}`]));
+   expect(page.url()).toBe(link);expect(await page.evaluate(()=>history.length)).toBe(length);
+  }
+ }),browserBudget);
+ test(`Seed inline run ${view} card read failures retry without another transcript or history entry`,()=>fresh(async page=>{
+  for(const [status,malformed] of [[403,""],[404,""],[503,""],[200,"owner"],[200,"id"]] as const){
+   malformedInlineCard=malformed;inlineCardStatus=status;await page.goto("about:blank");await page.goto(inlineHref(view,[`open:${inlineIds[0]}`]));
+   await title(page,`${status === 403 ? "Access denied" : status === 404 ? "Run card not found" : "Run card unavailable"} · Seed · Cyberdeck`);
+   const before=reads.length,link=page.url(),length=await page.evaluate(()=>history.length);inlineCardStatus=200;malformedInlineCard="";
+   await page.getByRole("button",{name:"Retry",exact:true}).click();await title(page,inlineTitle([`open:${inlineIds[0]}`]));await runCalls(page).waitFor();
+   expect(page.url()).toBe(link);expect(await page.evaluate(()=>history.length)).toBe(length);expect(reads.slice(before).filter(({action})=>action._==="GetSession")).toEqual([]);
+  }
+ }),browserBudget);
+ test(`Seed inline run ${view} late denied lists cannot rename another node, view or locked owner`,()=>fresh(async page=>{
+  holdInlineList=true;inlineListStatus=403;await page.goto(inlineHref(view,[`open:${inlineIds[0]}`]));await title(page,"Loading run cards · Seed · Cyberdeck");
+  while(!pending.size)await page.waitForTimeout(10);holdInlineList=false;inlineListStatus=200;
+  await page.evaluate(link=>location.hash=new URL(link).hash,inlineHref(view,[`closed:${inlineIds[1]}`],"peer-b"));await title(page,inlineTitle([`closed:${inlineIds[1]}`],"peer-b"));
+  for(const release of pending)release();pending.clear();await page.waitForTimeout(100);expect(await page.title()).toBe(inlineTitle([`closed:${inlineIds[1]}`],"peer-b"));
+  await page.route("**/api/fs/list**",route=>route.fulfill({status:401,json:{error:"Locked"}}));await page.evaluate(()=>location.hash="#/files");await title(page,"Locked · Cyberdeck");expect(await runCalls(page).count()).toBe(0);
+ }),browserBudget);
+ test(`Seed inline run ${view} message shares retain list selections and signing node`,()=>fresh(async page=>{
+  // The transcript supplies a real user message; its share link describes the same run disclosures.
+  await page.goto(inlineHref(view,[`open:${inlineIds[0]}`],"peer-b"));await title(page,inlineTitle([`open:${inlineIds[0]}`],"peer-b"));
+  await page.getByRole("button",{name:"Show markdown sent to the LLM",exact:true}).first().click();
+  const outer=new URLSearchParams(new URL(await page.getByRole("dialog").locator("code").innerText()).hash.slice(7));expect(outer.get("node")).toBe("peer-b");
+  const query=view === "Seed" ? new URLSearchParams(outer.get("r")!.split("?")[1]) : outer;expect(query.getAll("inline-calls")).toEqual([`open:${inlineIds[0]}`]);
+ }),browserBudget);
+}
+test("Seed inline run external-server reads keep the selected signing node and URL",()=>fresh(async page=>{
+ await page.goto(inlineHref("Seed",[`open:${inlineIds[0]}`],"peer-b",true));await title(page,inlineTitle([`open:${inlineIds[0]}`],"peer-b",true));
+ await runCalls(page).waitFor();expect(reads.filter(({action})=>action._ === "GetRun").at(-1)?.node).toBe("external");await page.reload();await title(page,inlineTitle([`open:${inlineIds[0]}`],"peer-b",true));
+}),browserBudget);
+
+for(const view of ["Seed","Sessions"])test(`Seed inline run ${view} visual states fit phones and desktop with usable controls`,()=>fresh(async page=>{
+ const shots=process.env.CYBERDECK_NAV_SHOTS;
+ for(const width of [390,1280])for(const scheme of ["light","dark"] as const){
+  await page.setViewportSize({width,height:900});await page.emulateMedia({colorScheme:scheme});
+  for(const state of ["open","closed","missing","error","loading"]){
+   inlineListStatus=state === "error" ? 503 : 200;holdInlineList=state === "loading";
+   const states=[`${state === "closed" ? "closed" : "open"}:${state === "missing" ? "absent" : inlineIds[0]}`];
+   await page.goto("about:blank");await page.goto(inlineHref(view,states));
+   await title(page,state === "error" ? "Run cards unavailable · Seed · Cyberdeck" : state === "missing" ? "Run cards not found · Seed · Cyberdeck" : state === "loading" ? "Loading run cards · Seed · Cyberdeck" : inlineTitle(states));
+   if(state === "open")await page.getByLabel("Run tool calls",{exact:true}).getByText("Recorded inline result 7",{exact:false}).waitFor();
+   const control=state === "open" || state === "closed" ? runCalls(page) : state === "error" ? page.getByRole("button",{name:"Retry",exact:true}) : null;
+   if(control && width === 390)expect((await control.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+   expect(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+   if(shots){await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:join(shots,`inline-${view.toLowerCase()}-${state}-${width}-${scheme}.png`),animations:"disabled"});}
+   holdInlineList=false;for(const release of pending)release();pending.clear();
+  }
+ }
 }),browserBudget);

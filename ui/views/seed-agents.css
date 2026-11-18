@@ -36,5 +36,7 @@ html.dark {
 
 /* Read-only run reconnection must remain easy to tap on a narrow screen. */
 @media (max-width: 639px) {
-  .seed-agents-host [data-run-journal-error] button { min-height: 44px; }
+  .seed-agents-host [data-run-journal-error] button,
+  .seed-agents-host [data-inline-run-selection] button,
+  .seed-agents-host [data-inline-run-calls] { min-height: 44px; }
 }

@@ -97,7 +97,7 @@ function TermPane({ session, onStatus, onRemove }: { session: LiveSession; onSta
   );
 }
 /** A Seed session in Seed's UI: tool calls, runs, plan, sub-sessions, model and stop/retry. */
-const transcriptKeys = ["panel", "event", "tool", "full", "thinking", "detail", "handoff", "trigger-context"];
+const transcriptKeys = ["panel", "event", "tool", "full", "thinking", "detail", "handoff", "trigger-context", "inline-calls"];
 function transcriptParams(params: URLSearchParams, next: Extract<SeedAgentsRoute, { key: "agent-session" }>) {
   const result = new URLSearchParams(params);
   for (const key of transcriptKeys) result.delete(key);
@@ -105,6 +105,7 @@ function transcriptParams(params: URLSearchParams, next: Extract<SeedAgentsRoute
   if (next.eventId) result.set("event", next.eventId);
   if (next.panel === "tool" && next.toolId) result.set("tool", next.toolId);
   if (next.panel === "tool" && next.fullPayload) result.set("full", next.fullPayload);
+  for (const value of next.inlineRunTools || []) result.append("inline-calls", value);
   for (const id of next.expandedThinking || []) result.append("thinking", id);
   for (const id of next.expandedDetails || []) result.append("detail", id);
   for (const id of next.expandedHandoffs || []) result.append("handoff", id);
@@ -122,12 +123,20 @@ function NativeSeedSession({ id, node, params }: { id: string; node: string; par
   const panel = selectedPanel === "prompt" ? "prompt" : (selectedPanel === "message" || selectedPanel === "context" || selectedPanel === "handoff") && eventId ? selectedPanel : selectedPanel === "tool" && toolId ? "tool" : undefined;
   // Match the pinned Seed route contract without eagerly loading the full UI in
   // ordinary terminal tabs. Browser cases exercise both adapters together.
+  const runStates = new Map<string, string>();
+  for (const value of params.getAll("inline-calls")) {
+    if (!/^(open|closed):/.test(value)) continue;
+    const colon = value.indexOf(":"), id = value.slice(colon + 1), state = value.slice(0, colon);
+    if (!id || id.length > 512 || /[\u0000-\u001f]/.test(id)) continue;
+    if (!runStates.has(id) || state === "open") runStates.set(id, state);
+  }
+  const inlineRunTools = [...runStates].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).slice(0, 100).map(([id, state]) => `${state}:${id}`);
   const expandedThinking = [...new Set(params.getAll("thinking").filter(value => value.length > 0 && value.length <= 512 && !/[\u0000-\u001f]/.test(value)))].sort().slice(0, 100);
   const expandedDetails = [...new Set(params.getAll("detail").filter(value => value.length > 0 && value.length <= 512 && !/[\u0000-\u001f]/.test(value)))].sort().slice(0, 100);
   const expandedHandoffs = [...new Set(params.getAll("handoff").filter(value => /^[pt]:./.test(value) && value.length <= 514 && !/[\u0000-\u001f]/.test(value)))].sort().slice(0, 100);
   const expandedTriggerContext = [...new Set(params.getAll("trigger-context").filter((value): value is "activity" | "instructions" | "prompt" => ["activity", "instructions", "prompt"].includes(value)))].sort();
   const route: Extract<SeedAgentsRoute, { key: "agent-session" }> = {
-    key: "agent-session", sessionId, eventId, panel, expandedThinking, expandedDetails, expandedHandoffs, expandedTriggerContext,
+    key: "agent-session", sessionId, eventId, panel, inlineRunTools, expandedThinking, expandedDetails, expandedHandoffs, expandedTriggerContext,
     toolId: panel === "tool" ? toolId : undefined,
     fullPayload: panel === "tool" && (full === "input" || full === "output" || full === "both") ? full : undefined,
   };
