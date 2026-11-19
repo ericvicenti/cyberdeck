@@ -2437,6 +2437,8 @@ for(const view of ["Seed","Sessions"]) {
     if(state === "inspector")await page.getByRole("dialog").getByText("Recorded inline result 2",{exact:false}).waitFor();
     if(await page.getByRole("dialog").count())await page.getByRole("dialog").evaluate(el=>Promise.all(el.getAnimations().map(animation=>animation.finished.catch(()=>{}))));
     const controls=state === "detail" ? page.getByTitle("Hide tool details",{exact:true}) : state === "inspector" || state === "waiting" ? page.getByRole("dialog").getByRole("button",{name:"Close",exact:true}) : state === "error" ? page.getByRole("button",{name:"Retry",exact:true}) : null;
+    if(state === "detail" || state === "loading")await withinViewport(page,page.getByTitle("Hide tool details",{exact:true}));
+    if(state === "error")await withinViewport(page,page.getByRole("button",{name:"Retry",exact:true}));
     if(controls && width === 390){const box=(await controls.boundingBox())!;expect(box.height).toBeGreaterThanOrEqual(44);expect(box.width).toBeGreaterThanOrEqual(44);}
     expect(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     if(shots){await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:join(shots,`inline-tools-${view.toLowerCase()}-${state}-${width}-${scheme}.png`),animations:"disabled"});}
@@ -2539,3 +2541,40 @@ for(const view of ["Seed","Sessions"])test(`Seed inline tools ${view} live cards
  await page.reload();await title(page,inlineDetailTitle(1,true,"peer-b"));
  await page.evaluate(link=>location.hash=new URL(link).hash,inlineErrorHref(view,child,"peer-b"));await title(page,inlineErrorTitle(true,"peer-b"));await page.locator("[data-seed-inline-error]").getByText("INLINE_CHILD_ERROR",{exact:true}).waitFor();
 }),browserBudget);
+
+const withinViewport = async (page:Page, locator:any) => {
+ await page.waitForFunction(element=>{if(!element)return false;const box=element.getBoundingClientRect();const parent=element.closest("[data-seed-transcript-scroll]")?.getBoundingClientRect();return box.top >= (parent?.top || 0)-1 && box.bottom <= (parent?.bottom || innerHeight)+1;},await locator.elementHandle());
+};
+for(const view of ["Seed","Sessions"]){
+ test(`Seed inline tools ${view} selected read errors restore visibly on phone, reload, new tabs and history`,()=>fresh(async page=>{
+  await page.setViewportSize({width:390,height:900});
+  for(const owner of ["list","card"]){
+   if(owner==="list")inlineListStatus=503;else inlineCardStatus=503;
+   await page.goto(inlineDetailHref(view,[],inlineSelection()));await title(page,`${owner==="list"?"Run cards":"Run card"} unavailable · Seed · Cyberdeck`);await withinViewport(page,page.getByRole("button",{name:"Retry",exact:true}));
+   inlineListStatus=200;inlineCardStatus=200;await page.goto("about:blank");
+  }
+  inlineWorkflow=true;detailRunStatus=503;
+  await page.goto(inlineDetailHref(view));await title(page,"Workflow run unavailable · Seed · Cyberdeck");const retry=page.getByRole("button",{name:"Retry",exact:true});await withinViewport(page,retry);
+  const link=page.url();await page.reload();await title(page,"Workflow run unavailable · Seed · Cyberdeck");await withinViewport(page,retry);
+  await fresh(async tab=>{await tab.setViewportSize({width:390,height:900});inlineWorkflow=true;detailRunStatus=503;await tab.goto(link);await title(tab,"Workflow run unavailable · Seed · Cyberdeck");await withinViewport(tab,tab.getByRole("button",{name:"Retry",exact:true}));});
+  inlineWorkflow=true;detailRunStatus=503;
+  await page.evaluate(url=>location.hash=new URL(url).hash,inlineDetailHref(view,[]));await title(page,inlineTitle());await page.goBack();await title(page,"Workflow run unavailable · Seed · Cyberdeck");await withinViewport(page,retry);
+ }),browserBudget);
+ test(`Seed inline tools ${view} revealed selections pause following and retain manual scroll, composer and subscriptions`,()=>fresh(async page=>{
+  await page.setViewportSize({width:390,height:900});await page.goto(inlineDetailHref(view));await title(page,inlineDetailTitle());
+  const detail=page.getByTitle("Hide tool details",{exact:true});await withinViewport(page,detail);await runCalls(page,inlineIds[1]).waitFor();
+  const scroller=page.locator("[data-seed-transcript-scroll]");
+  const append = (callSeq:number) => {for(const [socket,data] of runSockets)if(data.key===`runs/${inlineIds[0]}`){
+   socket.send(JSON.stringify({_:"append",key:data.key,runId:inlineIds[0],seq:callSeq*2-1,createdAt:callSeq*2-1,entry:{kind:"call",op:"tool",callSeq,tool:"read",input:{path:"Late recorded input"}}}));
+   socket.send(JSON.stringify({_:"append",key:data.key,runId:inlineIds[0],seq:callSeq*2,createdAt:callSeq*2,entry:{kind:"result",callSeq,status:"succeeded",output:{content:"Late recorded output"}}}));
+  }};
+  append(8);await page.waitForTimeout(150);await withinViewport(page,detail);
+  await scroller.evaluate(el=>{el.scrollTop=0;el.dispatchEvent(new Event("scroll",{bubbles:true}));});
+  const link=page.url(),length=await page.evaluate(()=>history.length),readCount=reads.length,subCount=subscriptions.length;
+  const composer=page.locator("textarea").first();await composer.evaluate(el=>(el as any).__selectionOwner="same composer");
+  append(9);
+  await page.waitForTimeout(150);expect(await scroller.evaluate(el=>el.scrollTop)).toBe(0);expect(page.url()).toBe(link);expect(await page.evaluate(()=>history.length)).toBe(length);expect(reads.slice(readCount).filter(({action})=>["GetSession","GetRun","ListRuns"].includes(action._))).toEqual([]);expect(subscriptions.length).toBe(subCount);expect(await composer.evaluate(el=>(el as any).__selectionOwner)).toBe("same composer");
+  await page.evaluate(url=>location.hash=new URL(url).hash,inlineDetailHref(view,[inlineSelection(inlineIds[1],3)]));await title(page,inlineDetailTitle());await withinViewport(page,page.getByTitle("Hide tool details",{exact:true}));
+  await page.goBack();await title(page,inlineDetailTitle());await withinViewport(page,page.getByTitle("Hide tool details",{exact:true}));
+ }),browserBudget);
+}

@@ -1148,3 +1148,11 @@ than claiming it is absent. This does not finish inline stream diagnostics,
 independent deeper workflow/plan/activity disclosures, older root-run/message
 windows, attachments, Commander/live-seat or native/original-file coverage.
 The containing card's current root-run list still has its existing 50-run window.
+
+
+Selected inline reads also reveal their content in the transcript viewport after
+its initial bottom reset. A selected read failure remains visible on phones.
+Restoration pauses automatic following so later journal updates cannot hide the
+selection. Manual wheel/touch/pointer/keyboard activity cancels pending reveal;
+transcript panels and explicit message anchors retain their own precedence.
+No focus, URL, history, transcript read or subscription changes are required.
