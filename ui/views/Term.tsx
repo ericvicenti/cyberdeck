@@ -97,7 +97,7 @@ function TermPane({ session, onStatus, onRemove }: { session: LiveSession; onSta
   );
 }
 /** A Seed session in Seed's UI: tool calls, runs, plan, sub-sessions, model and stop/retry. */
-const transcriptKeys = ["panel", "event", "tool", "full", "thinking", "detail", "handoff", "trigger-context", "inline-calls"];
+const transcriptKeys = ["panel", "event", "tool", "full", "thinking", "detail", "handoff", "trigger-context", "inline-calls", "inline-detail", "inline-tool", "inline-error"];
 function transcriptParams(params: URLSearchParams, next: Extract<SeedAgentsRoute, { key: "agent-session" }>) {
   const result = new URLSearchParams(params);
   for (const key of transcriptKeys) result.delete(key);
@@ -105,7 +105,14 @@ function transcriptParams(params: URLSearchParams, next: Extract<SeedAgentsRoute
   if (next.eventId) result.set("event", next.eventId);
   if (next.panel === "tool" && next.toolId) result.set("tool", next.toolId);
   if (next.panel === "tool" && next.fullPayload) result.set("full", next.fullPayload);
-  for (const value of next.inlineRunTools || []) result.append("inline-calls", value);
+  const detailRoots = new Set((next.inlineRunDetails || []).map(value => JSON.parse(value)[0]));
+  for (const value of next.inlineRunTools || []) {
+    const root = value.slice(value.indexOf(":") + 1);
+    result.append("inline-calls", detailRoots.has(root) ? `open:${root}` : value);
+  }
+  for (const value of next.inlineRunDetails || []) result.append("inline-detail", value);
+  if (!next.panel && next.inlineRunTool) result.set("inline-tool", next.inlineRunTool);
+  else if (!next.panel && next.inlineRunError) result.set("inline-error", next.inlineRunError);
   for (const id of next.expandedThinking || []) result.append("thinking", id);
   for (const id of next.expandedDetails || []) result.append("detail", id);
   for (const id of next.expandedHandoffs || []) result.append("handoff", id);
@@ -123,6 +130,19 @@ function NativeSeedSession({ id, node, params }: { id: string; node: string; par
   const panel = selectedPanel === "prompt" ? "prompt" : (selectedPanel === "message" || selectedPanel === "context" || selectedPanel === "handoff") && eventId ? selectedPanel : selectedPanel === "tool" && toolId ? "tool" : undefined;
   // Match the pinned Seed route contract without eagerly loading the full UI in
   // ordinary terminal tabs. Browser cases exercise both adapters together.
+  const inlineSelections = (values: (string | null)[]) => {
+    const parsed: string[] = [];
+    for (const value of values) {
+      try {
+        const tuple = JSON.parse(value || "");
+        if (Array.isArray(tuple) && tuple.length === 2 && tuple.every(id => typeof id === "string" && id.length > 0 && id.length <= 512 && !/[\u0000-\u001f]/.test(id))) parsed.push(JSON.stringify(tuple));
+      } catch {}
+    }
+    return [...new Set(parsed)].sort().slice(0, 100);
+  };
+  const inlineRunDetails = inlineSelections(params.getAll("inline-detail"));
+  const inlineRunTool = !panel ? inlineSelections([params.get("inline-tool")])[0] : undefined;
+  const inlineRunError = !panel && !inlineRunTool ? inlineSelections([params.get("inline-error")])[0] : undefined;
   const runStates = new Map<string, string>();
   for (const value of params.getAll("inline-calls")) {
     if (!/^(open|closed):/.test(value)) continue;
@@ -136,7 +156,7 @@ function NativeSeedSession({ id, node, params }: { id: string; node: string; par
   const expandedHandoffs = [...new Set(params.getAll("handoff").filter(value => /^[pt]:./.test(value) && value.length <= 514 && !/[\u0000-\u001f]/.test(value)))].sort().slice(0, 100);
   const expandedTriggerContext = [...new Set(params.getAll("trigger-context").filter((value): value is "activity" | "instructions" | "prompt" => ["activity", "instructions", "prompt"].includes(value)))].sort();
   const route: Extract<SeedAgentsRoute, { key: "agent-session" }> = {
-    key: "agent-session", sessionId, eventId, panel, inlineRunTools, expandedThinking, expandedDetails, expandedHandoffs, expandedTriggerContext,
+    key: "agent-session", sessionId, eventId, panel, inlineRunTools, inlineRunDetails, inlineRunTool, inlineRunError, expandedThinking, expandedDetails, expandedHandoffs, expandedTriggerContext,
     toolId: panel === "tool" ? toolId : undefined,
     fullPayload: panel === "tool" && (full === "input" || full === "output" || full === "both") ? full : undefined,
   };

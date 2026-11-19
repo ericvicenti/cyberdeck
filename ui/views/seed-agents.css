@@ -40,3 +40,22 @@ html.dark {
   .seed-agents-host [data-inline-run-selection] button,
   .seed-agents-host [data-inline-run-calls] { min-height: 44px; }
 }
+
+/* Recorded inline tools retain the dense desktop layout and usable touch targets. */
+@media (max-width: 639px) {
+  .seed-agents-host .toolrow button,
+  .seed-agents-host [data-seed-inline-selection] button,
+  [data-seed-inline-inspector] button { min-height: 44px; min-width: 44px; }
+  .seed-agents-host .toolrow button[title="Show tool details"],
+  .seed-agents-host .toolrow button[title="Hide tool details"],
+  .seed-agents-host .toolrow button[title="View raw tool input/output"],
+  [data-seed-inline-inspector] [data-slot="dialog-close"] { min-width: 44px; display: grid; place-items: center; }
+  [data-seed-inline-inspector] [data-slot="dialog-header"] { padding-inline: 44px; }
+  [data-seed-inline-inspector] > div > [data-slot="dialog-title"],
+  [data-seed-inline-inspector] > div > [data-slot="dialog-description"] { padding-right: 44px; }
+}
+
+@media (max-width: 639px) {
+  [data-seed-inline-error-trigger],
+  [data-seed-inline-error] button { min-height: 44px; }
+}

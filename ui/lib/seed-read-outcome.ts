@@ -30,8 +30,17 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       case "session": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId;
       case "session-event": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && selected.eventId === outcome.path;
       case "session-context": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && selected.panel === "context" && selected.eventId === outcome.path;
-      case "session-run-tools": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && !!selected.inlineRunTools?.length && JSON.stringify(selected.inlineRunTools) === outcome.path;
-      case "session-run-card": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && !!selected.inlineRunTools?.some(value => value.slice(value.indexOf(":") + 1) === outcome.path);
+      case "session-run-tools": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && !!(selected.inlineRunTools?.length || selected.inlineRunDetails?.length || selected.inlineRunTool || selected.inlineRunError) && JSON.stringify([selected.inlineRunTools || [], selected.inlineRunDetails || [], selected.inlineRunTool || "", selected.inlineRunError || ""]) === outcome.path;
+      case "session-run-card": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && !!(selected.inlineRunTools?.some(value => value.slice(value.indexOf(":") + 1) === outcome.path) || [...(selected.inlineRunDetails || []), ...(selected.inlineRunTool ? [selected.inlineRunTool] : []), ...(selected.inlineRunError ? [selected.inlineRunError] : [])].some(value => JSON.parse(value)[0] === outcome.path));
+      case "session-inline-error": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && selected.inlineRunError === outcome.path;
+      case "session-inline-tools": {
+        if (selected.key !== "agent-session" || selected.sessionId !== outcome.sessionId) return false;
+        const [runId] = JSON.parse(outcome.path);
+        const details = (selected.inlineRunDetails || []).filter(value => JSON.parse(value)[0] === runId);
+        const tool = selected.inlineRunTool && JSON.parse(selected.inlineRunTool)[0] === runId ? JSON.parse(selected.inlineRunTool)[1] : "";
+        return !!(details.length || tool) && JSON.stringify([runId, details, tool]) === outcome.path;
+      }
+      case "session-inline-detail-read": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && !!selected.inlineRunDetails?.includes(outcome.path);
       case "session-thinking": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && !!selected.expandedThinking?.length && JSON.stringify(selected.expandedThinking) === outcome.path;
       case "session-trigger-context": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && !!selected.expandedTriggerContext?.length && JSON.stringify(selected.expandedTriggerContext) === outcome.path;
       case "session-handoff": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && JSON.stringify([selected.expandedHandoffs || [], selected.panel === "handoff" ? selected.eventId : ""]) === outcome.path;
@@ -55,7 +64,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       if (!mounted.current || owner.host !== host || !owns(owner.route, outcome)) return;
       setResults(previous => {
         const values = previous?.host === host ? previous.values : {};
-        const key = outcome.kind === "child-session-list" ? `${outcome.kind}:${outcome.listOwner}:${outcome.path}` : outcome.kind === "session-run-card" ? `${outcome.kind}:${outcome.sessionId}:${outcome.path}` : outcome.kind === "session-detail-read" ? `${outcome.kind}:${outcome.sessionId}:${outcome.path}` : outcome.kind === "run-detail-read" ? `${outcome.kind}:${outcome.runId}:${outcome.path}` : outcome.kind;
+        const key = outcome.kind === "session-inline-tools" ? `${outcome.kind}:${outcome.sessionId}:${JSON.parse(outcome.path)[0]}` : outcome.kind === "session-inline-detail-read" ? `${outcome.kind}:${outcome.sessionId}:${outcome.path}` : outcome.kind === "child-session-list" ? `${outcome.kind}:${outcome.listOwner}:${outcome.path}` : outcome.kind === "session-run-card" ? `${outcome.kind}:${outcome.sessionId}:${outcome.path}` : outcome.kind === "session-detail-read" ? `${outcome.kind}:${outcome.sessionId}:${outcome.path}` : outcome.kind === "run-detail-read" ? `${outcome.kind}:${outcome.runId}:${outcome.path}` : outcome.kind;
         const old = values[key];
         if (old && old.error === outcome.error) {
           const { error: _oldError, ...oldValue } = old;
@@ -80,9 +89,14 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
   const runDetails = get("run-details"), journal = get("run-journal");
   const runDetailReads = results?.host === host ? Object.values(results.values).filter((value): value is Outcome => !!value && value.kind === "run-detail-read" && owns(route, value)) : [];
   const runDetailRead = runDetailReads.find(value => value.error) || runDetailReads.find(value => value.pending);
-  const inlineRuns = get("session-run-tools");
+  const inlineRuns = get("session-run-tools"), inlineError = get("session-inline-error");
   const inlineCards = results?.host === host ? Object.values(results.values).filter((value): value is Outcome => !!value && value.kind === "session-run-card" && owns(route, value)) : [];
   const inlineCard = inlineCards.find(value => value.error) || inlineCards.find(value => value.pending);
+  const inlineSelections = results?.host === host ? Object.values(results.values).filter((value): value is Outcome => !!value && value.kind === "session-inline-tools" && owns(route, value)) : [];
+  const inlineSelection = inlineSelections.find(value => value.error) || inlineSelections.find(value => value.pending);
+  const inlineInspector = route.key === "agent-session" && route.inlineRunTool ? inlineSelections.find(value => value.kind === "session-inline-tools" && JSON.parse(value.path)[0] === JSON.parse(route.inlineRunTool!)[0]) : undefined;
+  const inlineDetailReads = results?.host === host ? Object.values(results.values).filter((value): value is Outcome => !!value && value.kind === "session-inline-detail-read" && owns(route, value)) : [];
+  const inlineDetailRead = inlineDetailReads.find(value => value.error) || inlineDetailReads.find(value => value.pending);
   const triggerContext = get("session-trigger-context");
   const details = get("session-details"), handoff = get("session-handoff");
   const detailReads = results?.host === host ? Object.values(results.values).filter((value): value is Outcome => !!value && value.kind === "session-detail-read" && owns(route, value)) : [];
@@ -114,6 +128,12 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       : inlineRuns?.error ? failure(inlineRuns.error, "Run cards")
       : inlineCard?.error ? failure(inlineCard.error, "Run card")
       : inlineRuns?.pending || inlineCard?.pending ? "Loading run cards · Seed"
+      : inlineError?.error ? failure(inlineError.error, "Run error")
+      : route.inlineRunError ? `${inlineError && !inlineError.pending ? "Error" : "Loading error"} · ${inlineError?.name || "Recorded run"} · Seed session`
+      : inlineSelection?.error ? failure(inlineSelection.error, "Recorded tools")
+      : inlineDetailRead?.error ? failure(inlineDetailRead.error, "Workflow run")
+      : inlineDetailRead?.pending ? "Loading workflow run · Seed"
+      : inlineSelection?.pending ? "Waiting for selected recorded tools · Seed"
       : triggerContext?.error ? failure(triggerContext.error, "Trigger context")
       : handoff?.error ? failure(handoff.error, "Handoff")
       : context?.error ? failure(context.error, "Message context")
@@ -122,7 +142,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       : details?.error ? failure(details.error, "Tool details")
       : detailRead?.error ? failure(detailRead.error, "Workflow run")
       : detailRead?.pending ? "Loading workflow run · Seed"
-      : `${route.panel === "handoff" ? "Handoff projection · " : route.panel === "prompt" ? "Current system prompt · " : route.panel === "context" ? "Message context · " : route.panel === "tool" ? `${!tool || tool.pending ? "Loading tool payload · " : route.fullPayload ? `Full ${route.fullPayload === "both" ? "input/output" : route.fullPayload} · ` : "Tool input/output · "}${tool?.name || route.toolId} · ` : route.eventId ? "Message · " : ""}${route.inlineRunTools?.length ? `${route.inlineRunTools.length === 1 ? `Run tool calls ${route.inlineRunTools[0].startsWith("open:") ? "open" : "collapsed"}` : `${route.inlineRunTools.length} run tool lists`} · ` : ""}${route.expandedTriggerContext?.length ? `${route.expandedTriggerContext.map(field => ({ activity: "Activity details", instructions: "Trigger instructions", prompt: "Trigger prompt" })[field]).join(" + ")} · ${triggerContext?.name ? `${triggerContext.name} · ` : ""}` : ""}${route.expandedHandoffs?.length ? `${route.expandedHandoffs.length} expanded handoff${route.expandedHandoffs.length === 1 ? "" : "s"} · ` : ""}${route.expandedDetails?.length ? `${route.expandedDetails.length} tool detail${route.expandedDetails.length === 1 ? "" : "s"} · ` : ""}${!route.panel && route.expandedThinking?.length ? `${route.expandedThinking.length} expanded tool group${route.expandedThinking.length === 1 ? "" : "s"} · ` : ""}${session.name?.trim() || "Untitled session"} · Seed session`;
+      : `${route.panel === "handoff" ? "Handoff projection · " : route.panel === "prompt" ? "Current system prompt · " : route.panel === "context" ? "Message context · " : route.panel === "tool" ? `${!tool || tool.pending ? "Loading tool payload · " : route.fullPayload ? `Full ${route.fullPayload === "both" ? "input/output" : route.fullPayload} · ` : "Tool input/output · "}${tool?.name || route.toolId} · ` : route.eventId ? "Message · " : ""}${route.inlineRunTool ? `Recorded tool input/output · ${inlineInspector?.name || "Loading tool"} · ` : ""}${route.inlineRunDetails?.length ? `${route.inlineRunDetails.length} recorded tool detail${route.inlineRunDetails.length === 1 ? "" : "s"} · ` : ""}${route.inlineRunTools?.length ? `${route.inlineRunTools.length === 1 ? `Run tool calls ${route.inlineRunTools[0].startsWith("open:") ? "open" : "collapsed"}` : `${route.inlineRunTools.length} run tool lists`} · ` : ""}${route.expandedTriggerContext?.length ? `${route.expandedTriggerContext.map(field => ({ activity: "Activity details", instructions: "Trigger instructions", prompt: "Trigger prompt" })[field]).join(" + ")} · ${triggerContext?.name ? `${triggerContext.name} · ` : ""}` : ""}${route.expandedHandoffs?.length ? `${route.expandedHandoffs.length} expanded handoff${route.expandedHandoffs.length === 1 ? "" : "s"} · ` : ""}${route.expandedDetails?.length ? `${route.expandedDetails.length} tool detail${route.expandedDetails.length === 1 ? "" : "s"} · ` : ""}${!route.panel && route.expandedThinking?.length ? `${route.expandedThinking.length} expanded tool group${route.expandedThinking.length === 1 ? "" : "s"} · ` : ""}${session.name?.trim() || "Untitled session"} · Seed session`;
   } else if (run && route.key === "agent-run") {
     title = run.error ? failure(run.error, "Run")
       : journal?.error ? failure(journal.error, "Run updates")
