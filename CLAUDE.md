@@ -63,6 +63,10 @@ Fleet nodes auto-update: each daemon checks origin hourly (and 90s after boot),
 sweeps peers every 15 min, and nudges any node on a different commit to update
 (`autoUpdate` in config; POST /api/system/update). A `git push` to main is a
 fleet-wide deploy within the hour, or within ~30s of any UI being open.
+The updater pins the boot commit at startup (`src/daemon/updater.ts` `ensureBoot`) and
+counts drift from boot, not from the checkout's current HEAD; that way an external
+`git pull` on `~/.cyberdeck/src` (other routines do this) still trips a restart on the
+next tick instead of being masked as "already up to date".
 
 Gotchas:
 - bun:sqlite named params need `$`-prefixed keys at bind time.

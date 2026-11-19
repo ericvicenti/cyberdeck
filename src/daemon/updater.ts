@@ -19,20 +19,38 @@ async function run(cmd: string[], cwd = SRC_ROOT, env?: Record<string, string | 
   return { code: await proc.exited, out: out.trim(), err: err.trim() };
 }
 
-let cachedCommit: string | null = null;
+// Captured once at boot: this is the commit we are actually running, regardless of
+// what the checkout's HEAD says later (another routine may have pulled ~/.cyberdeck/src
+// out from under us). All "are we up to date?" math uses this as the base.
+let bootShort: string | null = null;
+let bootFull: string | null = null;
+async function ensureBoot(): Promise<void> {
+  if (bootShort && bootFull) return;
+  const [s, f] = await Promise.all([
+    run(["git", "rev-parse", "--short", "HEAD"]),
+    run(["git", "rev-parse", "HEAD"]),
+  ]);
+  bootShort = s.code === 0 ? s.out : "unknown";
+  bootFull = f.code === 0 ? f.out : "unknown";
+}
 export async function currentCommit(): Promise<string> {
-  if (cachedCommit) return cachedCommit;
-  const { code, out } = await run(["git", "rev-parse", "--short", "HEAD"]);
-  cachedCommit = code === 0 ? out : "unknown";
-  return cachedCommit;
+  await ensureBoot();
+  return bootShort ?? "unknown";
 }
 
-export async function checkForUpdate(): Promise<{ commit: string; behind: number; error?: string }> {
-  const commit = await currentCommit();
+export async function checkForUpdate(): Promise<{ commit: string; behind: number; head?: string; error?: string }> {
+  await ensureBoot();
+  const commit = bootShort ?? "unknown";
   const fetch_ = await run(["git", "fetch", "--quiet", "origin"]);
   if (fetch_.code !== 0) return { commit, behind: 0, error: `fetch failed: ${fetch_.err.slice(0, 200)}` };
-  const count = await run(["git", "rev-list", "--count", "HEAD..origin/main"]);
-  return { commit, behind: count.code === 0 ? parseInt(count.out, 10) || 0 : 0 };
+  // Count from the commit we ACTUALLY run (boot) to origin/main. If something
+  // else pulled the checkout, `HEAD..origin/main` would say 0 while we still
+  // run pre-pull code; using the boot commit catches that case.
+  const base = bootFull && bootFull !== "unknown" ? bootFull : "HEAD";
+  const count = await run(["git", "rev-list", "--count", `${base}..origin/main`]);
+  const headRes = await run(["git", "rev-parse", "--short", "HEAD"]);
+  const head = headRes.code === 0 ? headRes.out : undefined;
+  return { commit, behind: count.code === 0 ? parseInt(count.out, 10) || 0 : 0, head };
 }
 
 let updating = false;
