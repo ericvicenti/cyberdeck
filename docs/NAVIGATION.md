@@ -1178,9 +1178,13 @@ Both completed and still-live older roots retain their recorded tool lists,
 details, input/output inspectors and root/descendant error selections. They do
 not replace the latest run's pinned card. The mounted session retains recovered
 cards when a disclosure closes, so Back/Forward and reopening use the same
-journal owners and preserve the real Seed composer. The current selection's
-loading-to-content transition reveals the restored card; later journal updates
-still preserve manual scrolling. New tabs and reload reconstruct from the URL
+journal owners and preserve the real Seed composer. Once its final URL selection
+is removed, an older card is hidden; the visible transcript and activity match a
+fresh open of that URL. Retained background owners cannot change the latest
+pinned card or message timing. The current selection's
+loading-to-content transition reveals the restored card. Late formatted content
+and editor layout changes keep the selected read visible until manual scrolling;
+subsequent journal changes preserve that reading position. New tabs and reload reconstruct from the URL
 with the correct server and signing node. No URL executes a run or sends a
 message.
 
