@@ -7,6 +7,7 @@ import * as blobs from "@seed-hypermedia/client/blobs";
 // Real published Seed UI + production Cyberdeck bundle. Synthetic signatures,
 // metadata and transcripts only; no real agent is messaged or started.
 const account = blobs.principalToString(blobs.nobleKeyPairFromSeed(new Uint8Array(32).fill(42)).principal);
+const sharedOwner = blobs.principalToString(blobs.nobleKeyPairFromSeed(new Uint8Array(32).fill(43)).principal);
 const browserBudget = process.env.CYBERDECK_TEST_ORIGIN ? 90000 : 30000;
 const actions: string[] = [], errors: string[] = [], unexpected: string[] = [];
 const pending = new Set<() => void>();
@@ -16,11 +17,11 @@ let holdRunJournal = false, nestedRunTools = false;
 let runStreamMode = "";
 let inlineListStatus = 200, inlineCardStatus = 200, holdInlineList = false, malformedInlineList = "", inlineSucceeded = false, malformedInlineCard = "";
 let holdInlineJournal = false, inlineWorkflow = false, inlineGraphStatus = 200, inlineErrorFixture = false, holdInlineGraph = false, inlineLive = false;
-let inlineWindowed = false, holdInlineCard = false, inlineComposerAvailable = false;
+let inlineWindowed = false, holdInlineCard = false, inlineComposerAvailable = false, inlineShared = false;
 const archivedInlineId = "archived root /?&";
 const inlineChildId = (root:string) => `${root}:child /?&`;
 const inlineIds = ["inline-run /?&", "inline-second"];
-const inlineRun = (id: string, node: string) => ({...run(id,node),sessionId:"inline",status:inlineLive && id===inlineIds[0] ? "running" : inlineSucceeded ? "succeeded" : "failed",finishedAt:inlineLive && id===inlineIds[0] ? undefined : 2,title:`Recorded ${id === inlineIds[0] ? "first" : "second"} run`,...(inlineErrorFixture ? {error:{code:"INLINE_ERROR",message:"Recorded inline root error",detail:{recorded:"Root error detail"},stack:"Error: recorded inline\n at workflow.js:2"},sourceText:"// Recorded inline source\nthrow new Error('recorded');"} : {}),plan:{steps:[{id:"inline-step",label:"Recorded inline step",status:inlineSucceeded ? "done" : "failed"}]}});
+const inlineRun = (id: string, node: string) => ({...run(id,node),account:inlineShared ? sharedOwner : account,sessionId:"inline",status:inlineLive && id===inlineIds[0] ? "running" : inlineSucceeded ? "succeeded" : "failed",finishedAt:inlineLive && id===inlineIds[0] ? undefined : 2,title:`Recorded ${id === inlineIds[0] ? "first" : "second"} run`,...(inlineErrorFixture ? {error:{code:"INLINE_ERROR",message:"Recorded inline root error",detail:{recorded:"Root error detail"},stack:"Error: recorded inline\n at workflow.js:2"},sourceText:"// Recorded inline source\nthrow new Error('recorded');"} : {}),plan:{steps:[{id:"inline-step",label:"Recorded inline step",status:inlineSucceeded ? "done" : "failed"}]}});
 const runSockets = new Map<any, { node: string; key: string }>();
 const subscriptions: string[] = [];
 const errorChild = "failed child /?&";
@@ -96,8 +97,8 @@ const transcriptEvents = (id: string) => id === "inline" ? [{id:"inline-message"
 const readActions = new Set(["ListAgents","GetAgent","GetSession","GetSessionEvent","GetRun","GetAgentTrigger","ListSessions","ListRuns","ListAgentTriggers","ListAgentMemoryDir","ReadAgentMemoryFile","ListAgentTools","ListAgentCollaborators","ListAgentInvites","ListModelProviders","ListProviderModels","ListMcpServers","ListSigningIdentities","GetRunJournal"]);
 const ok = (value: unknown) => new Response(cbor.encode(value) as unknown as BodyInit,{headers:{"content-type":"application/cbor"}});
 const fail = (status: number, message: string) => new Response(cbor.encode({_:"Error",message}) as unknown as BodyInit,{status,headers:{"content-type":"application/cbor"}});
-const agent = (id: string, node: string) => ({id,account,definition:{name:renamed || `${node} ${id === "beta" ? "Beta assistant" : "Alpha assistant"}`,systemPrompt:"Fixture",model:"fixture",modelProvider:"fixture",mcpServers:[]},stateDir:"",status:"idle",createdAt:1,updatedAt:2});
-const session = (id: string, node: string) => ({id,account,agentId:"alpha",title:id === "untitled" ? "" : `${node} ${id === "two" ? "Second conversation" : id === "older" ? "Older conversation" : "First conversation"}`,status:"idle",createdAt:1,updatedAt:2,...(childLists && ["one", "two"].includes(id) ? { childSessionCount: id === "one" ? 2 : 1 } : {})});
+const agent = (id: string, node: string) => ({id,account:inlineShared ? sharedOwner : account,...(inlineShared ? {accessRole:"writer"} : {}),definition:{name:renamed || `${node} ${id === "beta" ? "Beta assistant" : "Alpha assistant"}`,systemPrompt:"Fixture",model:"fixture",modelProvider:"fixture",mcpServers:[]},stateDir:"",status:"idle",createdAt:1,updatedAt:2});
+const session = (id: string, node: string) => ({id,account:id==="inline" && inlineShared ? sharedOwner : account,agentId:"alpha",title:id === "untitled" ? "" : `${node} ${id === "two" ? "Second conversation" : id === "older" ? "Older conversation" : "First conversation"}`,status:"idle",createdAt:1,updatedAt:2,...(childLists && ["one", "two"].includes(id) ? { childSessionCount: id === "one" ? 2 : 1 } : {})});
 const run = (id: string, node: string) => ({id,account,rootRunId:id,depth:0,kind:"workflow",origin:"user",title:`${node} Review navigation`,status:"succeeded",createdAt:1,updatedAt:2,finishedAt:2,...(id === "failed-run" ? { status: "failed", error: { code: "FIXTURE_ERROR", message: "Recorded root failure", detail: { fixture: "root detail" }, stack: "Error: recorded failure\n at workflow.js:2" }, plan: { steps: [{ id: "child-step", label: "Recorded child step", status: "failed" }] }, sourceText: "// Recorded source\nthrow new Error('fixture');" } : {}),...(id === "activity" ? {sourceText:"// Recorded workflow fixture\nreturn 42;"} : {})});
 const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch(req,server) {
   const url=new URL(req.url),path=url.pathname;
@@ -165,7 +166,7 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch
       const status=inlineListStatus, malformed=malformedInlineList;
       if(holdInlineList) await new Promise<void>(resolve=>pending.add(resolve));
       if(status!==200)return fail(status,"Recorded inline run list failed");
-      if(inlineWindowed)return ok({_:"ListRunsResponse",runs:[inlineRun(inlineIds[1],node),...Array.from({length:49},(_,index)=>({...run(`recent-${index}`,node),sessionId:"inline",kind:"agent",createdAt:100+index,updatedAt:200+index}))]});
+      if(inlineWindowed)return ok({_:"ListRunsResponse",runs:[inlineRun(inlineIds[1],node),...Array.from({length:49},(_,index)=>({...run(`recent-${index}`,node),account:inlineShared ? sharedOwner : account,sessionId:"inline",kind:"agent",createdAt:100+index,updatedAt:200+index}))]});
       return ok(malformed === "response" ? {_:"GetRunResponse"} : {_:"ListRunsResponse",runs:malformed === "list" ? {} : malformed === "owner" ? [{...inlineRun(inlineIds[0],node),sessionId:"other"}] : malformed === "plan" ? [{...inlineRun(inlineIds[0],node),plan:{steps:{}}}] : inlineIds.map(id=>inlineRun(id,node))});
     }
     if(action._ === "GetRun" && [...inlineIds,archivedInlineId].includes(id)) {
@@ -315,7 +316,7 @@ async function fresh(fn:(page:Page)=>Promise<void>){
  page.setDefaultNavigationTimeout(process.env.CYBERDECK_TEST_ORIGIN ? 30000 : 12000);
  await page.route("**/*",route=>new URL(route.request().url()).origin===server.url.origin?route.continue():route.abort());
  try{await fn(page);}catch(e){console.error(JSON.stringify({title:await page.title(),body:(await page.locator("body").innerText()).slice(0,1800),errors,actions:actions.slice(-15)}));throw e;}
- finally{inlineComposerAvailable=false;inlineWindowed=false;holdInlineCard=false;inlineLive=false;inlineErrorFixture=false;holdInlineGraph=false;inlineGraphStatus=200;holdInlineJournal=false;inlineWorkflow=false;malformedInlineCard="";inlineListStatus=200;inlineCardStatus=200;holdInlineList=false;malformedInlineList="";inlineSucceeded=false;runStreamMode="";holdTriggerRead=false;triggerReadStatus=200;nestedRunTools=false;holdRunJournal=false;holdHandoffRead=false;handoffReadStatus=200;detailRunStatus=200;holdDetailRun=false;malformedDetailRun="";graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
+ finally{inlineShared=false;inlineComposerAvailable=false;inlineWindowed=false;holdInlineCard=false;inlineLive=false;inlineErrorFixture=false;holdInlineGraph=false;inlineGraphStatus=200;holdInlineJournal=false;inlineWorkflow=false;malformedInlineCard="";inlineListStatus=200;inlineCardStatus=200;holdInlineList=false;malformedInlineList="";inlineSucceeded=false;runStreamMode="";holdTriggerRead=false;triggerReadStatus=200;nestedRunTools=false;holdRunJournal=false;holdHandoffRead=false;handoffReadStatus=200;detailRunStatus=200;holdDetailRun=false;malformedDetailRun="";graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
 }
 const href=(path:string,node="")=>`${server.url}#/seed?${new URLSearchParams({r:path,...(node?{node}:{})})}`;
 const title=(page:Page,value:string)=>page.waitForFunction(value=>document.title===value,value);
@@ -2733,4 +2734,16 @@ test("Seed older run external-server restoration keeps its signing node and cano
  await page.goto(inlineDetailHref("Seed",[],inlineSelection(),"peer-b",[],true));await title(page,"Recorded tool input/output · read · external First conversation · Seed session · Peer B · Cyberdeck");
  expect(reads.filter(row=>row.action._==="GetRun" && row.action.runId===inlineIds[0]).at(-1)?.node).toBe("external");
  const link=page.url();await page.reload();await title(page,"Recorded tool input/output · read · external First conversation · Seed session · Peer B · Cyberdeck");expect(page.url()).toBe(link);
+}),browserBudget);
+
+
+for(const view of ["Seed","Sessions"])test(`Seed older run ${view} authorized collaborators restore roots owned by the displayed session account`,()=>fresh(async page=>{
+ inlineWindowed=true;inlineShared=true;inlineComposerAvailable=true;
+ await page.goto(inlineDetailHref(view,[],inlineSelection(),"peer-b"));await title(page,inlineDetailTitle(0,true,"peer-b"));
+ await page.getByRole("dialog").getByText("Recorded inline result 2",{exact:false}).waitFor();
+ await page.keyboard.press("Escape");await title(page,inlineTitle([],"peer-b"));await page.locator('[contenteditable="true"]').first().waitFor();
+ await page.reload();await title(page,inlineTitle([],"peer-b"));
+ // The displayed owner differs from the signing identity; authorization remains
+ // the server's job. An unrelated owner in a root response is still rejected.
+ malformedInlineCard="account";await page.goto("about:blank");await page.goto(inlineDetailHref(view,[],inlineSelection(),"peer-b"));await title(page,"Run cards unavailable · Seed · Peer B · Cyberdeck");
 }),browserBudget);
