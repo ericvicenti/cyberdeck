@@ -2480,6 +2480,9 @@ for(const view of ["Seed","Sessions"]){
   const composer=page.locator("textarea").first();await composer.fill("Keep this error draft");await composer.evaluate(el=>(el as any).__errorOwner="same composer");
   await page.evaluate(link=>location.hash=new URL(link).hash,inlineErrorHref(view));await title(page,inlineErrorTitle());
   await page.locator(`[data-seed-inline-error-trigger=${JSON.stringify(inlineChildId(inlineIds[0]))}]`).waitFor();
+  // A graph can render errors before its journal subscription arrives. Wait
+  // for both initial journals before measuring URL-only lifecycle changes.
+  await runCalls(page,inlineIds[0]).waitFor();await runCalls(page,inlineIds[1]).waitFor();
   const length=await page.evaluate(()=>history.length),subCount=subscriptions.length,readCount=reads.length;
   await page.keyboard.press("Escape");await title(page,inlineTitle());await page.locator("[data-seed-inline-error]").waitFor({state:"hidden"});expect(await page.evaluate(()=>history.length)).toBe(length+1);
   const trigger=page.locator(`[data-seed-inline-error-trigger=${JSON.stringify(inlineIds[0])}]`);await trigger.focus();await page.keyboard.press("Enter");await title(page,inlineErrorTitle());expect(await page.evaluate(()=>history.length)).toBe(length+2);
