@@ -1164,10 +1164,12 @@ No focus, URL, history, transcript read or subscription changes are required.
 root cards beyond the latest 50 session runs. Absence from that recent window
 no longer means the card is missing. Once the session and its run listing are
 read successfully, the UI reads only the selected missing roots with `GetRun`.
-Each response must match the selected ID, session, account, root identity and
+Each response must match the selected ID, session, owning account, root identity and
 root depth, with valid recorded content and timestamps. Foreign-session,
 foreign-account and child-run responses never open a graph, tool inspector or
-journal. Missing/denied/unavailable/invalid outcomes retain the requested URL,
+journal. The owning account comes from the displayed session; an authorized
+collaborator can sign with a different identity. Missing/denied/unavailable/invalid
+outcomes retain the requested URL,
 show the matching title and offer read-only Retry without another transcript
 or session-list request.
 
