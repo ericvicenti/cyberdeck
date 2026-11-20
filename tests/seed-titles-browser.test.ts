@@ -2615,11 +2615,14 @@ for(const view of ["Seed","Sessions"]){
   await page.getByRole("dialog").getByText("Recorded inline result 2",{exact:false}).waitFor();
   const length=await page.evaluate(()=>history.length),readCount=reads.length,subCount=subscriptions.length;
   await page.keyboard.press("Escape");await title(page,inlineTitle());await page.getByRole("dialog").waitFor({state:"hidden"});
-  await runCalls(page).waitFor();expect(await page.evaluate(()=>history.length)).toBe(length+1);
-  await page.goBack();await title(page,inlineDetailTitle(0,true));await page.goForward();await title(page,inlineTitle());
-  await runCalls(page).click();await title(page,inlineTitle([`open:${inlineIds[0]}`]));
+  await runCalls(page).waitFor({state:"hidden"});expect(await runCalls(page).count()).toBe(1);expect(await page.evaluate(()=>history.length)).toBe(length+1);
+  const baseLink=page.url(),visibleCards=await page.locator('[data-seed-inline-card]:visible').evaluateAll(elements=>elements.map(el=>el.getAttribute("data-seed-inline-card")));
+  expect(visibleCards).toEqual([inlineIds[1]]);
+  await page.goBack();await title(page,inlineDetailTitle(0,true));await page.goForward();await title(page,inlineTitle());await runCalls(page).waitFor({state:"hidden"});
+  await page.evaluate(url=>location.hash=new URL(url).hash,inlineHref(view,[`open:${inlineIds[0]}`]));await title(page,inlineTitle([`open:${inlineIds[0]}`]));await runCalls(page).waitFor();
   expect(await composer.innerText()).toContain("Keep the older run draft");expect(await composer.evaluate(el=>(el as any).__olderOwner)).toBe("same composer");
   expect(subscriptions.length).toBe(subCount);expect(reads.slice(readCount).filter(row=>["GetSession","GetRun","ListRuns"].includes(row.action._))).toEqual([]);
+  await fresh(async tab=>{await tab.goto(baseLink);await title(tab,inlineTitle());await runCalls(tab,inlineIds[1]).waitFor();expect(await tab.locator('[data-seed-inline-card]:visible').evaluateAll(elements=>elements.map(el=>el.getAttribute("data-seed-inline-card")))).toEqual(visibleCards);expect(await runCalls(tab).count()).toBe(0);});
  }),browserBudget);
  test(`Seed older run ${view} root and descendant error links restore the older graph and title`,()=>fresh(async page=>{
   inlineWindowed=true;inlineErrorFixture=true;
@@ -2716,11 +2719,12 @@ for(const view of ["Seed","Sessions"]){
   inlineWindowed=true;const shots=process.env.CYBERDECK_NAV_SHOTS;
   for(const width of [390,1280])for(const scheme of ["light","dark"] as const){
    await page.setViewportSize({width,height:900});await page.emulateMedia({colorScheme:scheme});
-   for(const state of ["populated","loading","error","missing"]){
+   for(const state of ["populated","cleared","loading","error","missing"]){
     inlineCardStatus=state==="error"?503:state==="missing"?404:200;holdInlineCard=state==="loading";
     await page.goto("about:blank");await page.goto(inlineHref(view,[`open:${inlineIds[0]}`]));
-    await title(page,state==="populated"?inlineTitle([`open:${inlineIds[0]}`]):`${state==="loading"?"Loading run cards":state==="error"?"Run cards unavailable":"Run cards not found"} · Seed · Cyberdeck`);
-    const control=state==="populated"?runCalls(page):state==="loading"?page.getByText("Loading selected run cards…",{exact:true}):page.getByRole("button",{name:"Retry",exact:true}).first();
+    await title(page,(state==="populated" || state==="cleared")?inlineTitle([`open:${inlineIds[0]}`]):`${state==="loading"?"Loading run cards":state==="error"?"Run cards unavailable":"Run cards not found"} · Seed · Cyberdeck`);
+    if(state==="cleared"){await runCalls(page).waitFor();await page.evaluate(url=>location.hash=new URL(url).hash,inlineHref(view));await title(page,inlineTitle());await runCalls(page).waitFor({state:"hidden"});}
+    const control=state==="cleared"?runCalls(page,inlineIds[1]):state==="populated"?runCalls(page):state==="loading"?page.getByText("Loading selected run cards…",{exact:true}):page.getByRole("button",{name:"Retry",exact:true}).first();
     await withinViewport(page,control);if(width===390 && state!=="loading")expect((await control.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
     if(shots){await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:join(shots,`older-${view.toLowerCase()}-${state}-${width}-${scheme}.png`),animations:"disabled"});}
@@ -2746,4 +2750,19 @@ for(const view of ["Seed","Sessions"])test(`Seed older run ${view} authorized co
  // The displayed owner differs from the signing identity; authorization remains
  // the server's job. An unrelated owner in a root response is still rejected.
  malformedInlineCard="account";await page.goto("about:blank");await page.goto(inlineDetailHref(view,[],inlineSelection(),"peer-b"));await title(page,"Run cards unavailable · Seed · Peer B · Cyberdeck");
+}),browserBudget);
+
+
+for(const view of ["Seed","Sessions"])test(`Seed older run ${view} delayed transcript layout keeps a selected read visible until manual scrolling`,()=>fresh(async page=>{
+ inlineWindowed=true;inlineWorkflow=true;detailRunStatus=503;await page.setViewportSize({width:390,height:900});
+ await page.goto(inlineDetailHref(view));await title(page,"Workflow run unavailable · Seed · Cyberdeck");
+ const retry=page.getByRole("button",{name:"Retry",exact:true}),scroller=page.locator("[data-seed-transcript-scroll]");await withinViewport(page,retry);
+ const link=page.url(),length=await page.evaluate(()=>history.length),subCount=subscriptions.length;
+ // A late formatted block can change layout before the selected read, even
+ // after its journal and error response have arrived.
+ await scroller.evaluate(el=>{const spacer=document.createElement("div");spacer.dataset.layoutFixture="";spacer.style.height="240px";el.firstElementChild!.prepend(spacer);});
+ await withinViewport(page,retry);
+ await scroller.evaluate(el=>{el.scrollTop=0;el.dispatchEvent(new Event("scroll",{bubbles:true}));});await page.waitForTimeout(50);
+ await page.locator('[data-layout-fixture]').evaluate(el=>{(el as HTMLElement).style.height="480px";});await page.waitForTimeout(100);
+ expect(await scroller.evaluate(el=>el.scrollTop)).toBe(0);expect(page.url()).toBe(link);expect(await page.evaluate(()=>history.length)).toBe(length);expect(subscriptions.length).toBe(subCount);
 }),browserBudget);
