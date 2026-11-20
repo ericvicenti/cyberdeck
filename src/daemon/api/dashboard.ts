@@ -25,8 +25,10 @@ import { randomUUID } from "crypto";
 import { ensureDiskSamples, nearlyFull, sampleDisks, SAMPLE_EVERY_MS, type DiskTrend } from "../disks";
 import { spaceReport, startSpaceMeasure } from "../space";
 import { applyCleanup, planCleanup } from "../cleanup";
+import { checkForUpdate, isUpdating } from "../updater";
 
 export const USAGE_CACHE_MS = 60_000;
+export const DEPLOY_CACHE_MS = 5 * 60_000;
 const FETCH_TIMEOUT_MS = 10_000;
 const ACTIVITY_DAYS = 14;
 
@@ -94,6 +96,19 @@ export type Redundancy = {
   dataCacheBytes: number;
   lastScanAt: number | null;
 };
+/** Deploy state for this node: what git commit the daemon is actually running (`commit`, the sha
+ *  it was booted on), what the checkout's HEAD says now (`head`), and how far `origin/main` is
+ *  ahead of the boot commit (`behind`). `commit !== head` means another routine pulled
+ *  `~/.cyberdeck/src` while we still run the old code — a restart deploys the new one; `behind > 0`
+ *  means origin has code we have not pulled yet. `checkedAt` is when the git fetch ran. */
+export type DeployState = {
+  commit: string;
+  head: string | null;
+  behind: number;
+  updating: boolean;
+  error?: string;
+  checkedAt: number;
+};
 export type BackupStatus = {
   /** True once the (future) backup system has at least one target configured. */
   configured: boolean;
@@ -111,6 +126,7 @@ export type Dashboard = {
   activity: ActivityDay[];
   redundancy: Redundancy;
   backup: BackupStatus;
+  deploy: DeployState;
 };
 
 // ----------------------------------------------------------- normalizers ----
@@ -521,6 +537,20 @@ export function backupStatus(cfg: CyberdeckConfig): BackupStatus {
   };
 }
 
+// ------------------------------------------------------------- deploy state ----
+
+/** Rolls `checkForUpdate()` + `isUpdating()` into one Dashboard field. The git fetch it
+ *  performs is a few hundred ms over the network, so this is cached. */
+export async function readDeployState(): Promise<DeployState> {
+  const checkedAt = Date.now();
+  try {
+    const r = await checkForUpdate();
+    return { commit: r.commit, head: r.head ?? null, behind: r.behind, updating: isUpdating(), ...(r.error ? { error: r.error } : {}), checkedAt };
+  } catch (err) {
+    return { commit: "unknown", head: null, behind: 0, updating: isUpdating(), error: String(err instanceof Error ? err.message : err), checkedAt };
+  }
+}
+
 // ---------------------------------------------------------------- routes ----
 
 export function registerDashboardRoutes(app: Hono, db: Database, cfg: CyberdeckConfig) {
@@ -530,6 +560,13 @@ export function registerDashboardRoutes(app: Hono, db: Database, cfg: CyberdeckC
     if (hit && !fresh && Date.now() - hit.at < USAGE_CACHE_MS) return hit.value;
     const value = (tool === "claude" ? fetchClaudeUsage() : fetchCodexUsage()).catch((err) => none(tool, String(err instanceof Error ? err.message : err)));
     cache.set(tool, { at: Date.now(), value });
+    return value;
+  };
+  let deployCache: { at: number; value: Promise<DeployState> } | null = null;
+  const deploy = (fresh: boolean): Promise<DeployState> => {
+    if (deployCache && !fresh && Date.now() - deployCache.at < DEPLOY_CACHE_MS) return deployCache.value;
+    const value = readDeployState();
+    deployCache = { at: Date.now(), value };
     return value;
   };
 
@@ -562,7 +599,7 @@ export function registerDashboardRoutes(app: Hono, db: Database, cfg: CyberdeckC
 
   app.get("/api/dashboard", async (c) => {
     const fresh = Boolean(c.req.query("fresh"));
-    const [claude, codex, disks, system] = await Promise.all([usage("claude", fresh), usage("codex", fresh), ownDisks(), systemInfo()]);
+    const [claude, codex, disks, system, dep] = await Promise.all([usage("claude", fresh), usage("codex", fresh), ownDisks(), systemInfo(), deploy(fresh)]);
     const body: Dashboard = {
       at: Date.now(),
       usage: { claude: { ...claude, resets: claude.resets ?? claudeResetOffer() }, codex },
@@ -571,6 +608,7 @@ export function registerDashboardRoutes(app: Hono, db: Database, cfg: CyberdeckC
       activity: activityByDay(),
       redundancy: redundancy(db),
       backup: backupStatus(cfg),
+      deploy: dep,
     };
     return c.json(body);
   });

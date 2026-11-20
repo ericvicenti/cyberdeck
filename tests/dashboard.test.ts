@@ -4,7 +4,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { startTestServer, testConfig, tmpHomeDir, type TestServer } from "./helpers";
-import { normalizeClaudeUsage, normalizeCodexUsage, codexUsageFromSessions, parseDf, mergeVolumes, localLinuxMounts, applyZpoolSizes, activityByDay, backupStatus, claudeResetOffer } from "../src/daemon/api/dashboard";
+import { normalizeClaudeUsage, normalizeCodexUsage, codexUsageFromSessions, parseDf, mergeVolumes, localLinuxMounts, applyZpoolSizes, activityByDay, backupStatus, claudeResetOffer, readDeployState } from "../src/daemon/api/dashboard";
 import { normalizeCodexResets } from "../src/daemon/codexrpc";
 import { readFileSync, existsSync } from "fs";
 
@@ -180,6 +180,19 @@ describe("local metrics", () => {
   });
 });
 
+describe("deploy state", () => {
+  test("reads the running commit, the checkout head, and origin drift", async () => {
+    const d = await readDeployState();
+    expect(d.commit).toMatch(/^[a-f0-9]{7,}$/);
+    // On a dev checkout both are the same commit, with no drift. The git fetch may fail offline;
+    // in that case `error` is set and `behind` is 0 — both cases are valid.
+    expect(typeof d.behind).toBe("number");
+    expect(typeof d.updating).toBe("boolean");
+    expect(d.checkedAt).toBeGreaterThan(0);
+    if (d.head) expect(d.head).toMatch(/^[a-f0-9]{7,}$/);
+  }, 30000);
+});
+
 describe("GET /api/dashboard", () => {
   let srv: TestServer;
   beforeAll(() => {
@@ -208,6 +221,11 @@ describe("GET /api/dashboard", () => {
     expect(d.redundancy).toMatchObject({ repos: 3, safe: 1, attention: 1, atRisk: 1, remoteless: 1, dirty: 2, unpushed: 1, exposedBytes: 7000, lastScanAt: 3 });
     expect(d.backup.configured).toBe(false);
     expect(d.backup.note).toContain("no backup system yet");
+    // Deploy state: the daemon's running commit; on a dev checkout `head` matches, behind may be 0 or small.
+    expect(d.deploy.commit).toMatch(/^[a-f0-9]{7,}$/);
+    expect(typeof d.deploy.behind).toBe("number");
+    expect(typeof d.deploy.updating).toBe("boolean");
+    expect(d.deploy.checkedAt).toBeGreaterThan(0);
   });
   test("requires auth", async () => {
     expect((await fetch(`${srv.base}/api/dashboard`)).status).toBe(401);
