@@ -2914,7 +2914,9 @@ for(const view of ["Seed","Sessions"])test(`Seed inline journal ${view} waiting,
   const retry=dialog.getByRole("button",{name:"Retry",exact:true});await withinViewport(page,retry);
   if(width===390)expect((await retry.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   if(shots)await page.screenshot({path:join(shots,`inline-journal-${view.toLowerCase()}-error-${width}-${scheme}.png`),animations:"disabled"});
+  const beforeRetry=subscriptions.filter(key=>key===runStreamTarget).length;
   runStreamMode="silent";await retry.click();await title(page,inlineJournalTitle("",true));
+  await waitInlineFixture(()=>subscriptions.filter(key=>key===runStreamTarget).length===beforeRetry+1);
   await withinViewport(page,dialog.getByText("Reconnecting run updates…",{exact:true}));
   if(shots)await page.screenshot({path:join(shots,`inline-journal-${view.toLowerCase()}-reconnecting-${width}-${scheme}.png`),animations:"disabled"});
   holdInlineJournal=false;for(const release of pending)release();pending.clear();runStreamMode="";inlineInterrupt();await title(page,inlineJournalTitle());
