@@ -185,8 +185,9 @@ describe("deploy state", () => {
     const d = await readDeployState();
     expect(d.commit).toMatch(/^[a-f0-9]{7,}$/);
     // On a dev checkout both are the same commit, with no drift. The git fetch may fail offline;
-    // in that case `error` is set and `behind` is 0 — both cases are valid.
+    // in that case `error` is set and `behind`/`ahead` are 0 — both cases are valid.
     expect(typeof d.behind).toBe("number");
+    expect(typeof d.ahead).toBe("number");
     expect(typeof d.updating).toBe("boolean");
     expect(d.checkedAt).toBeGreaterThan(0);
     if (d.head) expect(d.head).toMatch(/^[a-f0-9]{7,}$/);
@@ -224,6 +225,7 @@ describe("GET /api/dashboard", () => {
     // Deploy state: the daemon's running commit; on a dev checkout `head` matches, behind may be 0 or small.
     expect(d.deploy.commit).toMatch(/^[a-f0-9]{7,}$/);
     expect(typeof d.deploy.behind).toBe("number");
+    expect(typeof d.deploy.ahead).toBe("number");
     expect(typeof d.deploy.updating).toBe("boolean");
     expect(d.deploy.checkedAt).toBeGreaterThan(0);
   });

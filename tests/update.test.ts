@@ -38,8 +38,11 @@ test("update check reports drift from origin", async () => {
   expect(res.status).toBe(200);
   const body = await res.json();
   expect(body.commit).toMatch(/^[a-f0-9]{7,}$/);
-  // offline machines get an error field instead of a behind count
-  if (!body.error) expect(body.behind).toBeGreaterThanOrEqual(0);
+  // offline machines get an error field instead of drift counts
+  if (!body.error) {
+    expect(body.behind).toBeGreaterThanOrEqual(0);
+    expect(body.ahead).toBeGreaterThanOrEqual(0);
+  }
 }, 30000);
 
 test("rev-list counts drift from a boot commit after the checkout moves forward", async () => {
@@ -82,6 +85,46 @@ test("rev-list counts drift from a boot commit after the checkout moves forward"
     await bootProc.exited;
     const fromBoot = parseInt((await new Response(bootProc.stdout).text()).trim(), 10);
     expect(fromBoot).toBe(2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("rev-list counts local commits that origin does not have (ahead of origin)", async () => {
+  // A node that commits locally to ~/.cyberdeck/src without pushing is running code
+  // no other machine has. `origin/main..bootFull` surfaces that, which is what
+  // DeployState.ahead reports; the Deploy widget then flags it louder than a pending pull.
+  const dir = mkdtempSync(join(tmpdir(), "cyberdeck-ahead-"));
+  const git = async (...args: string[]) => {
+    const p = Bun.spawn(["git", "-C", dir, ...args], { stdout: "pipe", stderr: "pipe" });
+    const code = await p.exited;
+    const out = (await new Response(p.stdout).text()).trim();
+    if (code !== 0) throw new Error(`git ${args.join(" ")} failed: ${await new Response(p.stderr).text()}`);
+    return out;
+  };
+  try {
+    await git("init", "--quiet", "--initial-branch=main");
+    await git("config", "user.email", "t@t");
+    await git("config", "user.name", "t");
+    await git("commit", "--allow-empty", "-m", "shared");
+    const originPath = join(dir, "origin.git");
+    const p = Bun.spawn(["git", "clone", "--bare", "--quiet", dir, originPath], { stdout: "pipe", stderr: "pipe" });
+    if (await p.exited !== 0) throw new Error("bare clone failed");
+    await git("remote", "add", "origin", originPath);
+    await git("fetch", "--quiet", "origin");
+    // Three unpushed commits on top; this is yacht's state on 2026-11-22.
+    await git("commit", "--allow-empty", "-m", "local-only-1");
+    await git("commit", "--allow-empty", "-m", "local-only-2");
+    await git("commit", "--allow-empty", "-m", "local-only-3");
+    const boot = await git("rev-parse", "HEAD");
+
+    const behindProc = Bun.spawn(["git", "-C", dir, "rev-list", "--count", `${boot}..origin/main`], { stdout: "pipe" });
+    await behindProc.exited;
+    expect(parseInt((await new Response(behindProc.stdout).text()).trim(), 10)).toBe(0);
+
+    const aheadProc = Bun.spawn(["git", "-C", dir, "rev-list", "--count", `origin/main..${boot}`], { stdout: "pipe" });
+    await aheadProc.exited;
+    expect(parseInt((await new Response(aheadProc.stdout).text()).trim(), 10)).toBe(3);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

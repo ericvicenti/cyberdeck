@@ -97,14 +97,17 @@ export type Redundancy = {
   lastScanAt: number | null;
 };
 /** Deploy state for this node: what git commit the daemon is actually running (`commit`, the sha
- *  it was booted on), what the checkout's HEAD says now (`head`), and how far `origin/main` is
- *  ahead of the boot commit (`behind`). `commit !== head` means another routine pulled
- *  `~/.cyberdeck/src` while we still run the old code — a restart deploys the new one; `behind > 0`
- *  means origin has code we have not pulled yet. `checkedAt` is when the git fetch ran. */
+ *  it was booted on), what the checkout's HEAD says now (`head`), how far `origin/main` is ahead
+ *  of the boot commit (`behind`), and how many commits the boot has that origin does not (`ahead`).
+ *  `commit !== head` means another routine pulled `~/.cyberdeck/src` while we still run the old
+ *  code — a restart deploys the new one; `behind > 0` means origin has code we have not pulled
+ *  yet; `ahead > 0` means the running code has commits never pushed, so no other machine has it.
+ *  `checkedAt` is when the git fetch ran. */
 export type DeployState = {
   commit: string;
   head: string | null;
   behind: number;
+  ahead: number;
   updating: boolean;
   error?: string;
   checkedAt: number;
@@ -545,9 +548,9 @@ export async function readDeployState(): Promise<DeployState> {
   const checkedAt = Date.now();
   try {
     const r = await checkForUpdate();
-    return { commit: r.commit, head: r.head ?? null, behind: r.behind, updating: isUpdating(), ...(r.error ? { error: r.error } : {}), checkedAt };
+    return { commit: r.commit, head: r.head ?? null, behind: r.behind, ahead: r.ahead, updating: isUpdating(), ...(r.error ? { error: r.error } : {}), checkedAt };
   } catch (err) {
-    return { commit: "unknown", head: null, behind: 0, updating: isUpdating(), error: String(err instanceof Error ? err.message : err), checkedAt };
+    return { commit: "unknown", head: null, behind: 0, ahead: 0, updating: isUpdating(), error: String(err instanceof Error ? err.message : err), checkedAt };
   }
 }
 

@@ -38,19 +38,28 @@ export async function currentCommit(): Promise<string> {
   return bootShort ?? "unknown";
 }
 
-export async function checkForUpdate(): Promise<{ commit: string; behind: number; head?: string; error?: string }> {
+export async function checkForUpdate(): Promise<{ commit: string; behind: number; ahead: number; head?: string; error?: string }> {
   await ensureBoot();
   const commit = bootShort ?? "unknown";
   const fetch_ = await run(["git", "fetch", "--quiet", "origin"]);
-  if (fetch_.code !== 0) return { commit, behind: 0, error: `fetch failed: ${fetch_.err.slice(0, 200)}` };
+  if (fetch_.code !== 0) return { commit, behind: 0, ahead: 0, error: `fetch failed: ${fetch_.err.slice(0, 200)}` };
   // Count from the commit we ACTUALLY run (boot) to origin/main. If something
   // else pulled the checkout, `HEAD..origin/main` would say 0 while we still
   // run pre-pull code; using the boot commit catches that case.
   const base = bootFull && bootFull !== "unknown" ? bootFull : "HEAD";
-  const count = await run(["git", "rev-list", "--count", `${base}..origin/main`]);
+  const behindRes = await run(["git", "rev-list", "--count", `${base}..origin/main`]);
+  // The reverse: commits the running daemon has that origin does not. A node
+  // running local commits that were never pushed is drift too, and more urgent
+  // than "behind origin" because no other machine has that code.
+  const aheadRes = await run(["git", "rev-list", "--count", `origin/main..${base}`]);
   const headRes = await run(["git", "rev-parse", "--short", "HEAD"]);
   const head = headRes.code === 0 ? headRes.out : undefined;
-  return { commit, behind: count.code === 0 ? parseInt(count.out, 10) || 0 : 0, head };
+  return {
+    commit,
+    behind: behindRes.code === 0 ? parseInt(behindRes.out, 10) || 0 : 0,
+    ahead: aheadRes.code === 0 ? parseInt(aheadRes.out, 10) || 0 : 0,
+    head,
+  };
 }
 
 let updating = false;

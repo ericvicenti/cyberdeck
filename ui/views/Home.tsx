@@ -173,12 +173,15 @@ export function deployTone(d: DeployState | null, online: boolean | null): { sev
   if (d.updating) return { sev: "warn", label: "updating…" };
   if (d.error) return { sev: "bad", label: "check failed" };
   if (d.behind > 0) return { sev: "warn", label: `${d.behind} behind origin` };
+  // "ahead" without "behind" means local-only commits — the running code is not on origin and
+  // no other machine has it; flag it louder than a pending pull.
+  if (d.ahead > 0) return { sev: "bad", label: `${d.ahead} ahead of origin` };
   if (d.head && d.head !== d.commit) return { sev: "warn", label: "restart to deploy" };
   return { sev: "ok", label: "up to date" };
 }
 
 function DeployWidget({ rows }: { rows: DeployRow[] }) {
-  const dirty = rows.filter((r) => r.deploy && !r.deploy.updating && !r.deploy.error && (r.deploy.behind > 0 || (r.deploy.head && r.deploy.head !== r.deploy.commit)));
+  const dirty = rows.filter((r) => r.deploy && !r.deploy.updating && !r.deploy.error && (r.deploy.behind > 0 || r.deploy.ahead > 0 || (r.deploy.head && r.deploy.head !== r.deploy.commit)));
   const freshest = rows.reduce<number | null>((a, r) => (r.deploy?.checkedAt && (a == null || r.deploy.checkedAt > a) ? r.deploy.checkedAt : a), null);
   const meta = dirty.length ? `${dirty.length} drifting` : freshest ? `all up to date · checked ${fmtAgo(freshest)}` : "…";
   return (
@@ -195,9 +198,11 @@ function DeployWidget({ rows }: { rows: DeployRow[] }) {
                 ? d.error
                 : d.behind > 0
                   ? `${d.commit} · origin has ${d.behind} commit${d.behind === 1 ? "" : "s"}`
-                  : d.head && d.head !== d.commit
-                    ? `running ${d.commit} · checkout ${d.head} · restart to deploy`
-                    : `${d.commit}`
+                  : d.ahead > 0
+                    ? `${d.commit} · ${d.ahead} commit${d.ahead === 1 ? "" : "s"} not on origin · push to back up`
+                    : d.head && d.head !== d.commit
+                      ? `running ${d.commit} · checkout ${d.head} · restart to deploy`
+                      : `${d.commit}`
             : r.online === false ? "node offline" : r.node ? "no dashboard yet" : "no Cyberdeck node";
           return (
             <li key={r.id} className="flex items-center gap-2 text-[11px]" data-testid={`deploy-${r.name.toLowerCase()}`}>
