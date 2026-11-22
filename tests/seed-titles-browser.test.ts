@@ -2912,6 +2912,7 @@ for(const view of ["Seed","Sessions"])test(`Seed inline journal ${view} waiting,
   if(shots)await page.screenshot({path:join(shots,`inline-journal-${view.toLowerCase()}-waiting-${width}-${scheme}.png`),animations:"disabled"});
   await waitInlineFixture(()=>pending.size>0);inlineInterrupt();await title(page,inlineJournalTitle());
   const retry=dialog.getByRole("button",{name:"Retry",exact:true});await withinViewport(page,retry);
+  await dialog.evaluate(async el=>{await Promise.all(el.getAnimations().filter(animation=>animation.effect?.getComputedTiming().iterations!==Infinity).map(animation=>animation.finished.catch(()=>{})));});
   if(width===390)expect((await retry.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   if(shots)await page.screenshot({path:join(shots,`inline-journal-${view.toLowerCase()}-error-${width}-${scheme}.png`),animations:"disabled"});
   const beforeRetry=subscriptions.filter(key=>key===runStreamTarget).length;
