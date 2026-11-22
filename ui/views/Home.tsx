@@ -10,7 +10,7 @@ import { useOverview, refreshNodes } from "../lib/fleet";
 import { pairingOrigin } from "../lib/pairing";
 import { confirmAction } from "../lib/tv/confirm";
 import { ServerIcon, FolderIcon, TerminalIcon, GitIcon, GridIcon } from "../lib/icons";
-import type { Dashboard, UsageSummary } from "../../src/daemon/api/dashboard";
+import type { Dashboard, UsageSummary, DeployState } from "../../src/daemon/api/dashboard";
 
 /** "in ~2 d" from a disk's fill rate (the daemon's hourly samples); nothing when it is not filling or lasts months. */
 const fillsIn = (days: number | null | undefined) =>
@@ -157,6 +157,63 @@ function UsageWidget({ title, usage, testId, node, nodeName, isSelf, onRefresh }
         )}
         {note && <p role={note.kind === "err" ? "alert" : "status"} className={`mt-2 text-[10px] ${note.kind === "ok" ? "text-emerald-400" : "text-amber-400"}`}>{note.text}</p>}
       </div>
+    </Widget>
+  );
+}
+
+// ----------------------------------------------------------- deploy widget ----
+
+/** One row per machine: the sha the daemon is actually running, the sha on disk (if different),
+ *  and whether origin is ahead. "stale" = origin has code we have not pulled; "deploy pending"
+ *  = checkout moved past the running daemon (a restart would deploy). */
+type DeployRow = { id: string; name: string; self: boolean; online: boolean | null; node: boolean; deploy: DeployState | null };
+
+export function deployTone(d: DeployState | null, online: boolean | null): { sev: "ok" | "warn" | "bad" | "off"; label: string } {
+  if (!d) return { sev: "off", label: online === false ? "offline" : "no node" };
+  if (d.updating) return { sev: "warn", label: "updating…" };
+  if (d.error) return { sev: "bad", label: "check failed" };
+  if (d.behind > 0) return { sev: "warn", label: `${d.behind} behind origin` };
+  if (d.head && d.head !== d.commit) return { sev: "warn", label: "restart to deploy" };
+  return { sev: "ok", label: "up to date" };
+}
+
+function DeployWidget({ rows }: { rows: DeployRow[] }) {
+  const dirty = rows.filter((r) => r.deploy && !r.deploy.updating && !r.deploy.error && (r.deploy.behind > 0 || (r.deploy.head && r.deploy.head !== r.deploy.commit)));
+  const freshest = rows.reduce<number | null>((a, r) => (r.deploy?.checkedAt && (a == null || r.deploy.checkedAt > a) ? r.deploy.checkedAt : a), null);
+  const meta = dirty.length ? `${dirty.length} drifting` : freshest ? `all up to date · checked ${fmtAgo(freshest)}` : "…";
+  return (
+    <Widget title="Deploy" testId="widget-deploy" meta={meta}>
+      <ul className="space-y-1.5">
+        {rows.map((r) => {
+          const d = r.deploy;
+          const tone = deployTone(d, r.online);
+          const color = { ok: "led-on", warn: "led-warn", bad: "led-err", off: "led-off" }[tone.sev];
+          const detail = d
+            ? d.updating
+              ? `updating…`
+              : d.error
+                ? d.error
+                : d.behind > 0
+                  ? `${d.commit} · origin has ${d.behind} commit${d.behind === 1 ? "" : "s"}`
+                  : d.head && d.head !== d.commit
+                    ? `running ${d.commit} · checkout ${d.head} · restart to deploy`
+                    : `${d.commit}`
+            : r.online === false ? "node offline" : r.node ? "no dashboard yet" : "no Cyberdeck node";
+          return (
+            <li key={r.id} className="flex items-center gap-2 text-[11px]" data-testid={`deploy-${r.name.toLowerCase()}`}>
+              <span className={`led ${color}`} />
+              <span className="min-w-0 flex-1 truncate">
+                <span className="text-zinc-200">{r.name}</span>
+                {r.self && <span className="ml-1.5 text-[10px] text-emerald-400">this machine</span>}
+              </span>
+              <span className={`shrink-0 font-mono tabular-nums text-[10px] ${tone.sev === "ok" ? "text-zinc-500" : tone.sev === "warn" ? "text-amber-400" : tone.sev === "bad" ? "text-red-400" : "text-zinc-600"}`} title={detail}>
+                {tone.label}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="mt-3 text-[10px] leading-relaxed text-zinc-500">The fleet auto-updates hourly and nudges peers that differ. Drift here means a push to main has not reached a machine yet.</p>
     </Widget>
   );
 }
@@ -594,6 +651,10 @@ export function Home({ params, onLocked }: { params: URLSearchParams; onLocked: 
           </Widget>
 
           <SoundWidget nodeName={selfName} />
+
+          <DeployWidget
+            rows={machines.filter((m) => m.node).map((m) => ({ id: m.id || "self", name: m.name, self: m.self, online: m.online, node: m.node, deploy: m.dash?.deploy ?? null }))}
+          />
 
           {/* row 4: every machine */}
           <Widget title="Systems" testId="widget-system" className="md:col-span-2 xl:col-span-3" meta={`${machines.filter((m) => m.online).length}/${machines.length} machines up`}>
