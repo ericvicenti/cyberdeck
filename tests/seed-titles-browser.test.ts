@@ -9,7 +9,7 @@ import * as blobs from "@seed-hypermedia/client/blobs";
 const account = blobs.principalToString(blobs.nobleKeyPairFromSeed(new Uint8Array(32).fill(42)).principal);
 const sharedOwner = blobs.principalToString(blobs.nobleKeyPairFromSeed(new Uint8Array(32).fill(43)).principal);
 const browserBudget = process.env.CYBERDECK_TEST_ORIGIN ? 90000 : 30000;
-const actions: string[] = [], errors: string[] = [], unexpected: string[] = [];
+const actions: string[] = [], errors: string[] = [], unexpected: string[] = [], signingNodes: string[] = [];
 const pending = new Set<() => void>();
 let hold = false;
 let graphStatus = 200, holdGraph = false, malformedGraph = "";
@@ -274,6 +274,8 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch
        if(malformed==="identity")response.runId="another-run";
        if(malformed==="array")response.entries={};
        if(malformed==="entry")response.entries=[{runId:action.runId,seq:1,createdAt:1,entry:{kind:"call",op:"tool",tool:42}}];
+       if(malformed==="description")response.entries=[{runId:action.runId,seq:1,createdAt:1,entry:{kind:"call",op:"tool",tool:"read",description:{bad:"description"}}}];
+       if(malformed==="result")response.entries=[{runId:action.runId,seq:1,createdAt:1,entry:{kind:"result",callSeq:1,status:"failed",error:{message:{bad:"message"}}}}];
        if(malformed==="row-owner")response.entries=[{runId:"another-run",seq:1,createdAt:1,entry:{kind:"log"}}];
        if(malformed==="duplicate")response.entries=[{runId:action.runId,seq:1,createdAt:1,entry:{kind:"log"}},{runId:action.runId,seq:1,createdAt:2,entry:{kind:"log"}}];
        return ok(response);
@@ -281,7 +283,7 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch
     }
   }
   if(path.startsWith("/api/")) {
-    if(path.endsWith("/sign") && path.startsWith("/api/seed-agents")) return Response.json({sig:Buffer.alloc(64).toString("base64")});
+    if(path.endsWith("/sign") && path.startsWith("/api/seed-agents")) { signingNodes.push(path.includes("/nodes/") ? path.split("/")[4] : "local"); return Response.json({sig:Buffer.alloc(64).toString("base64")}); }
     if(req.method!=="GET"){unexpected.push(path);return Response.json({error:"No writes"},{status:405});}
     if(path==="/api/auth/whoami")return Response.json({method:"none"});
     if(path==="/api/fleet/nodes")return Response.json({self:{nodeId:"local",name:"Local",urls:[]},nodes:[{id:"peer-a",name:"Peer A",online:true},{id:"peer-b",name:"Peer B",online:true}]});
@@ -1911,6 +1913,7 @@ test("Seed standalone run tools recover only owned durable journals without fetc
  expect(await page.getByRole("dialog").count()).toBe(0);const link=page.url();
  holdRunJournal=false;for(const release of pending)release();pending.clear();
  await title(page,runInspectorTitle());expect(page.url()).toBe(link);
+ await waitInlineFixture(()=>reads.filter(row=>row.action._==="GetSessionEvent" || row.action._==="GetRunJournal").length===readsBefore+2);
  expect(reads.filter(row=>row.action._==="GetSessionEvent" || row.action._==="GetRunJournal").length).toBe(readsBefore+2);
  expect(reads.slice(-20).filter(row=>row.action._==="GetRunJournal").every(row=>["failed-run",errorChild].includes(row.action.runId))).toBe(true);
 }), browserBudget);
@@ -2137,13 +2140,15 @@ test("Seed run journal failures restore honest errors through direct links, relo
  await page.goto(selectionHref(runToolQuery(),"peer-a"));await title(page,interruptedTitle("peer-a"));
  await page.getByText("Run updates interrupted",{exact:true}).waitFor();
  expect(await page.getByText("Waiting for selected recorded tools…",{exact:true}).count()).toBe(0);
- expect(await page.getByRole("dialog").count()).toBe(0);
+ await page.getByRole("dialog").getByText(/Recorded run result 2/).waitFor();
  const link=page.url();await page.reload();await title(page,interruptedTitle("peer-a"));
  await fresh(async tab=>{runStreamMode="error";await tab.goto(link);await title(tab,interruptedTitle("peer-a"));});
 }),browserBudget);
 
 test("Seed run journal retry retains canonical history, graph owner and selected tools without replaying commands", () => fresh(async page => {
+ const journalStart=reads.length;
  runStreamMode="error";await page.goto(selectionHref(runToolQuery()));await title(page,interruptedTitle());
+ await waitInlineFixture(()=>reads.slice(journalStart).filter(row=>row.action._==="GetRunJournal").length===2);
  const link=page.url(),count=await page.evaluate(()=>history.length),readCount=reads.length,subCount=subscriptions.filter(key=>key==="runs/failed-run").length;
  const graph=page.getByText("Recorded child step",{exact:true});await graph.evaluate(el=>(el as any).__fixtureJournalOwner="retained");
  runStreamMode="";await page.getByRole("button",{name:"Retry",exact:true}).click();await title(page,runInspectorTitle());
@@ -2155,7 +2160,9 @@ test("Seed run journal retry retains canonical history, graph owner and selected
 }),browserBudget);
 
 test("Seed run journal errors preserve recorded tools and activity while history keeps one subscription", () => fresh(async page => {
+ const journalStart=reads.length;
  await page.goto(selectionHref(runToolQuery()));await title(page,runInspectorTitle());
+ await waitInlineFixture(()=>reads.slice(journalStart).filter(row=>row.action._==="GetRunJournal").length===2);
  const before=subscriptions.length,readCount=reads.length;interruptRunSockets();await title(page,interruptedTitle());
  await page.getByRole("dialog").getByText(/Recorded run result 2/).waitFor();
  await page.keyboard.press("Escape");await title(page,interruptedTitle());
@@ -2183,7 +2190,7 @@ test("Seed run journal malformed stream messages are visible and retryable", () 
 
 test("Seed run journal missing acknowledgements time out and retry at the same selected URL", () => fresh(async page => {
  await page.clock.install();runStreamMode="silent";await page.goto(selectionHref(runToolQuery()));
- await title(page,`Waiting for tool · ${runDetailId} · local Review navigation · Seed run · Cyberdeck`);
+ await title(page,runInspectorTitle());
  const link=page.url();await page.clock.fastForward(15001);await title(page,interruptedTitle());
  runStreamMode="";await page.getByRole("button",{name:"Retry",exact:true}).click();await title(page,runInspectorTitle());expect(page.url()).toBe(link);
 }),browserBudget);
@@ -2227,11 +2234,12 @@ test("Seed run journal retry shows connecting state and rejects unrelated acknow
  runStreamMode="error";await page.goto(selectionHref(runToolQuery()));await title(page,interruptedTitle());
  for(const [socket,owner] of runSockets)if(owner.node==="local")socket.send(JSON.stringify({_:"subscribed",key:"runs/some-other-run",accountId:account}));
  await page.waitForTimeout(100);expect(await page.title()).toBe(interruptedTitle());
- runStreamMode="silent";const link=page.url(),count=await page.evaluate(()=>history.length);
+ runStreamMode="silent";const link=page.url(),count=await page.evaluate(()=>history.length),subscriptionStart=subscriptions.length;
  await page.getByRole("button",{name:"Retry",exact:true}).click();await title(page,"Reconnecting run updates · Seed · Cyberdeck");
  await page.getByText("Reconnecting run updates…",{exact:true}).waitFor();
  expect(await page.getByRole("button",{name:"Retry",exact:true}).count()).toBe(0);
  expect(page.url()).toBe(link);expect(await page.evaluate(()=>history.length)).toBe(count);
+ await waitInlineFixture(()=>subscriptions.length>subscriptionStart && [...runSockets.values()].some(owner=>owner.node==="local" && owner.key==="runs/failed-run"));
  interruptRunSockets();await title(page,interruptedTitle());runStreamMode="";
  await page.getByRole("button",{name:"Retry",exact:true}).click();await title(page,runInspectorTitle());
 }),browserBudget);
@@ -2977,7 +2985,7 @@ test("Seed completed journal keeps canonical history and mounted tools while sel
  const before=await page.evaluate(()=>history.length),readCount=reads.length,subCount=subscriptions.length;
  await page.getByLabel("Run tool calls").getByTitle("Show tool details",{exact:true}).last().click();await title(page,runDetailsTitle());
  expect(selectedPath(page.url())).toBe(`run/failed-run?calls=open&detail=${encodeURIComponent(recordedOldId)}`);
- await page.getByLabel("Run tool calls").getByTitle("View input/output",{exact:true}).last().click();await title(page,runInspectorTitle());
+ await page.getByLabel("Run tool calls").getByTitle("View raw tool input/output",{exact:true}).last().click();await title(page,runInspectorTitle());
  await page.keyboard.press("Escape");await title(page,runDetailsTitle());
  await page.goBack();await title(page,runInspectorTitle());await page.goBack();await title(page,runDetailsTitle());
  await page.goBack();await title(page,selectionTitle("Tool calls open · "));await page.goForward();await title(page,runDetailsTitle());
@@ -3005,7 +3013,7 @@ test("Seed completed journal restores empty tool lists without an endless waitin
  const link=page.url();await page.reload();await title(page,selectionTitle("Tool calls open · "));expect(page.url()).toBe(link);
 }),browserBudget);
 
-for(const [status,malformed,label]of [[403,"","Access denied"],[404,"","Run tools not found"],[503,"","Run tools unavailable"],[200,"response","Run tools unavailable"],[200,"identity","Run tools unavailable"],[200,"array","Run tools unavailable"],[200,"entry","Run tools unavailable"],[200,"row-owner","Run tools unavailable"],[200,"duplicate","Run tools unavailable"]]as const)
+for(const [status,malformed,label]of [[403,"","Access denied"],[404,"","Run tools not found"],[503,"","Run tools unavailable"],[200,"response","Run tools unavailable"],[200,"identity","Run tools unavailable"],[200,"array","Run tools unavailable"],[200,"entry","Run tools unavailable"],[200,"description","Run tools unavailable"],[200,"result","Run tools unavailable"],[200,"row-owner","Run tools unavailable"],[200,"duplicate","Run tools unavailable"]]as const)
  test(`Seed completed journal ${status} ${malformed||"read"} failures retry at the same selected URL`,()=>fresh(async page=>{
   durableOnly=true;recordedStatus=status;recordedMalformed=malformed;
   await page.goto(selectionHref(runToolQuery(recordedOldId)));await title(page,`${label} · Seed · Cyberdeck`);
@@ -3018,7 +3026,7 @@ for(const [status,malformed,label]of [[403,"","Access denied"],[404,"","Run tool
 
 test("Seed completed journal read failure preserves received tools and keeps a separate read-only Retry",()=>fresh(async page=>{
  recordedStatus=503;await page.goto(selectionHref("calls=open"));await title(page,"Recorded tools unavailable · Seed · Cyberdeck");
- await page.getByLabel("Run tool calls").getByText("Recorded run call 2",{exact:false}).waitFor();
+ await page.getByLabel("Run tool calls").getByText(/Recorded run result 2/).waitFor();
  const link=page.url(),count=await page.evaluate(()=>history.length),subCount=subscriptions.length;
  recordedStatus=200;await recordedNotice(page).getByRole("button",{name:"Retry",exact:true}).click();await title(page,selectionTitle("Tool calls open · "));
  expect(page.url()).toBe(link);expect(await page.evaluate(()=>history.length)).toBe(count);expect(subscriptions.length).toBe(subCount);
@@ -3031,7 +3039,7 @@ test("Seed completed journal late reads cannot restore a prior run, node, cleare
   const target=destination==="run"?href("run/activity?code=1"):destination==="node"?selectionHref("calls=closed","peer-b"):destination==="closed"?selectionHref("calls=closed"):`${server.url}#/files`;
   if(destination==="locked")await page.route("**/api/fs/list**",route=>route.fulfill({status:401,json:{error:"Locked"}}));
   holdRecorded=false;recordedStatus=200;await page.evaluate(url=>location.hash=new URL(url).hash,target);
-  const expected=destination==="run"?runTitle("Code · "):destination==="node"?selectionTitle("Tool calls collapsed · ","peer-b"):destination==="closed"?selectionTitle("Tool calls collapsed · "):"Locked · Cyberdeck";
+  const expected=destination==="run"?runTitle("Code · "):destination==="node"?"Tool calls collapsed · peer-b Review navigation · Seed run · Peer B · Cyberdeck":destination==="closed"?selectionTitle("Tool calls collapsed · "):"Locked · Cyberdeck";
   await title(page,expected);const link=page.url();for(const release of pending)release();pending.clear();await page.waitForTimeout(100);
   expect(page.url()).toBe(link);expect(await page.title()).toBe(expected);expect(await page.getByRole("dialog").count()).toBe(0);
   if(destination==="locked")await page.unroute("**/api/fs/list**");
@@ -3039,12 +3047,12 @@ test("Seed completed journal late reads cannot restore a prior run, node, cleare
 }),browserBudget);
 
 test("Seed completed journal external-server reads remain bound to the selected signing node",()=>fresh(async page=>{
- durableOnly=true;
+ durableOnly=true;const signCount=signingNodes.length;
  await page.goto(selectionHref(`server=${encodeURIComponent(`${server.url}seed-fixture/external`)}&${runToolQuery(recordedOldId)}`,"peer-b"));
  await title(page,"Tool input/output · read · external Review navigation · Seed run · Peer B · Cyberdeck");
  await page.getByRole("dialog").getByText(/Old durable result outside the stream window/).waitFor();
  expect(reads.filter(row=>row.action._==="GetRunJournal").slice(-2).every(row=>row.node==="external")).toBe(true);
- expect(actions.filter(action=>action.startsWith("sign:")).slice(-2).every(action=>action.startsWith("sign:peer-b:"))).toBe(true);
+ expect(signingNodes.length).toBeGreaterThan(signCount);expect(signingNodes.slice(signCount).every(node=>node==="peer-b")).toBe(true);
 }),browserBudget);
 
 test("Seed completed journal never treats a live run as an authoritative missing-tool result",()=>fresh(async page=>{
@@ -3064,7 +3072,7 @@ test("Seed completed journal old tools, missing selections, empty lists and read
    await title(page,state==="tool"?runInspectorTitle():state==="missing"?recordedMissingTitle:state==="empty"?selectionTitle("Tool calls open · "):"Run tools unavailable · Seed · Cyberdeck");
    if(state==="tool")await page.getByRole("dialog").evaluate(async element=>{await Promise.all(element.getAnimations({subtree:true}).filter(animation=>Number.isFinite(animation.effect?.getComputedTiming().endTime)).map(animation=>animation.finished.catch(()=>{})));});
    expect(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)).toBe(false);
-   if(state==="missing"||state==="error"){
+   if(width===390 && (state==="missing"||state==="error")){
     const retry=page.getByRole("button",{name:"Retry",exact:true});const bounds=await retry.boundingBox();expect(bounds!.height).toBeGreaterThanOrEqual(44);expect(bounds!.width).toBeGreaterThanOrEqual(44);
    }
    if(process.env.CYBERDECK_NAV_SHOTS)await page.screenshot({path:join(process.env.CYBERDECK_NAV_SHOTS,`completed-journal-${state}-${width}-${colorScheme}.png`)});

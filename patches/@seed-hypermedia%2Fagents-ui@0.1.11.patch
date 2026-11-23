@@ -1,5 +1,5 @@
 diff --git a/chunks/index-ZHWGA37c.js b/chunks/index-ZHWGA37c.js
-index 46d2a63..297076f 100644
+index 46d2a63..08af75c 100644
 --- a/chunks/index-ZHWGA37c.js
 +++ b/chunks/index-ZHWGA37c.js
 @@ -21335,10 +21335,15 @@ const hue = [
@@ -1554,8 +1554,8 @@ index 46d2a63..297076f 100644
 +        if (!row || row.runId !== item.id || !Number.isSafeInteger(row.seq) || row.seq <= last || !Number.isFinite(row.createdAt) || !row.entry || typeof row.entry !== "object" || Array.isArray(row.entry) || typeof row.entry.kind !== "string") return true;
 +        last = row.seq;
 +        const entry = row.entry;
-+        return entry.kind === "call" && (typeof entry.op !== "string" || entry.op === "tool" && typeof entry.tool !== "string" || entry.callSeq != null && (!Number.isSafeInteger(entry.callSeq) || entry.callSeq <= 0))
-+          || entry.kind === "result" && (!Number.isSafeInteger(entry.callSeq) || entry.callSeq <= 0 || typeof entry.status !== "string");
++        return entry.kind === "call" && (entry.description != null && typeof entry.description !== "string" || typeof entry.op !== "string" || entry.op === "tool" && typeof entry.tool !== "string" || entry.callSeq != null && (!Number.isSafeInteger(entry.callSeq) || entry.callSeq <= 0))
++          || entry.kind === "result" && (entry.error != null && (typeof entry.error !== "object" || entry.error.message != null && typeof entry.error.message !== "string") || !Number.isSafeInteger(entry.callSeq) || entry.callSeq <= 0 || typeof entry.status !== "string");
 +      })) throw Object.assign(new Error("The recorded run journal returned invalid data."), { status: 502 });
 +      return response.entries;
 +    }
@@ -1570,7 +1570,7 @@ index 46d2a63..297076f 100644
 +  }, [live.journal, versions]);
 +  return { ...live, journal, recorded: { enabled, complete, error, pending: enabled && !complete && !error, isFetching: queries.some(query => query.isFetching), refetch: () => { for (const query of queries) query.refetch(); } } };
 +}
-+function SeedRunToolSelection({ run, children, journal, graphRead, serverUrl, accountUid, journalError, recorded }) {
++function SeedRunToolSelection({ run, children, journal, graphRead, serverUrl, accountUid, journalError, recorded, journalStatus }) {
 +  const route = Xye(), navigate = N8e(), host = T8e();
 +  const ids = new Set([run.id, ...children.map(child => child.id)]);
 +  const items = l_(journal.filter(row => ids.has(row.runId)));
@@ -1582,7 +1582,7 @@ index 46d2a63..297076f 100644
 +  xe(() => { if (details.length || route.toolId) host.onReadOutcome?.({ kind: "run-details", runId: run.id, serverUrl, accountUid, path, name: tool?.name, pending: waiting && !error, error }); }, [host, run.id, serverUrl, accountUid, path, tool?.name, waiting, error]);
 +  return /* @__PURE__ */ A(ze, { children: [
 +    waiting && !journalError && !recorded?.error ? /* @__PURE__ */ f("div", { "data-run-recorded-selection": true, className: "min-w-0 [&_button]:min-h-11 [&_button]:min-w-11", children: error ? /* @__PURE__ */ f(z$e, { error, failed: "Couldn’t load selected run tools", onRetry: () => graphRead.error ? graphRead.refetch() : recorded?.refetch(), retryPending: graphRead.isFetching || recorded?.isFetching }) : /* @__PURE__ */ f(W, { role: "status", children: "Waiting for selected recorded tools…" }) }) : null,
-+    tool ? /* @__PURE__ */ f(Uy.Provider, { value: { serverUrl, accountUid, agentId: run.agentId }, children: /* @__PURE__ */ f(hK, { key: tool.id, item: tool, open: true, onOpenChange: open => { if (!open) navigate({ ...route, toolId: undefined }); } }) }) : null
++    tool ? /* @__PURE__ */ f(Uy.Provider, { value: { serverUrl, accountUid, agentId: run.agentId }, children: /* @__PURE__ */ f(hK, { key: tool.id, item: tool, open: true, onOpenChange: open => { if (!open) navigate({ ...route, toolId: undefined }); }, journalStatus }) }) : null
 +  ] });
 +}
 +function SeedFullPayloadControl({ label, query, selected, onSelect }) {
@@ -2158,7 +2158,7 @@ index 46d2a63..297076f 100644
      const k = u?.error?.callSeq;
      if (!(!u || typeof k != "number"))
        return l_(d.journal.filter((S) => S.runId === u.id)).find(
-@@ -89103,7 +89927,19 @@ function $$e({
+@@ -89103,7 +89927,24 @@ function $$e({
        return k ? `${r_(k)} tokens` : null;
      })()
    ].filter(Boolean).join(" · ") : "";
@@ -2175,22 +2175,27 @@ index 46d2a63..297076f 100644
 +  const pendingError = !!selected.errorRunId && !selectedError && (!u || runGraphRead.isLoading);
 +  const missingError = Ce(() => selected.errorRunId && u && !selectedError && !runGraphRead.isLoading ? runGraphRead.error || { status: 404 } : undefined, [selected.errorRunId, !!u, !!selectedError, runGraphRead.isLoading, runGraphRead.error]);
 +  xe(() => { if (selected.errorRunId && u) host.onReadOutcome?.({ kind: "run-error", runId: e, serverUrl: o, accountUid: r, path: selected.errorRunId, name: selectedError ? Jr(selectedError) : undefined, pending: pendingError, error: missingError }); }, [host, e, o, r, selected.errorRunId, !!u, selectedError && Jr(selectedError), pendingError, missingError]);
++  const inspectorOwned = !!selected.toolId && l_(d.journal).some(item => item.id === selected.toolId);
++  const journalStatus = /* @__PURE__ */ A("div", { className: "min-w-0 [&_button]:min-h-11 [&_button]:min-w-11", children: [
++journalError ? /* @__PURE__ */ f("div", { "data-run-journal-error": true, children: /* @__PURE__ */ f(z$e, { error: journalError, failed: "Run updates interrupted", onRetry: d.retryJournal, retryPending: false }) }) : journalRetrying ? /* @__PURE__ */ f(W, { role: "status", children: "Reconnecting run updates…" }) : null,
++d.recorded.error ? /* @__PURE__ */ f("div", { "data-run-recorded-journal": true, className: "min-w-0 [&_button]:min-h-11 [&_button]:min-w-11", children: /* @__PURE__ */ f(z$e, { error: d.recorded.error, failed: "Could not load the recorded run journal", onRetry: d.recorded.refetch, retryPending: d.recorded.isFetching }) }) : null,
++  ] });
 +  return /* @__PURE__ */ f(SeedRunNavigation.Provider, { value: e, children: /* @__PURE__ */ f(Ud, { className: "overflow-y-auto", children: /* @__PURE__ */ A(fo, { className: "max-w-4xl gap-4 pt-4 pb-8", children: [
      /* @__PURE__ */ f(
        v_,
        {
-@@ -89170,6 +90006,10 @@ function $$e({
+@@ -89170,6 +90011,10 @@ function $$e({
            renderToolPart: w
          }
        ) }) : null,
 +      selected.errorRunId && !selectedError ? pendingError ? /* @__PURE__ */ f(W, { role: "status", children: "Loading selected run error…" }) : runGraphRead.error ? /* @__PURE__ */ f(z$e, { error: runGraphRead.error, failed: "Couldn’t load the selected run error", onRetry: () => runGraphRead.refetch(), retryPending: runGraphRead.isFetching }) : /* @__PURE__ */ f(W, { role: "alert", children: "The selected run error is not available in this run." }) : null,
-+      journalError ? /* @__PURE__ */ f("div", { "data-run-journal-error": true, children: /* @__PURE__ */ f(z$e, { error: journalError, failed: "Run updates interrupted", onRetry: d.retryJournal, retryPending: false }) }) : journalRetrying ? /* @__PURE__ */ f(W, { role: "status", children: "Reconnecting run updates…" }) : null,
-+      /* @__PURE__ */ f(SeedRunToolSelection, { run: u, children: h, journal: d.journal, graphRead: runGraphRead, serverUrl: o, accountUid: r, journalError, recorded: d.recorded }),
-+      d.recorded.error ? /* @__PURE__ */ f("div", { "data-run-recorded-journal": true, className: "min-w-0 [&_button]:min-h-11 [&_button]:min-w-11", children: /* @__PURE__ */ f(z$e, { error: d.recorded.error, failed: "Could not load the recorded run journal", onRetry: d.recorded.refetch, retryPending: d.recorded.isFetching }) }) : null,
++      !inspectorOwned ? journalStatus : null,
++      /* @__PURE__ */ f(SeedRunToolSelection, { run: u, children: h, journal: d.journal, graphRead: runGraphRead, serverUrl: o, accountUid: r, journalError, recorded: d.recorded, journalStatus }),
++
        /* @__PURE__ */ f(d_, { run: u, serverUrl: o, accountUid: r }),
        /* @__PURE__ */ f("section", { className: "border-border bg-card flex flex-col gap-2 rounded-lg border p-3", children: /* @__PURE__ */ f(
          u_,
-@@ -89180,6 +90020,8 @@ function $$e({
+@@ -89180,6 +90025,8 @@ function $$e({
            plan: u.plan,
            journal: d.journal,
            liveState: d,
@@ -2199,7 +2204,7 @@ index 46d2a63..297076f 100644
            onOpenSession: (k, S) => i({ key: "agent-session", sessionId: k, agentId: S, serverUrl: o }),
            onCancelRun: (k) => g.mutate(k),
            cancelPending: g.isPending,
-@@ -89187,9 +90029,9 @@ function $$e({
+@@ -89187,9 +90034,9 @@ function $$e({
          }
        ) }),
        /* @__PURE__ */ f(O3e, { runs: [u, ...h] }),
@@ -2211,7 +2216,7 @@ index 46d2a63..297076f 100644
  }
  function U$e({ error: e, onRetry: t, retryPending: n }) {
    const r = si(e, { failed: "Couldn’t load this run" });
-@@ -89222,9 +90064,10 @@ function J$e() {
+@@ -89222,9 +90069,10 @@ function J$e() {
  }
  function H$e({ routeServerUrl: e, selectedAccountId: t }) {
    V0();
@@ -2224,7 +2229,7 @@ index 46d2a63..297076f 100644
      serverUrl: g.serverUrl,
      notice: si(g.error, { failed: "Couldn’t load sessions" }),
      refetch: g.refetch,
-@@ -89264,7 +90107,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
+@@ -89264,7 +90112,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
              {
                variant: "outline",
                className: "max-sm:min-h-10",
@@ -2233,7 +2238,7 @@ index 46d2a63..297076f 100644
                children: [
                  /* @__PURE__ */ f(Bz, { className: "size-4" }),
                  "Accounts"
-@@ -89276,7 +90119,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
+@@ -89276,7 +90124,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
              {
                variant: "outline",
                className: "max-sm:min-h-10",
@@ -2242,7 +2247,7 @@ index 46d2a63..297076f 100644
                children: [
                  /* @__PURE__ */ f(p2, { className: "size-4" }),
                  "Providers"
-@@ -89285,8 +90128,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
+@@ -89285,8 +90133,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
            )
          ] })
        ] }),
@@ -2252,7 +2257,7 @@ index 46d2a63..297076f 100644
        l.content,
        s.isError ? /* @__PURE__ */ f(
          z$e,
-@@ -89308,6 +90150,9 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
+@@ -89308,6 +90155,9 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
            hasNextPage: d.hasNextPage,
            isFetchingNextPage: d.isFetchingNextPage,
            fetchNextPage: d.fetchNextPage,
@@ -2262,7 +2267,7 @@ index 46d2a63..297076f 100644
            problems: u,
            emptyText: s.data?.length ? "No sessions on this server yet. Start one below." : "No sessions on this server yet."
          }
-@@ -89330,9 +90175,11 @@ function j$e({
+@@ -89330,9 +90180,11 @@ function j$e({
    routeServerUrl: t,
    routeAgentId: n
  }) {
@@ -2277,7 +2282,7 @@ index 46d2a63..297076f 100644
    UQ(o, e, qQ(a.data?.events));
    const v = Zu(
      o,
-@@ -89345,7 +90192,7 @@ function j$e({
+@@ -89345,7 +90197,7 @@ function j$e({
      r,
      r ? `account/${r}` : void 0
    );
@@ -2286,7 +2291,7 @@ index 46d2a63..297076f 100644
      () => eQ(
        WV(
          sQ(a.data?.events || [], {
-@@ -89353,12 +90200,22 @@ function j$e({
+@@ -89353,12 +90205,22 @@ function j$e({
            agentId: l,
            sessionId: e,
            triggerContext: a.data?.triggerContext ?? null,
@@ -2312,7 +2317,7 @@ index 46d2a63..297076f 100644
        )
      ),
      [
-@@ -89367,15 +90224,25 @@ function j$e({
+@@ -89367,15 +90229,25 @@ function j$e({
        a.data?.events,
        a.data?.session.plan,
        a.data?.triggerContext,
@@ -2341,7 +2346,7 @@ index 46d2a63..297076f 100644
      (Z) => i({ key: "agent-session", agentId: l, sessionId: Z, serverUrl: o }),
      [l, i, o]
    ), He = HV({
-@@ -89416,9 +90283,14 @@ function j$e({
+@@ -89416,9 +90288,14 @@ function j$e({
    }, [D, T, w]), xe(() => {
      E.resetToBottom();
    }, [e]), xe(() => {
@@ -2359,7 +2364,7 @@ index 46d2a63..297076f 100644
    function N() {
      if (!a.data) return;
      const Z = a.data.session;
-@@ -89537,7 +90409,7 @@ function j$e({
+@@ -89537,7 +90414,7 @@ function j$e({
                    label: "Copy session URL",
                    disabled: !l,
                    onClick: () => {
@@ -2368,7 +2373,7 @@ index 46d2a63..297076f 100644
                      Z && (navigator.clipboard?.writeText(Z), we.success("Session URL copied"));
                    }
                  },
-@@ -89593,19 +90465,33 @@ function j$e({
+@@ -89593,19 +90470,33 @@ function j$e({
            "div",
            {
              ref: E.containerRef,
@@ -2404,7 +2409,7 @@ index 46d2a63..297076f 100644
                        serverUrl: o,
                        agentId: l,
                        accountUid: r,
-@@ -89620,7 +90506,7 @@ function j$e({
+@@ -89620,7 +90511,7 @@ function j$e({
                  Z.key
                )),
                x ? /* @__PURE__ */ f(K$e, { text: x }) : null,
@@ -2413,7 +2418,7 @@ index 46d2a63..297076f 100644
                  // Hidden while a thinking line or a pending tool row is showing its own live
                  // status, to avoid two spinners. A queued run, or one parked on children, has no
                  // live status anywhere else.
-@@ -89765,6 +90651,8 @@ const K$e = pe.memo(function({ text: t }) {
+@@ -89765,6 +90656,8 @@ const K$e = pe.memo(function({ text: t }) {
    return /* @__PURE__ */ f(h_, { parts: n, isStreaming: !0 });
  }), G$e = pe.memo(function({
    row: t,
@@ -2422,7 +2427,7 @@ index 46d2a63..297076f 100644
    serverUrl: n,
    agentId: r,
    accountUid: i,
-@@ -89779,6 +90667,7 @@ const K$e = pe.memo(function({ text: t }) {
+@@ -89779,6 +90672,7 @@ const K$e = pe.memo(function({ text: t }) {
      {
        context: t.context,
        instructions: t.instructions,
@@ -2430,7 +2435,7 @@ index 46d2a63..297076f 100644
        serverUrl: n,
        agentId: r
      }
-@@ -89798,6 +90687,7 @@ const K$e = pe.memo(function({ text: t }) {
+@@ -89798,6 +90692,7 @@ const K$e = pe.memo(function({ text: t }) {
        serverUrl: n,
        accountUid: i,
        runId: t.run.id,
@@ -2438,7 +2443,7 @@ index 46d2a63..297076f 100644
        plan: t.plan,
        onOpenSession: c
      }
-@@ -89805,6 +90695,8 @@ const K$e = pe.memo(function({ text: t }) {
+@@ -89805,6 +90700,8 @@ const K$e = pe.memo(function({ text: t }) {
      KV,
      {
        id: "continuation-handoff",
