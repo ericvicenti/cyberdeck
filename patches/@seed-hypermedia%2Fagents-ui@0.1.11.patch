@@ -1,5 +1,5 @@
 diff --git a/chunks/index-ZHWGA37c.js b/chunks/index-ZHWGA37c.js
-index 46d2a63..08af75c 100644
+index 46d2a63..cce7915 100644
 --- a/chunks/index-ZHWGA37c.js
 +++ b/chunks/index-ZHWGA37c.js
 @@ -21335,10 +21335,15 @@ const hue = [
@@ -1581,7 +1581,7 @@ index 46d2a63..08af75c 100644
 +  const error = waiting ? graphRead.error || recorded?.error || (recorded?.complete ? missing : undefined) : undefined;
 +  xe(() => { if (details.length || route.toolId) host.onReadOutcome?.({ kind: "run-details", runId: run.id, serverUrl, accountUid, path, name: tool?.name, pending: waiting && !error, error }); }, [host, run.id, serverUrl, accountUid, path, tool?.name, waiting, error]);
 +  return /* @__PURE__ */ A(ze, { children: [
-+    waiting && !journalError && !recorded?.error ? /* @__PURE__ */ f("div", { "data-run-recorded-selection": true, className: "min-w-0 [&_button]:min-h-11 [&_button]:min-w-11", children: error ? /* @__PURE__ */ f(z$e, { error, failed: "Couldn’t load selected run tools", onRetry: () => graphRead.error ? graphRead.refetch() : recorded?.refetch(), retryPending: graphRead.isFetching || recorded?.isFetching }) : /* @__PURE__ */ f(W, { role: "status", children: "Waiting for selected recorded tools…" }) }) : null,
++    waiting && !journalError && !recorded?.error ? /* @__PURE__ */ f("div", { "data-run-recorded-selection": true, className: "min-w-0 [&_button]:min-h-11 [&_button]:min-w-11", children: error ? /* @__PURE__ */ f(z$e, { error, failed: error === missing ? "Recorded tool not found" : "Couldn’t load selected run tools", onRetry: () => graphRead.error ? graphRead.refetch() : recorded?.refetch(), retryPending: graphRead.isFetching || recorded?.isFetching }) : /* @__PURE__ */ f(W, { role: "status", children: "Waiting for selected recorded tools…" }) }) : null,
 +    tool ? /* @__PURE__ */ f(Uy.Provider, { value: { serverUrl, accountUid, agentId: run.agentId }, children: /* @__PURE__ */ f(hK, { key: tool.id, item: tool, open: true, onOpenChange: open => { if (!open) navigate({ ...route, toolId: undefined }); }, journalStatus }) }) : null
 +  ] });
 +}
@@ -2176,7 +2176,7 @@ index 46d2a63..08af75c 100644
 +  const missingError = Ce(() => selected.errorRunId && u && !selectedError && !runGraphRead.isLoading ? runGraphRead.error || { status: 404 } : undefined, [selected.errorRunId, !!u, !!selectedError, runGraphRead.isLoading, runGraphRead.error]);
 +  xe(() => { if (selected.errorRunId && u) host.onReadOutcome?.({ kind: "run-error", runId: e, serverUrl: o, accountUid: r, path: selected.errorRunId, name: selectedError ? Jr(selectedError) : undefined, pending: pendingError, error: missingError }); }, [host, e, o, r, selected.errorRunId, !!u, selectedError && Jr(selectedError), pendingError, missingError]);
 +  const inspectorOwned = !!selected.toolId && l_(d.journal).some(item => item.id === selected.toolId);
-+  const journalStatus = /* @__PURE__ */ A("div", { className: "min-w-0 [&_button]:min-h-11 [&_button]:min-w-11", children: [
++  const journalStatus = /* @__PURE__ */ A("div", { "data-run-journal-owner": true, className: "min-w-0 [&_button]:min-h-11 [&_button]:min-w-11", children: [
 +journalError ? /* @__PURE__ */ f("div", { "data-run-journal-error": true, children: /* @__PURE__ */ f(z$e, { error: journalError, failed: "Run updates interrupted", onRetry: d.retryJournal, retryPending: false }) }) : journalRetrying ? /* @__PURE__ */ f(W, { role: "status", children: "Reconnecting run updates…" }) : null,
 +d.recorded.error ? /* @__PURE__ */ f("div", { "data-run-recorded-journal": true, className: "min-w-0 [&_button]:min-h-11 [&_button]:min-w-11", children: /* @__PURE__ */ f(z$e, { error: d.recorded.error, failed: "Could not load the recorded run journal", onRetry: d.recorded.refetch, retryPending: d.recorded.isFetching }) }) : null,
 +  ] });

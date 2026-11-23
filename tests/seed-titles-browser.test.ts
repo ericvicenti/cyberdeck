@@ -3072,6 +3072,9 @@ test("Seed completed journal old tools, missing selections, empty lists and read
    await title(page,state==="tool"?runInspectorTitle():state==="missing"?recordedMissingTitle:state==="empty"?selectionTitle("Tool calls open · "):"Run tools unavailable · Seed · Cyberdeck");
    if(state==="tool")await page.getByRole("dialog").evaluate(async element=>{await Promise.all(element.getAnimations({subtree:true}).filter(animation=>Number.isFinite(animation.effect?.getComputedTiming().endTime)).map(animation=>animation.finished.catch(()=>{})));});
    expect(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)).toBe(false);
+   if(width===390 && state==="tool"){
+    const bounds=await page.getByRole("dialog").locator('[data-slot="dialog-close"]').boundingBox();expect(bounds!.height).toBeGreaterThanOrEqual(44);expect(bounds!.width).toBeGreaterThanOrEqual(44);
+   }
    if(width===390 && (state==="missing"||state==="error")){
     const retry=page.getByRole("button",{name:"Retry",exact:true});const bounds=await retry.boundingBox();expect(bounds!.height).toBeGreaterThanOrEqual(44);expect(bounds!.width).toBeGreaterThanOrEqual(44);
    }
