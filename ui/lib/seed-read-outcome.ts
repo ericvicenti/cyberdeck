@@ -31,6 +31,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       case "session-event": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && selected.eventId === outcome.path;
       case "session-context": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && selected.panel === "context" && selected.eventId === outcome.path;
       case "session-run-tools": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && !!(selected.inlineRunTools?.length || selected.inlineRunDetails?.length || selected.inlineRunTool || selected.inlineRunError) && JSON.stringify([selected.inlineRunTools || [], selected.inlineRunDetails || [], selected.inlineRunTool || "", selected.inlineRunError || ""]) === outcome.path;
+      case "session-inline-journal":
       case "session-run-card": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && !!(selected.inlineRunTools?.some(value => value.slice(value.indexOf(":") + 1) === outcome.path) || [...(selected.inlineRunDetails || []), ...(selected.inlineRunTool ? [selected.inlineRunTool] : []), ...(selected.inlineRunError ? [selected.inlineRunError] : [])].some(value => JSON.parse(value)[0] === outcome.path));
       case "session-inline-error": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && selected.inlineRunError === outcome.path;
       case "session-inline-tools": {
@@ -64,7 +65,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       if (!mounted.current || owner.host !== host || !owns(owner.route, outcome)) return;
       setResults(previous => {
         const values = previous?.host === host ? previous.values : {};
-        const key = outcome.kind === "session-inline-tools" ? `${outcome.kind}:${outcome.sessionId}:${JSON.parse(outcome.path)[0]}` : outcome.kind === "session-inline-detail-read" ? `${outcome.kind}:${outcome.sessionId}:${outcome.path}` : outcome.kind === "child-session-list" ? `${outcome.kind}:${outcome.listOwner}:${outcome.path}` : outcome.kind === "session-run-card" ? `${outcome.kind}:${outcome.sessionId}:${outcome.path}` : outcome.kind === "session-detail-read" ? `${outcome.kind}:${outcome.sessionId}:${outcome.path}` : outcome.kind === "run-detail-read" ? `${outcome.kind}:${outcome.runId}:${outcome.path}` : outcome.kind;
+        const key = outcome.kind === "session-inline-tools" ? `${outcome.kind}:${outcome.sessionId}:${JSON.parse(outcome.path)[0]}` : outcome.kind === "session-inline-detail-read" ? `${outcome.kind}:${outcome.sessionId}:${outcome.path}` : outcome.kind === "child-session-list" ? `${outcome.kind}:${outcome.listOwner}:${outcome.path}` : (outcome.kind === "session-run-card" || outcome.kind === "session-inline-journal") ? `${outcome.kind}:${outcome.sessionId}:${outcome.path}` : outcome.kind === "session-detail-read" ? `${outcome.kind}:${outcome.sessionId}:${outcome.path}` : outcome.kind === "run-detail-read" ? `${outcome.kind}:${outcome.runId}:${outcome.path}` : outcome.kind;
         const old = values[key];
         if (old && old.error === outcome.error) {
           const { error: _oldError, ...oldValue } = old;
@@ -92,6 +93,8 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
   const inlineRuns = get("session-run-tools"), inlineError = get("session-inline-error");
   const inlineCards = results?.host === host ? Object.values(results.values).filter((value): value is Outcome => !!value && value.kind === "session-run-card" && owns(route, value)) : [];
   const inlineCard = inlineCards.find(value => value.error) || inlineCards.find(value => value.pending);
+  const inlineJournals = results?.host === host ? Object.values(results.values).filter((value): value is Outcome => !!value && value.kind === "session-inline-journal" && owns(route, value)) : [];
+  const inlineJournal = inlineJournals.find(value => value.error) || inlineJournals.find(value => value.pending);
   const inlineSelections = results?.host === host ? Object.values(results.values).filter((value): value is Outcome => !!value && value.kind === "session-inline-tools" && owns(route, value)) : [];
   const inlineSelection = inlineSelections.find(value => value.error) || inlineSelections.find(value => value.pending);
   const inlineInspector = route.key === "agent-session" && route.inlineRunTool ? inlineSelections.find(value => value.kind === "session-inline-tools" && JSON.parse(value.path)[0] === JSON.parse(route.inlineRunTool!)[0]) : undefined;
@@ -128,6 +131,8 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       : inlineRuns?.error ? failure(inlineRuns.error, "Run cards")
       : inlineCard?.error ? failure(inlineCard.error, "Run card")
       : inlineRuns?.pending || inlineCard?.pending ? "Loading run cards · Seed"
+      : inlineJournal?.error ? failure(inlineJournal.error, "Run updates")
+      : inlineJournal?.pending ? "Reconnecting run updates · Seed"
       : inlineError?.error ? failure(inlineError.error, "Run error")
       : route.inlineRunError ? `${inlineError && !inlineError.pending ? "Error" : "Loading error"} · ${inlineError?.name || "Recorded run"} · Seed session`
       : inlineSelection?.error ? failure(inlineSelection.error, "Recorded tools")
