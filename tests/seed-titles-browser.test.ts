@@ -1582,9 +1582,9 @@ test("Seed run selection canonicalizes invalid and duplicate parameters without 
  expect(await page.getByRole("dialog").count()).toBe(0);
 }), browserBudget);
 
-test("Seed run selection keeps pending tools honest and primary read failures own selected error titles", () => fresh(async page => {
- await page.goto(href("run/review?calls=open"));await title(page,runTitle("Waiting for tool calls · Tool calls open · "));
- await page.getByText("Waiting for recorded tool calls…").waitFor();
+test("Seed run selection keeps completed empty tools honest and primary read failures own selected error titles", () => fresh(async page => {
+ await page.goto(href("run/review?calls=open"));await title(page,runTitle("Tool calls open · "));
+ await page.getByText("No tool calls were recorded in this completed run.",{exact:true}).waitFor();
  await page.getByRole("button",{name:/^Tool calls/}).click();await title(page,runTitle("Tool calls collapsed · "));
  for(const [id,label] of [["missing","Run not found"],["denied","Access denied"],["offline","Run unavailable"]]) {
   await page.goto(href(`run/${id}?calls=open&error=failed-run`));await title(page,`${label} · Seed · Cyberdeck`);
