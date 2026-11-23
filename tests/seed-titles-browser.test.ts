@@ -14,6 +14,7 @@ const pending = new Set<() => void>();
 let hold = false;
 let graphStatus = 200, holdGraph = false, malformedGraph = "";
 let holdRunJournal = false, nestedRunTools = false;
+let recordedStatus = 200, recordedMalformed = "", holdRecorded = false, durableOnly = false, recordedEmpty = false, recordedLive = false;
 let runStreamMode = "", runStreamTarget = "";
 let inlineListStatus = 200, inlineCardStatus = 200, holdInlineList = false, malformedInlineList = "", inlineSucceeded = false, malformedInlineCard = "";
 let holdInlineJournal = false, inlineWorkflow = false, inlineGraphStatus = 200, inlineErrorFixture = false, holdInlineGraph = false, inlineLive = false;
@@ -94,12 +95,30 @@ const transcriptEvents = (id: string) => id === "inline" ? [{id:"inline-message"
  id: eventId, sessionId: id, seq: index + 1, createdAt: index + 1,
  event: { type: "message", role: index ? "assistant" : "user", content: `Fixture transcript message ${index + 1}` },
 })) : [];
+const completedEntries = (id:string) => {
+ const rows:any[]=[];
+ const append=(seq:number,entry:any)=>rows.push({runId:id,seq,createdAt:seq,entry});
+ if(recordedEmpty)return rows;
+ if(id==="failed-run")for(let index=1;index<=7;index++){
+  append(index*2-1,{kind:"call",op:"tool",callSeq:index,tool:"read",input:{path:`Recorded run call ${index}`}});
+  append(index*2,{kind:"result",callSeq:index,status:"succeeded",output:{content:`Recorded run result ${index}`}});
+ }
+ if(nestedRunTools && (id==="failed-run" || id===errorChild)){
+  append(101,{kind:"call",op:"tool",callSeq:id===errorChild?9:99,tool:id===errorChild?"read":"run_workflow",input:id===errorChild?{path:"Recorded descendant input"}:{script:"export default async () => 42",brief:"Recorded nested workflow"}});
+  append(102,{kind:"result",callSeq:id===errorChild?9:99,status:"succeeded",output:id===errorChild?{content:"Recorded descendant result"}:{runId:"detail-run",output:{recorded:42}}});
+ }
+ if(durableOnly && id==="failed-run"){
+  append(1001,{kind:"call",op:"tool",callSeq:501,tool:"read",input:{path:"Old durable input outside the stream window"}});
+  append(1002,{kind:"result",callSeq:501,status:"succeeded",output:{content:"Old durable result outside the stream window"}});
+ }
+ return rows;
+};
 const readActions = new Set(["ListAgents","GetAgent","GetSession","GetSessionEvent","GetRun","GetAgentTrigger","ListSessions","ListRuns","ListAgentTriggers","ListAgentMemoryDir","ReadAgentMemoryFile","ListAgentTools","ListAgentCollaborators","ListAgentInvites","ListModelProviders","ListProviderModels","ListMcpServers","ListSigningIdentities","GetRunJournal"]);
 const ok = (value: unknown) => new Response(cbor.encode(value) as unknown as BodyInit,{headers:{"content-type":"application/cbor"}});
 const fail = (status: number, message: string) => new Response(cbor.encode({_:"Error",message}) as unknown as BodyInit,{status,headers:{"content-type":"application/cbor"}});
 const agent = (id: string, node: string) => ({id,account:inlineShared ? sharedOwner : account,...(inlineShared ? {accessRole:"writer"} : {}),definition:{name:renamed || `${node} ${id === "beta" ? "Beta assistant" : "Alpha assistant"}`,systemPrompt:"Fixture",model:"fixture",modelProvider:"fixture",mcpServers:[]},stateDir:"",status:"idle",createdAt:1,updatedAt:2});
 const session = (id: string, node: string) => ({id,account:id==="inline" && inlineShared ? sharedOwner : account,agentId:"alpha",title:id === "untitled" ? "" : `${node} ${id === "two" ? "Second conversation" : id === "older" ? "Older conversation" : "First conversation"}`,status:"idle",createdAt:1,updatedAt:2,...(childLists && ["one", "two"].includes(id) ? { childSessionCount: id === "one" ? 2 : 1 } : {})});
-const run = (id: string, node: string) => ({id,account,rootRunId:id,depth:0,kind:"workflow",origin:"user",title:`${node} Review navigation`,status:"succeeded",createdAt:1,updatedAt:2,finishedAt:2,...(id === "failed-run" ? { status: "failed", error: { code: "FIXTURE_ERROR", message: "Recorded root failure", detail: { fixture: "root detail" }, stack: "Error: recorded failure\n at workflow.js:2" }, plan: { steps: [{ id: "child-step", label: "Recorded child step", status: "failed" }] }, sourceText: "// Recorded source\nthrow new Error('fixture');" } : {}),...(id === "activity" ? {sourceText:"// Recorded workflow fixture\nreturn 42;"} : {})});
+const run = (id: string, node: string) => ({id,account,rootRunId:id,depth:0,kind:"workflow",origin:"user",title:`${node} Review navigation`,status:recordedLive && id === "failed-run" ? "running" : "succeeded",createdAt:1,updatedAt:2,finishedAt:2,...(id === "failed-run" ? { status: recordedLive ? "running" : "failed", error: { code: "FIXTURE_ERROR", message: "Recorded root failure", detail: { fixture: "root detail" }, stack: "Error: recorded failure\n at workflow.js:2" }, plan: { steps: [{ id: "child-step", label: "Recorded child step", status: "failed" }] }, sourceText: "// Recorded source\nthrow new Error('fixture');" } : {}),...(id === "activity" ? {sourceText:"// Recorded workflow fixture\nreturn 42;"} : {})});
 const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch(req,server) {
   const url=new URL(req.url),path=url.pathname;
   if (path.endsWith("/agents/ws") && server.upgrade(req, { data: { node: path.split("/")[2] } })) return;
@@ -246,7 +265,19 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch
       case "ListModelProviders":return ok({_:"ListModelProvidersResponse",providers:inlineComposerAvailable ? [{id:"fixture",name:"fixture",type:"openai"}] : []});
       case "ListMcpServers":return ok({_:"ListMcpServersResponse",servers:[]});
       case "ListSigningIdentities":return ok({_:"ListSigningIdentitiesResponse",identities:[]});
-      case "GetRunJournal":return ok({_:"GetRunJournalResponse",runId:action.runId,entries:[]});
+      case "GetRunJournal": {
+       const status=recordedStatus, malformed=recordedMalformed, entries=completedEntries(action.runId);
+       if(holdRecorded || holdRunJournal)await new Promise<void>(resolve=>pending.add(resolve));
+       if(status!==200)return fail(status,"Recorded journal read failed");
+       const response:any={_:"GetRunJournalResponse",runId:action.runId,entries};
+       if(malformed==="response")response._="GetRunResponse";
+       if(malformed==="identity")response.runId="another-run";
+       if(malformed==="array")response.entries={};
+       if(malformed==="entry")response.entries=[{runId:action.runId,seq:1,createdAt:1,entry:{kind:"call",op:"tool",tool:42}}];
+       if(malformed==="row-owner")response.entries=[{runId:"another-run",seq:1,createdAt:1,entry:{kind:"log"}}];
+       if(malformed==="duplicate")response.entries=[{runId:action.runId,seq:1,createdAt:1,entry:{kind:"log"}},{runId:action.runId,seq:1,createdAt:2,entry:{kind:"log"}}];
+       return ok(response);
+      }
     }
   }
   if(path.startsWith("/api/")) {
@@ -284,6 +315,7 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch
   if (mode === "silent") return;
  }
  ws.send(JSON.stringify({_:"subscribed",key:envelope.action.key,accountId:account}));
+ if((durableOnly || recordedEmpty) && envelope.action?.key === "runs/failed-run")return;
  if([...inlineIds,archivedInlineId].some(id=>envelope.action?.key === `runs/${id}`)) {
   const id=envelope.action.key.slice(5);
   if(holdInlineJournal) await new Promise<void>(resolve=>pending.add(resolve));
@@ -317,7 +349,7 @@ async function fresh(fn:(page:Page)=>Promise<void>){
  page.setDefaultNavigationTimeout(process.env.CYBERDECK_TEST_ORIGIN ? 30000 : 12000);
  await page.route("**/*",route=>new URL(route.request().url()).origin===server.url.origin?route.continue():route.abort());
  try{await fn(page);}catch(e){console.error(JSON.stringify({title:await page.title(),body:(await page.locator("body").innerText()).slice(0,1800),errors,actions:actions.slice(-15)}));throw e;}
- finally{runStreamTarget="";inlineShared=false;inlineComposerAvailable=false;inlineWindowed=false;holdInlineCard=false;inlineLive=false;inlineErrorFixture=false;holdInlineGraph=false;inlineGraphStatus=200;holdInlineJournal=false;inlineWorkflow=false;malformedInlineCard="";inlineListStatus=200;inlineCardStatus=200;holdInlineList=false;malformedInlineList="";inlineSucceeded=false;runStreamMode="";holdTriggerRead=false;triggerReadStatus=200;nestedRunTools=false;holdRunJournal=false;holdHandoffRead=false;handoffReadStatus=200;detailRunStatus=200;holdDetailRun=false;malformedDetailRun="";graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
+ finally{recordedStatus=200;recordedMalformed="";holdRecorded=false;durableOnly=false;recordedEmpty=false;recordedLive=false;runStreamTarget="";inlineShared=false;inlineComposerAvailable=false;inlineWindowed=false;holdInlineCard=false;inlineLive=false;inlineErrorFixture=false;holdInlineGraph=false;inlineGraphStatus=200;holdInlineJournal=false;inlineWorkflow=false;malformedInlineCard="";inlineListStatus=200;inlineCardStatus=200;holdInlineList=false;malformedInlineList="";inlineSucceeded=false;runStreamMode="";holdTriggerRead=false;triggerReadStatus=200;nestedRunTools=false;holdRunJournal=false;holdHandoffRead=false;handoffReadStatus=200;detailRunStatus=200;holdDetailRun=false;malformedDetailRun="";graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
 }
 const href=(path:string,node="")=>`${server.url}#/seed?${new URLSearchParams({r:path,...(node?{node}:{})})}`;
 const title=(page:Page,value:string)=>page.waitForFunction(value=>document.title===value,value);
@@ -1866,12 +1898,12 @@ test("Seed standalone run tools canonicalize duplicate, invalid, bounded and hid
  await page.goto(selectionHref(`${runToolQuery()}&error=failed-run`));await title(page,runInspectorTitle());
  expect(selectedPath(page.url())).toBe(`run/failed-run?${runToolQuery()}`);expect(await page.getByRole("dialog").count()).toBe(1);
  const many=Array.from({length:105},(_,i)=>`detail=missing-${String(i).padStart(3,"0")}`).join("&");
- await page.goto(selectionHref(many));await title(page,selectionTitle("Waiting for selected tools · 100 tool details · Tool calls open · "));
+ await page.goto(selectionHref(many));await title(page,"Run tools not found · Seed · Cyberdeck");
  expect(new URLSearchParams(selectedPath(page.url())!.split("?")[1]).getAll("detail").length).toBe(100);
  expect(await page.getByLabel("Run tool calls").getByTitle("Show tool details",{exact:true}).first().isDisabled()).toBe(true);
 }), browserBudget);
 
-test("Seed standalone run tools wait for journal entries without fetching arbitrary content", () => fresh(async page => {
+test("Seed standalone run tools recover only owned durable journals without fetching arbitrary content", () => fresh(async page => {
  const readsBefore=reads.filter(row=>row.action._==="GetSessionEvent" || row.action._==="GetRunJournal").length;
  holdRunJournal=true;await page.goto(selectionHref(runToolQuery()));
  await title(page,`Waiting for tool · ${runDetailId} · local Review navigation · Seed run · Cyberdeck`);
@@ -1879,7 +1911,8 @@ test("Seed standalone run tools wait for journal entries without fetching arbitr
  expect(await page.getByRole("dialog").count()).toBe(0);const link=page.url();
  holdRunJournal=false;for(const release of pending)release();pending.clear();
  await title(page,runInspectorTitle());expect(page.url()).toBe(link);
- expect(reads.filter(row=>row.action._==="GetSessionEvent" || row.action._==="GetRunJournal").length).toBe(readsBefore);
+ expect(reads.filter(row=>row.action._==="GetSessionEvent" || row.action._==="GetRunJournal").length).toBe(readsBefore+2);
+ expect(reads.slice(-20).filter(row=>row.action._==="GetRunJournal").every(row=>["failed-run",errorChild].includes(row.action.runId))).toBe(true);
 }), browserBudget);
 
 test("Seed standalone run tools preserve absent journal selections and graph errors retry at the same URL", () => fresh(async page => {
@@ -1888,7 +1921,7 @@ test("Seed standalone run tools preserve absent journal selections and graph err
   await page.goto(selectionHref(runToolQuery("wf-child:1")));await title(page,`${label} · Seed · Cyberdeck`);
   const link=page.url(), length=await page.evaluate(()=>history.length);graphStatus=200;
   await page.getByRole("button",{name:"Retry",exact:true}).click();
-  await title(page,"Waiting for tool · wf-child:1 · local Review navigation · Seed run · Cyberdeck");
+  await title(page,"Run tools not found · Seed · Cyberdeck");
   expect(page.url()).toBe(link);expect(await page.evaluate(()=>history.length)).toBe(length);
  }
 }), browserBudget);
@@ -1979,7 +2012,7 @@ test("Seed standalone run tools keep recorded details, dialogs and waiting/error
   for(const state of ["details","inspector","waiting","error"]){
    await page.goto("about:blank");graphStatus=state==="error" ? 503 : 200;
    await page.goto(selectionHref(state==="details" ? runDetailQuery() : runToolQuery(state==="waiting" || state==="error" ? "wf-absent:1" : runDetailId)));
-   await title(page,state==="details" ? runDetailsTitle() : state==="inspector" ? runInspectorTitle() : state==="error" ? "Run tools unavailable · Seed · Cyberdeck" : "Waiting for tool · wf-absent:1 · local Review navigation · Seed run · Cyberdeck");
+   await title(page,state==="details" ? runDetailsTitle() : state==="inspector" ? runInspectorTitle() : state==="error" ? "Run tools unavailable · Seed · Cyberdeck" : "Run tools not found · Seed · Cyberdeck");
    await page.waitForTimeout(200);
    if(state==="inspector"){
     const bounds=await page.getByRole("dialog").boundingBox();expect(bounds).not.toBeNull();
@@ -1994,8 +2027,8 @@ test("Seed standalone run tools keep recorded details, dialogs and waiting/error
 test("Seed standalone run tools give the visible inspector title ownership over pending background details", () => fresh(async page => {
  await page.goto(selectionHref(`${runDetailQuery("wf-absent:1")}&${runToolQuery()}`));
  await title(page,runInspectorTitle());await page.getByRole("dialog").getByText(/Recorded run result 2/).waitFor();
- await page.keyboard.press("Escape");await title(page,selectionTitle("Waiting for selected tools · 1 tool detail · Tool calls open · "));
- await page.getByText("Waiting for selected recorded tools…").waitFor();
+ await page.keyboard.press("Escape");await title(page,"Run tools not found · Seed · Cyberdeck");
+ await page.getByText("The selected tool is not in this completed run's recorded journal.").waitFor();
 }), browserBudget);
 
 const triggerSections=["activity","instructions","prompt"] as const;
@@ -2926,3 +2959,115 @@ for(const view of ["Seed","Sessions"])test(`Seed inline journal ${view} waiting,
   if(shots)await page.screenshot({path:join(shots,`inline-journal-${view.toLowerCase()}-recovered-${width}-${scheme}.png`),animations:"disabled"});
  }
 }),Math.max(browserBudget,120000));
+
+const recordedOldId="wf-failed-run:501";
+const recordedNotice=(page:Page)=>page.locator('[data-run-recorded-journal]');
+const recordedMissingTitle="Run tools not found · Seed · Cyberdeck";
+test("Seed completed journal restores an old tool outside the stream window on direct links, reload and fresh tabs",()=>fresh(async page=>{
+ durableOnly=true;
+ await page.goto(selectionHref(runToolQuery(recordedOldId),"peer-a"));await title(page,runInspectorTitle("peer-a"));
+ await page.getByRole("dialog").getByText(/Old durable result outside the stream window/).waitFor();
+ const link=page.url();await page.reload();await title(page,runInspectorTitle("peer-a"));expect(page.url()).toBe(link);
+ await fresh(async tab=>{await tab.goto(link);await title(tab,runInspectorTitle("peer-a"));await tab.getByRole("dialog").getByText(/Old durable input outside the stream window/).waitFor();});
+}),browserBudget);
+
+test("Seed completed journal keeps canonical history and mounted tools while selecting old durable details",()=>fresh(async page=>{
+ durableOnly=true;await page.goto(selectionHref("calls=open"));await page.getByLabel("Run tool calls").getByTitle("Show tool details",{exact:true}).last().waitFor();
+ const calls=page.getByRole("button",{name:/^Tool calls/});await calls.evaluate(el=>(el as any).__recordedOwner="same completed tree");
+ const before=await page.evaluate(()=>history.length),readCount=reads.length,subCount=subscriptions.length;
+ await page.getByLabel("Run tool calls").getByTitle("Show tool details",{exact:true}).last().click();await title(page,runDetailsTitle());
+ expect(selectedPath(page.url())).toBe(`run/failed-run?calls=open&detail=${encodeURIComponent(recordedOldId)}`);
+ await page.getByLabel("Run tool calls").getByTitle("View input/output",{exact:true}).last().click();await title(page,runInspectorTitle());
+ await page.keyboard.press("Escape");await title(page,runDetailsTitle());
+ await page.goBack();await title(page,runInspectorTitle());await page.goBack();await title(page,runDetailsTitle());
+ await page.goBack();await title(page,selectionTitle("Tool calls open · "));await page.goForward();await title(page,runDetailsTitle());
+ expect(await page.evaluate(()=>history.length)).toBe(before+3);
+ expect(await calls.evaluate(el=>(el as any).__recordedOwner)).toBe("same completed tree");
+ expect(reads.length).toBe(readCount);expect(subscriptions.length).toBe(subCount);
+}),browserBudget);
+
+test("Seed completed journal proves missing selections only after every owned terminal journal finishes",()=>fresh(async page=>{
+ holdRecorded=true;await page.goto(selectionHref(runToolQuery("wf-unrelated:1")));
+ await title(page,"Waiting for tool · wf-unrelated:1 · local Review navigation · Seed run · Cyberdeck");
+ await waitInlineFixture(()=>reads.filter(row=>row.action._==="GetRunJournal").length>=2 && pending.size>=2);
+ const link=page.url(),length=await page.evaluate(()=>history.length);
+ holdRecorded=false;for(const release of pending)release();pending.clear();await title(page,recordedMissingTitle);
+ await page.getByText("The selected tool is not in this completed run's recorded journal.").waitFor();
+ expect(page.url()).toBe(link);expect(await page.evaluate(()=>history.length)).toBe(length);
+ expect(reads.filter(row=>row.action._==="GetRunJournal").slice(-2).map(row=>row.action.runId).sort()).toEqual(["failed-run",errorChild].sort());
+ await page.reload();await title(page,recordedMissingTitle);
+}),browserBudget);
+
+test("Seed completed journal restores empty tool lists without an endless waiting title",()=>fresh(async page=>{
+ recordedEmpty=true;await page.goto(selectionHref("calls=open"));await title(page,selectionTitle("Tool calls open · "));
+ await page.getByText("No tool calls were recorded in this completed run.",{exact:true}).waitFor();
+ expect(await page.getByText("Waiting for recorded tool calls…",{exact:true}).count()).toBe(0);
+ const link=page.url();await page.reload();await title(page,selectionTitle("Tool calls open · "));expect(page.url()).toBe(link);
+}),browserBudget);
+
+for(const [status,malformed,label]of [[403,"","Access denied"],[404,"","Run tools not found"],[503,"","Run tools unavailable"],[200,"response","Run tools unavailable"],[200,"identity","Run tools unavailable"],[200,"array","Run tools unavailable"],[200,"entry","Run tools unavailable"],[200,"row-owner","Run tools unavailable"],[200,"duplicate","Run tools unavailable"]]as const)
+ test(`Seed completed journal ${status} ${malformed||"read"} failures retry at the same selected URL`,()=>fresh(async page=>{
+  durableOnly=true;recordedStatus=status;recordedMalformed=malformed;
+  await page.goto(selectionHref(runToolQuery(recordedOldId)));await title(page,`${label} · Seed · Cyberdeck`);
+  await recordedNotice(page).getByRole("button",{name:"Retry",exact:true}).waitFor();
+  const link=page.url(),count=await page.evaluate(()=>history.length),subCount=subscriptions.length;
+  recordedStatus=200;recordedMalformed="";await recordedNotice(page).getByRole("button",{name:"Retry",exact:true}).click();
+  await title(page,runInspectorTitle());await page.getByRole("dialog").getByText(/Old durable result outside the stream window/).waitFor();
+  expect(page.url()).toBe(link);expect(await page.evaluate(()=>history.length)).toBe(count);expect(subscriptions.length).toBe(subCount);
+ }),browserBudget);
+
+test("Seed completed journal read failure preserves received tools and keeps a separate read-only Retry",()=>fresh(async page=>{
+ recordedStatus=503;await page.goto(selectionHref("calls=open"));await title(page,"Recorded tools unavailable · Seed · Cyberdeck");
+ await page.getByLabel("Run tool calls").getByText("Recorded run call 2",{exact:false}).waitFor();
+ const link=page.url(),count=await page.evaluate(()=>history.length),subCount=subscriptions.length;
+ recordedStatus=200;await recordedNotice(page).getByRole("button",{name:"Retry",exact:true}).click();await title(page,selectionTitle("Tool calls open · "));
+ expect(page.url()).toBe(link);expect(await page.evaluate(()=>history.length)).toBe(count);expect(subscriptions.length).toBe(subCount);
+}),browserBudget);
+
+test("Seed completed journal late reads cannot restore a prior run, node, cleared selection or locked view",()=>fresh(async page=>{
+ for(const destination of ["run","node","closed","locked"]){
+  await page.goto("about:blank");durableOnly=true;holdRecorded=true;recordedStatus=503;
+  await page.goto(selectionHref(runToolQuery(recordedOldId)));await waitInlineFixture(()=>pending.size>=2);
+  const target=destination==="run"?href("run/activity?code=1"):destination==="node"?selectionHref("calls=closed","peer-b"):destination==="closed"?selectionHref("calls=closed"):`${server.url}#/files`;
+  if(destination==="locked")await page.route("**/api/fs/list**",route=>route.fulfill({status:401,json:{error:"Locked"}}));
+  holdRecorded=false;recordedStatus=200;await page.evaluate(url=>location.hash=new URL(url).hash,target);
+  const expected=destination==="run"?runTitle("Code · "):destination==="node"?selectionTitle("Tool calls collapsed · ","peer-b"):destination==="closed"?selectionTitle("Tool calls collapsed · "):"Locked · Cyberdeck";
+  await title(page,expected);const link=page.url();for(const release of pending)release();pending.clear();await page.waitForTimeout(100);
+  expect(page.url()).toBe(link);expect(await page.title()).toBe(expected);expect(await page.getByRole("dialog").count()).toBe(0);
+  if(destination==="locked")await page.unroute("**/api/fs/list**");
+ }
+}),browserBudget);
+
+test("Seed completed journal external-server reads remain bound to the selected signing node",()=>fresh(async page=>{
+ durableOnly=true;
+ await page.goto(selectionHref(`server=${encodeURIComponent(`${server.url}seed-fixture/external`)}&${runToolQuery(recordedOldId)}`,"peer-b"));
+ await title(page,"Tool input/output · read · external Review navigation · Seed run · Peer B · Cyberdeck");
+ await page.getByRole("dialog").getByText(/Old durable result outside the stream window/).waitFor();
+ expect(reads.filter(row=>row.action._==="GetRunJournal").slice(-2).every(row=>row.node==="external")).toBe(true);
+ expect(actions.filter(action=>action.startsWith("sign:")).slice(-2).every(action=>action.startsWith("sign:peer-b:"))).toBe(true);
+}),browserBudget);
+
+test("Seed completed journal never treats a live run as an authoritative missing-tool result",()=>fresh(async page=>{
+ recordedLive=true;durableOnly=true;const before=reads.filter(row=>row.action._==="GetRunJournal").length;
+ await page.goto(selectionHref(runToolQuery(recordedOldId)));await title(page,`Waiting for tool · ${recordedOldId} · local Review navigation · Seed run · Cyberdeck`);
+ await page.waitForTimeout(100);expect(reads.filter(row=>row.action._==="GetRunJournal").length).toBe(before);
+ recordedLive=false;for(const[socket,owner]of runSockets)if(owner.key==="runs/failed-run")socket.send(JSON.stringify({_:"change",key:owner.key,value:run("failed-run","local")}));
+ await title(page,runInspectorTitle());await page.getByRole("dialog").getByText(/Old durable result outside the stream window/).waitFor();
+}),browserBudget);
+
+test("Seed completed journal old tools, missing selections, empty lists and read errors fit phone and desktop",()=>fresh(async page=>{
+ for(const width of [390,1280])for(const colorScheme of ["light","dark"]as const){
+  await page.setViewportSize({width,height:900});await page.emulateMedia({colorScheme});
+  for(const state of ["tool","missing","empty","error"]){
+   await page.goto("about:blank");durableOnly=true;recordedEmpty=state==="empty";recordedStatus=state==="error"?503:200;
+   await page.goto(selectionHref(state==="empty"?"calls=open":runToolQuery(state==="missing"?"wf-unrelated:1":recordedOldId)));
+   await title(page,state==="tool"?runInspectorTitle():state==="missing"?recordedMissingTitle:state==="empty"?selectionTitle("Tool calls open · "):"Run tools unavailable · Seed · Cyberdeck");
+   if(state==="tool")await page.getByRole("dialog").evaluate(async element=>{await Promise.all(element.getAnimations({subtree:true}).filter(animation=>Number.isFinite(animation.effect?.getComputedTiming().endTime)).map(animation=>animation.finished.catch(()=>{})));});
+   expect(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)).toBe(false);
+   if(state==="missing"||state==="error"){
+    const retry=page.getByRole("button",{name:"Retry",exact:true});const bounds=await retry.boundingBox();expect(bounds!.height).toBeGreaterThanOrEqual(44);expect(bounds!.width).toBeGreaterThanOrEqual(44);
+   }
+   if(process.env.CYBERDECK_NAV_SHOTS)await page.screenshot({path:join(process.env.CYBERDECK_NAV_SHOTS,`completed-journal-${state}-${width}-${colorScheme}.png`)});
+  }
+ }
+}),browserBudget);

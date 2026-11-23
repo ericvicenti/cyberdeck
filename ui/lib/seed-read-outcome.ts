@@ -157,6 +157,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       : route.toolId ? runDetails?.error && !runDetails.name ? failure(runDetails.error, "Run tools")
         : `${runDetails?.name ? "Tool input/output" : "Waiting for tool"} · ${runDetails?.name || route.toolId} · ${run.name?.trim() || route.runId} · Seed run`
       : runDetails?.error ? failure(runDetails.error, "Run tools")
+      : runTools?.error ? failure(runTools.error, "Recorded tools")
       : runDetailRead?.error ? failure(runDetailRead.error, "Workflow run")
       : runDetailRead?.pending ? "Loading workflow run · Seed"
       : disclosure?.error ? failure(disclosure.error, "Workflow source")
