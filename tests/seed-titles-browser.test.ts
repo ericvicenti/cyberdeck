@@ -2956,6 +2956,8 @@ for(const view of ["Seed","Sessions"]){
  }),browserBudget);
  test(`Seed inline journal ${view} hidden recovered cards retain journals without renaming cleared URLs`,()=>fresh(async page=>{
   inlineWindowed=true;await page.goto(inlineDetailHref(view));await title(page,inlineDetailTitle());await page.getByText("Recorded inline result 2",{exact:false}).first().waitFor();
+  // The durable read can restore the card before the live subscription arrives.
+  await waitInlineFixture(()=>Array.from(runSockets.values()).some(owner=>owner.node==="local" && owner.key===`runs/${inlineIds[0]}`));
   const before=subscriptions.length;inlineInterrupt();await title(page,inlineJournalTitle());
   await page.evaluate(url=>location.hash=new URL(url).hash,inlineHref(view));await title(page,inlineTitle());inlineInterrupt();await page.waitForTimeout(100);expect(await page.title()).toBe(inlineTitle());
   await page.goBack();await title(page,inlineJournalTitle());await inlineJournalNotice(page).getByRole("button",{name:"Retry",exact:true}).click();await title(page,inlineDetailTitle());expect(subscriptions.length).toBe(before+1);
