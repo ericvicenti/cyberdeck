@@ -1354,3 +1354,8 @@ that lack a message ID, attachments, deeper workflow plan and activity details,
 Commander account/recording and live-game availability, and controls inside
 native PDF viewers and physical kiosks. See the run report for the verified
 fleet and the pending Starlight installation.
+
+A selected transcript message stays visible when the composer or viewport changes
+height after restoration. Scrolling, touching or using the keyboard inside the
+transcript releases that positioning. The installed PDF smoke script also checks
+**Open original** with an authenticated generated file and a signed-out browser.

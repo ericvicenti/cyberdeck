@@ -3446,3 +3446,30 @@ test("Seed earlier message shows the selected read on phone and desktop", () => 
   }
  }
 }), Math.max(browserBudget,120000));
+
+test("Seed earlier message stays visible through transcript resize and releases scroll to the reader", () => fresh(async page => {
+  earlierWindow = true;
+  await page.goto(contextHref("seed", "archived-108", "", ""));
+  await title(page, "Message · local First conversation · Seed session · Cyberdeck");
+  const row = page.locator('[data-selected-event="archived-108"]');
+  const pane = page.locator("[data-seed-transcript-scroll]");
+  await withinViewport(page, row);
+  await pane.evaluate((element: HTMLElement) => {
+    element.style.flex = "0 0 180px";
+    element.style.height = "180px";
+    element.style.maxHeight = "180px";
+  });
+  await page.waitForFunction(() => document.querySelector("[data-seed-transcript-scroll]")!.clientHeight <= 180);
+  await withinViewport(page, row);
+  await pane.evaluate((element: HTMLElement) => {
+    element.dispatchEvent(new WheelEvent("wheel", {bubbles:true,deltaY:800}));
+    element.scrollTop = element.scrollHeight;
+  });
+  await page.waitForFunction(() => {
+    const el = document.querySelector("[data-seed-transcript-scroll]")!;
+    return el.scrollHeight - el.clientHeight - el.scrollTop < 2;
+  });
+  await pane.evaluate((element: HTMLElement) => { element.style.maxHeight = "150px"; });
+  await page.evaluate(() => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+  expect(await row.evaluate(element => element.getBoundingClientRect().bottom < element.closest("[data-seed-transcript-scroll]")!.getBoundingClientRect().top)).toBe(true);
+}), browserBudget);
