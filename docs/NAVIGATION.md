@@ -1315,3 +1315,30 @@ and subscriptions. Loading, retry and missing-message states keep the requested
 URL. Independent tool and handoff disclosures without a selected event can
 still depend on the returned window. Repeat the browser checks with
 `bun test tests/seed-titles-browser.test.ts --test-name-pattern 'Seed earlier message' --timeout 30000`.
+
+### Original PDFs
+
+**Open original** opens a new Cyberdeck tab at `#/edit` with `original=1`,
+the selected file, machine, initial page and zoom. The address contains no
+access token. Each browser authenticates its own file read. A signed-out local
+read returns to the lock screen with the requested URL intact. A denied peer,
+missing file, invalid header or unavailable machine has its own title and a
+read-only retry. **Return to preview** restores the selected page and zoom.
+The opener keeps its rotation and history.
+
+The original viewer gets an in-memory PDF object URL scoped to the document.
+Lock or unmount revokes it. The browser owns printing, forms, annotations and
+subsequent changes inside its native controls. The shared route describes the
+initial page and zoom. Those opaque native interactions remain a coverage limit.
+Repeat with `bun test tests/pdf-navigation.test.ts --timeout 30000`.
+
+### Commander training inspectors
+
+An archive link restores its observed board square and opened decision or policy
+fields. Live links preserve independent local and remote seats, squares and
+decision fields. Idle seats wait at the selected URL. A malformed snapshot
+affects only its own side. Experiment links use `batchShow` to select candidate
+regression results, settings and source. A match opened over an experiment
+preserves its underlying selection on Back. An incomplete evaluation, absent
+candidate and malformed experiment have distinct states. Clipper's Commander
+source, browser checks and backup are recorded in the November 24 Deck report.

@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { getDocument, GlobalWorkerOptions, TextLayer, type PDFDocumentLoadingTask, type PDFDocumentProxy, type RenderTask } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { version } from "pdfjs-dist/package.json";
-import { api, nodePath, rawUrl, token } from "../lib/api";
-import { nodeName, readRoute, routeHash, updateParams, useRouteTitle } from "../lib/navigation";
+import { api, ApiError, nodePath, token } from "../lib/api";
+import { nodeName, readRoute, routeHash, updateParams, useRouteTitle, writeRoute } from "../lib/navigation";
 import "./pdf-preview.css";
 
 GlobalWorkerOptions.workerSrc = workerUrl;
@@ -29,11 +29,99 @@ function failure(error: unknown): Failure {
   return { title: "PDF unavailable", message: "The PDF could not be loaded. Retry or open the original file.", status: e.status };
 }
 
-/** Retained per node/path by EditorWorkspace. The parent is the only history
- * owner: neither a browser PDF plug-in nor a nested iframe can create entries. */
-export default function PdfPreview({ params, visible, onLocked }: {
-  params: URLSearchParams; visible: boolean; onLocked: () => void;
-}) {
+type PdfViewProps = { params: URLSearchParams; visible: boolean; onLocked: () => void };
+
+function pdfLink(params: URLSearchParams, original: boolean) {
+  const { page, zoom } = selection(params);
+  const next = new URLSearchParams({ path: params.get("path") || "" });
+  const node = params.get("node");
+  if (node) next.set("node", node);
+  if (page > 1) next.set("page", String(page));
+  if (zoom !== "width") next.set("zoom", zoom);
+  if (original) next.set("original", "1");
+  return routeHash("edit", next);
+}
+
+/** A native viewer gets a private local blob. The address bar stays on the
+ * authenticated document route, including after refresh or a shared open. */
+function OriginalPdf({ params, visible, onLocked }: PdfViewProps) {
+  const path = params.get("path") || "", node = params.get("node") || "";
+  const name = path.split("/").pop() || path;
+  const [source, setSource] = useState<string>();
+  const [error, setError] = useState<Failure>();
+  const [attempt, setAttempt] = useState(0);
+  const { page, zoom } = selection(params);
+  const canonical = pdfLink(params, true);
+  useEffect(() => {
+    if (visible && location.hash === routeHash("edit", params) && canonical !== location.hash) {
+      writeRoute("edit", readRoute(canonical).params, "replace");
+    }
+  }, [visible, params, canonical]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let url: string | undefined;
+    const { signal } = controller;
+    setSource(undefined); setError(undefined);
+    void (async () => {
+      const query = new URLSearchParams({ path });
+      const stat = await api<{ type: string; targetType?: string }>(`/api/fs/stat?${query}`, { node, signal });
+      if (stat.type === "dir" || stat.targetType === "dir") throw new Error("Directory");
+      const response = await fetch(nodePath(node, `/api/fs/read?${query}`), {
+        headers: { Authorization: `Bearer ${token()}` }, signal, redirect: "error",
+      });
+      if (!response.ok) throw new ApiError(response.status, response.statusText);
+      const bytes = await response.blob();
+      if (!(await bytes.slice(0, 1024).text()).includes("%PDF-")) {
+        throw Object.assign(new Error("Invalid PDF"), { name: "InvalidPDFException" });
+      }
+      if (signal.aborted) return;
+      url = URL.createObjectURL(bytes.slice(0, bytes.size, "application/pdf"));
+      setSource(url);
+    })().catch(reason => {
+      if (!signal.aborted) setError(failure(reason));
+    });
+    return () => { controller.abort(); if (url) URL.revokeObjectURL(url); };
+  }, [path, node, attempt]);
+
+  useEffect(() => {
+    const route = readRoute();
+    if (visible && error?.status === 401 && !node && route.view === "edit" &&
+        route.params.get("original") === "1" && route.params.get("path") === path && !route.params.get("node")) onLocked();
+  }, [visible, error, node, path, onLocked]);
+
+  useRouteTitle(visible ? [name, error?.title || (source ? "Original PDF" : "Loading original PDF"), node && nodeName(node)].filter(Boolean).join(" · ") : undefined);
+  const fragment = new URLSearchParams({ page: String(page) });
+  if (zoom === "fit" || zoom === "width") fragment.set("view", zoom === "fit" ? "Fit" : "FitH");
+  else fragment.set("zoom", zoom);
+  return <section className="flex min-h-0 flex-1 flex-col" aria-label={`Original PDF: ${name}`} data-testid="pdf-original">
+    <div className="flex flex-wrap items-center gap-4 border-b border-zinc-800 px-3 py-2 text-sm">
+      <a className="inline-flex min-h-11 items-center underline" href={pdfLink(params, false)}>Return to preview</a>
+      {source && <a className="ml-auto inline-flex min-h-11 items-center underline" href={source} download={name}>Download original</a>}
+    </div>
+    {error ? <div role="alert" className="m-4 text-sm text-red-300">{error.title}. <button className="min-h-11 px-2 underline" onClick={() => setAttempt(v => v + 1)}>Retry original</button></div>
+      : !source ? <p role="status" className="m-4 text-sm">Loading original PDF…</p>
+      : <object type="application/pdf" aria-label={name} data={source + "#" + fragment} className="min-h-0 w-full flex-1">
+          <p className="m-4 text-sm">Use Download original to open this PDF in your preferred viewer.</p>
+        </object>}
+  </section>;
+}
+
+export default function PdfPreview(props: PdfViewProps) {
+  const original = props.params.get("original") === "1";
+  const visited = useRef<{ preview?: URLSearchParams; original?: URLSearchParams }>({});
+  if (props.visible) visited.current[original ? "original" : "preview"] = props.params;
+  return <>
+    {visited.current.preview && <div className={original ? "hidden" : "flex min-h-0 flex-1 flex-col"} inert={original}>
+      <RenderedPdf {...props} params={visited.current.preview} visible={props.visible && !original} />
+    </div>}
+    {visited.current.original && <div className={original ? "flex min-h-0 flex-1 flex-col" : "hidden"} inert={!original}>
+      <OriginalPdf {...props} params={visited.current.original} visible={props.visible && original} />
+    </div>}
+  </>;
+}
+
+function RenderedPdf({ params, visible, onLocked }: PdfViewProps) {
   const path = params.get("path") || "", node = params.get("node") || "";
   const name = path.split("/").pop() || path;
   const { page, zoom, rotation } = selection(params);
@@ -51,7 +139,7 @@ export default function PdfPreview({ params, visible, onLocked }: {
   const active = useRef(visible); active.current = visible;
   const ownsRoute = () => {
     const route = readRoute();
-    return active.current && route.view === "edit" && route.params.get("path") === path && (route.params.get("node") || "") === node;
+    return active.current && route.view === "edit" && route.params.get("original") !== "1" && route.params.get("path") === path && (route.params.get("node") || "") === node;
   };
   const change = (values: Record<string, string | null>, mode: "push" | "replace" = "push") => {
     if (ownsRoute()) updateParams(values, mode);
@@ -60,7 +148,7 @@ export default function PdfPreview({ params, visible, onLocked }: {
   useEffect(() => { setPageInput(String(page)); }, [page]);
   useEffect(() => {
     if (!visible || location.hash !== routeHash("edit", params)) return;
-    const values = { page: page === 1 ? null : String(page), zoom: zoom === "width" ? null : zoom, rotate: rotation ? String(rotation) : null };
+    const values = { original: null, page: page === 1 ? null : String(page), zoom: zoom === "width" ? null : zoom, rotate: rotation ? String(rotation) : null };
     if (Object.entries(values).some(([key, value]) => params.get(key) !== value)) change(values, "replace");
   }, [params, visible, page, zoom, rotation]);
 
@@ -168,7 +256,7 @@ export default function PdfPreview({ params, visible, onLocked }: {
         {[...new Set([50, 75, 100, 125, 150, 200, ...(Number(zoom) ? [Number(zoom)] : [])])].sort((a,b) => a-b).map(n => <option key={n} value={String(n)}>{n}%</option>)}
       </select></label>
       <button className={button} onClick={() => { const next = (selection(readRoute().params).rotation + 90) % 360; change({ rotate: next ? String(next) : null }); }}>Rotate clockwise</button>
-      <a className={`${button} ml-auto`} href={rawUrl("/api/fs/read", { path }, node)} target="_blank" rel="noopener noreferrer" title="Open the browser PDF viewer for printing, forms and full-document search">Open original</a>
+      <a className={`${button} ml-auto`} href={pdfLink(params, true)} target="_blank" rel="noopener noreferrer" title="Open the browser PDF viewer for printing, forms and full-document search">Open original</a>
     </div>
     {error && <div role="alert" className="m-4 text-sm text-red-300" data-testid="pdf-error">{error.message} <button className={button} onClick={() => { setRenderError(undefined); setRetry(n => n + 1); }}>Retry preview</button>{missingPage && <button className={`${button} ml-2`} onClick={() => goPage(1)}>First page</button>}</div>}
     {passwordPrompt > 0 && !error && <form className="m-4 flex items-center gap-2 text-sm" onSubmit={event => { event.preventDefault(); passwordCallback.current?.(password); setPassword(""); }}>
