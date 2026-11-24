@@ -25,7 +25,7 @@ import { randomUUID } from "crypto";
 import { ensureDiskSamples, nearlyFull, sampleDisks, SAMPLE_EVERY_MS, type DiskTrend } from "../disks";
 import { spaceReport, startSpaceMeasure } from "../space";
 import { applyCleanup, planCleanup } from "../cleanup";
-import { checkForUpdate, isUpdating } from "../updater";
+import { checkForUpdate, isUpdating, getLastUpdateAttempt } from "../updater";
 
 export const USAGE_CACHE_MS = 60_000;
 export const DEPLOY_CACHE_MS = 5 * 60_000;
@@ -110,6 +110,10 @@ export type DeployState = {
   ahead: number;
   updating: boolean;
   error?: string;
+  /** The outcome of the last auto-update or manual update attempt this process made, or absent
+   *  if none ran yet. `ok: false` with a recent `at` means the auto-updater is failing silently —
+   *  the Deploy widget surfaces that so a diverged node's hourly refusals stop being invisible. */
+  lastAttempt?: { at: number; ok: boolean; detail: string };
   checkedAt: number;
 };
 export type BackupStatus = {
@@ -546,12 +550,22 @@ export function backupStatus(cfg: CyberdeckConfig): BackupStatus {
  *  performs is a few hundred ms over the network, so this is cached. */
 export async function readDeployState(): Promise<DeployState> {
   const checkedAt = Date.now();
+  const attempt = getLastUpdateAttempt();
+  const lastAttempt = attempt ? { at: attempt.at, ok: attempt.ok, detail: clipAttemptDetail(attempt.detail) } : undefined;
   try {
     const r = await checkForUpdate();
-    return { commit: r.commit, head: r.head ?? null, behind: r.behind, ahead: r.ahead, updating: isUpdating(), ...(r.error ? { error: r.error } : {}), checkedAt };
+    return { commit: r.commit, head: r.head ?? null, behind: r.behind, ahead: r.ahead, updating: isUpdating(), ...(r.error ? { error: r.error } : {}), ...(lastAttempt ? { lastAttempt } : {}), checkedAt };
   } catch (err) {
-    return { commit: "unknown", head: null, behind: 0, ahead: 0, updating: isUpdating(), error: String(err instanceof Error ? err.message : err), checkedAt };
+    return { commit: "unknown", head: null, behind: 0, ahead: 0, updating: isUpdating(), error: String(err instanceof Error ? err.message : err), ...(lastAttempt ? { lastAttempt } : {}), checkedAt };
   }
+}
+
+/** Short, display-safe form of the stderr the updater captured: trim, drop secrets-shaped tokens,
+ *  cap length. The sources are `git`/`bun install`/`bun run build` stderr, so there is no sensitive
+ *  input, but we treat them like a tooltip and keep the text brief. */
+export function clipAttemptDetail(detail: string): string {
+  const flat = detail.replace(/\s+/g, " ").trim();
+  return flat.length > 160 ? `${flat.slice(0, 159)}…` : flat;
 }
 
 // ---------------------------------------------------------------- routes ----

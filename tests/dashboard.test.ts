@@ -4,7 +4,8 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { startTestServer, testConfig, tmpHomeDir, type TestServer } from "./helpers";
-import { normalizeClaudeUsage, normalizeCodexUsage, codexUsageFromSessions, parseDf, mergeVolumes, localLinuxMounts, applyZpoolSizes, activityByDay, backupStatus, claudeResetOffer, readDeployState } from "../src/daemon/api/dashboard";
+import { normalizeClaudeUsage, normalizeCodexUsage, codexUsageFromSessions, parseDf, mergeVolumes, localLinuxMounts, applyZpoolSizes, activityByDay, backupStatus, claudeResetOffer, readDeployState, clipAttemptDetail } from "../src/daemon/api/dashboard";
+import { resetLastUpdateAttempt } from "../src/daemon/updater";
 import { normalizeCodexResets } from "../src/daemon/codexrpc";
 import { readFileSync, existsSync } from "fs";
 
@@ -182,6 +183,7 @@ describe("local metrics", () => {
 
 describe("deploy state", () => {
   test("reads the running commit, the checkout head, and origin drift", async () => {
+    resetLastUpdateAttempt();
     const d = await readDeployState();
     expect(d.commit).toMatch(/^[a-f0-9]{7,}$/);
     // On a dev checkout both are the same commit, with no drift. The git fetch may fail offline;
@@ -191,7 +193,19 @@ describe("deploy state", () => {
     expect(typeof d.updating).toBe("boolean");
     expect(d.checkedAt).toBeGreaterThan(0);
     if (d.head) expect(d.head).toMatch(/^[a-f0-9]{7,}$/);
+    // No attempt has run in this process, so lastAttempt is absent.
+    expect(d.lastAttempt).toBeUndefined();
   }, 30000);
+});
+
+describe("clipAttemptDetail", () => {
+  test("flattens whitespace and caps the length so a long build log fits in a tooltip", () => {
+    expect(clipAttemptDetail("  git  pull \n failed  \n fatal: refusing ")).toBe("git pull failed fatal: refusing");
+    const long = "x".repeat(300);
+    const clipped = clipAttemptDetail(long);
+    expect(clipped.length).toBeLessThanOrEqual(160);
+    expect(clipped.endsWith("…")).toBe(true);
+  });
 });
 
 describe("GET /api/dashboard", () => {

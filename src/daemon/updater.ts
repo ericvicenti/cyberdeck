@@ -38,6 +38,15 @@ export async function currentCommit(): Promise<string> {
   return bootShort ?? "unknown";
 }
 
+/** The outcome of the last `applyUpdate` call, kept in memory so the dashboard can show
+ *  that the auto-updater has been failing silently (a diverged node retries every hour
+ *  and quietly aborts; without this, the widget can only guess from the drift counts).
+ *  `detail` is the trimmed error message or short success summary — safe to show. */
+let lastAttempt: { at: number; ok: boolean; detail: string } | null = null;
+export const getLastUpdateAttempt = () => lastAttempt;
+/** Test-only: wipe the recorded attempt so an earlier run in the same process does not bleed in. */
+export function resetLastUpdateAttempt(): void { lastAttempt = null; }
+
 export async function checkForUpdate(): Promise<{ commit: string; behind: number; ahead: number; head?: string; error?: string }> {
   await ensureBoot();
   const commit = bootShort ?? "unknown";
@@ -88,13 +97,16 @@ export async function applyUpdate(): Promise<{ ok: boolean; detail: string }> {
     const target = await run(["git", "rev-parse", "--short", "HEAD"]);
     bus.emit({ kind: "update:restarting", commit: target.out });
     console.log(`updated to ${target.out}; restarting`);
+    const detail = `updated to ${target.out}, restarting`;
+    lastAttempt = { at: Date.now(), ok: true, detail };
     // Give the HTTP response time to flush, then let the supervisor restart us.
     setTimeout(() => process.exit(0), 750);
-    return { ok: true, detail: `updated to ${target.out}, restarting` };
+    return { ok: true, detail };
   } catch (err) {
     const detail = String(err instanceof Error ? err.message : err);
     bus.emit({ kind: "update:failed", error: detail });
     console.error("self-update failed:", detail);
+    lastAttempt = { at: Date.now(), ok: false, detail };
     updating = false;
     return { ok: false, detail };
   }

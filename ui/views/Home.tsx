@@ -184,6 +184,20 @@ export function deployTone(d: DeployState | null, online: boolean | null): { sev
   return { sev: "ok", label: "up to date" };
 }
 
+/** Hovered-tooltip suffix when the last update attempt failed within the last day: "last auto-update
+ *  failed 23m ago: git pull failed …". Silent for a successful or absent attempt — a stale success is
+ *  not useful, and a recent one is already covered by the `updating…` label. Pure, so a unit test can
+ *  freeze `now`. */
+export function fmtAttemptDetail(a: DeployState["lastAttempt"], now: number = Date.now()): string | null {
+  if (!a || a.ok) return null;
+  const ageMs = Math.max(0, now - a.at);
+  if (ageMs > 24 * 60 * 60 * 1000) return null;
+  const mins = Math.floor(ageMs / 60000);
+  const hours = Math.floor(ageMs / 3600000);
+  const ago = hours > 0 ? `${hours}h ago` : mins > 0 ? `${mins}m ago` : "just now";
+  return `last auto-update failed ${ago}: ${a.detail}`;
+}
+
 function DeployWidget({ rows }: { rows: DeployRow[] }) {
   const dirty = rows.filter((r) => r.deploy && !r.deploy.updating && !r.deploy.error && (r.deploy.behind > 0 || r.deploy.ahead > 0 || (r.deploy.head && r.deploy.head !== r.deploy.commit)));
   const freshest = rows.reduce<number | null>((a, r) => (r.deploy?.checkedAt && (a == null || r.deploy.checkedAt > a) ? r.deploy.checkedAt : a), null);
@@ -195,7 +209,7 @@ function DeployWidget({ rows }: { rows: DeployRow[] }) {
           const d = r.deploy;
           const tone = deployTone(d, r.online);
           const color = { ok: "led-on", warn: "led-warn", bad: "led-err", off: "led-off" }[tone.sev];
-          const detail = d
+          const base = d
             ? d.updating
               ? `updating…`
               : d.error
@@ -210,6 +224,10 @@ function DeployWidget({ rows }: { rows: DeployRow[] }) {
                         ? `running ${d.commit} · checkout ${d.head} · restart to deploy`
                         : `${d.commit}`
             : r.online === false ? "node offline" : r.node ? "no dashboard yet" : "no Cyberdeck node";
+          // A silent auto-update refusal (diverged node) gets surfaced as tooltip context so the
+          // widget stops being just a snapshot: Eric can see the node has been STUCK, not just drifted.
+          const attempt = d ? fmtAttemptDetail(d.lastAttempt) : null;
+          const detail = attempt ? `${base} · ${attempt}` : base;
           return (
             <li key={r.id} className="flex items-center gap-2 text-[11px]" data-testid={`deploy-${r.name.toLowerCase()}`}>
               <span className={`led ${color}`} />

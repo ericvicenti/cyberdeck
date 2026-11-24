@@ -3,7 +3,7 @@
 // (local commits AND behind origin) must read as its own red state because the
 // auto-updater's ff-only pull cannot resolve it on its own.
 import { describe, expect, test } from "bun:test";
-import { deployTone } from "../ui/views/Home";
+import { deployTone, fmtAttemptDetail } from "../ui/views/Home";
 import type { DeployState } from "../src/daemon/api/dashboard";
 
 const state = (p: Partial<DeployState>): DeployState => ({
@@ -38,5 +38,28 @@ describe("deployTone", () => {
   test("no deploy state: off (offline if the node says so)", () => {
     expect(deployTone(null, false)).toEqual({ sev: "off", label: "offline" });
     expect(deployTone(null, true)).toEqual({ sev: "off", label: "no node" });
+  });
+});
+
+describe("fmtAttemptDetail", () => {
+  const NOW = 1_700_000_000_000;
+  test("no attempt: silent", () => {
+    expect(fmtAttemptDetail(undefined, NOW)).toBeNull();
+  });
+  test("successful attempt: silent (handled by the updating label instead)", () => {
+    expect(fmtAttemptDetail({ at: NOW - 60_000, ok: true, detail: "updated to abc" }, NOW)).toBeNull();
+  });
+  test("recent failure: surface it as tooltip context", () => {
+    const d = fmtAttemptDetail({ at: NOW - 23 * 60_000, ok: false, detail: "git pull failed: fatal: Not possible to fast-forward, aborting." }, NOW);
+    expect(d).toBe("last auto-update failed 23m ago: git pull failed: fatal: Not possible to fast-forward, aborting.");
+  });
+  test("failure hours old: hour-rounded", () => {
+    expect(fmtAttemptDetail({ at: NOW - 2.5 * 3600_000, ok: false, detail: "bun install failed" }, NOW)).toBe("last auto-update failed 2h ago: bun install failed");
+  });
+  test("failure older than a day: no longer actionable, drop it", () => {
+    expect(fmtAttemptDetail({ at: NOW - 25 * 3600_000, ok: false, detail: "git pull failed" }, NOW)).toBeNull();
+  });
+  test("failure just now reads 'just now', not 0m", () => {
+    expect(fmtAttemptDetail({ at: NOW, ok: false, detail: "build failed" }, NOW)).toBe("last auto-update failed just now: build failed");
   });
 });
