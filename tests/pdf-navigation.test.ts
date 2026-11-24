@@ -27,6 +27,7 @@ const server = Bun.serve({ port: 0, hostname: "127.0.0.1", idleTimeout: 30, asyn
     if (path === "/api/fs/read") {
       const file = url.searchParams.get("path") || "";
       requests.push({ node, path: file, authorization: req.headers.get("authorization"), query: url.search });
+      if (file === "/private.pdf" && req.headers.get("authorization") !== "Bearer fixture-token") return Response.json({ error: "Locked" }, {status:401});
       if (file.includes("slow")) await new Promise<void>(resolve => delayed.set(`${node}:${file}`, resolve));
       const status = file.includes("missing") ? 404 : file.includes("denied") ? 403 : file.includes("locked") ? 401 : file.includes("offline") || file.includes("retry") && !retrySucceeds ? 503 : 200;
       if (status !== 200) return Response.json({ error: "Fixture read failed" }, { status });
@@ -41,6 +42,8 @@ const server = Bun.serve({ port: 0, hostname: "127.0.0.1", idleTimeout: 30, asyn
     if (path === "/api/applications") return Response.json({ applications: [] });
     return Response.json({ error: "Fixture endpoint unavailable" }, { status: 404 });
   }
+  const installedAssets = process.env.CYBERDECK_PDF_ASSET_ORIGIN;
+  if (installedAssets) return fetch(new URL(original, installedAssets));
   const file = Bun.file(join(ui, original === "/" ? "index.html" : original));
   return await file.exists() ? new Response(file) : new Response("Not found", { status: 404 });
 } });
@@ -58,7 +61,7 @@ async function held(key: string) {
     await Bun.sleep(10);
   }
 }
-beforeAll(async () => { browser = await chromium.launch(); });
+beforeAll(async () => { browser = await chromium.launch(process.env.CYBERDECK_PDF_BROWSER_CHANNEL ? { channel: process.env.CYBERDECK_PDF_BROWSER_CHANNEL } : {}); });
 beforeEach(async () => {
   for (const release of delayed.values()) release(); delayed.clear();
   await page?.context().close();
@@ -220,4 +223,103 @@ test("password-protected PDFs retain the requested page, keep passwords out of U
   await page.getByTestId("nav-services").click(); await page.goBack(); await rendered(2);
   await page.reload(); await title("password.pdf · PDF password required · Cyberdeck");
   expect(await page.getByLabel("PDF password", { exact: true }).inputValue()).toBe(""); expect(errors).toEqual([]);
+});
+
+test("PDF original opens a shareable node/path link and hands authenticated bytes to the native viewer", async () => {
+  await go("/guide.pdf", { node: "peer-a", page: "2", zoom: "125", rotate: "90" });
+  await rendered(2);
+  const link = page.getByRole("link", { name: "Open original" });
+  const destination = new URL((await link.getAttribute("href"))!, page.url());
+  expect(destination.pathname).toBe("/");
+  expect(destination.search).toBe("");
+  const query = new URLSearchParams(destination.hash.split("?")[1]);
+  expect(Object.fromEntries(query)).toEqual({ node: "peer-a", original: "1", page: "2", path: "/guide.pdf", zoom: "125" });
+  const length = await page.evaluate(() => history.length);
+  const opened = page.context().waitForEvent("page");
+  await link.click();
+  const original = await opened;
+  const object = original.locator("object[type='application/pdf']");
+  await object.waitFor({ state: "attached" });
+  const title = "guide.pdf · Original PDF · Peer A · Cyberdeck";
+  await original.waitForFunction(title => document.title === title, title);
+  expect(original.url()).toBe(destination.href);
+  const src = (await object.getAttribute("data"))!;
+  expect(src.startsWith("blob:")).toBe(true);
+  expect(new URLSearchParams(src.split("#")[1]).get("page")).toBe("2");
+  expect(new URLSearchParams(src.split("#")[1]).get("zoom")).toBe("125");
+  const contents = await original.evaluate(async address => {
+    const res = await fetch(address);
+    return [res.headers.get("content-type"), (await res.text()).startsWith("%PDF-")];
+  }, src);
+  expect(contents).toEqual(["application/pdf", true]);
+  expect(await original.evaluate(() => !!opener)).toBe(false);
+  await original.reload(); await object.waitFor({ state: "attached" });
+  expect((await object.getAttribute("data"))!.split("#")[0]).not.toBe(src.split("#")[0]);
+  expect(original.url()).toBe(destination.href);
+  const fresh = await page.context().newPage(); await fresh.goto(destination.href);
+  await fresh.waitForFunction(title => document.title === title, title);
+  await fresh.close(); await original.close();
+  expect(await page.evaluate(() => history.length)).toBe(length);
+  expect(await param("rotate")).toBe("90");
+  expect(requests.every(r => r.node === "peer-a" && r.authorization === "Bearer fixture-token" && !r.query.includes("token"))).toBe(true);
+  expect(mutations).toEqual([]); expect(errors).toEqual([]);
+});
+
+test("PDF original preserves its document and native viewer through Back/Forward, with separate preview state", async () => {
+  await go("/guide.pdf", { original: "1", page: "02", zoom: "fit", rotate: "90", unrelated: "remove" });
+  const native = page.getByTestId("pdf-original").locator("object");
+  await native.waitFor({ state: "attached" }); await title("guide.pdf · Original PDF · Cyberdeck");
+  expect(await param("page")).toBe("2"); expect(await param("rotate")).toBe(null); expect(await param("unrelated")).toBe(null);
+  const selected = page.url(), src = await native.getAttribute("data");
+  const length = await page.evaluate(() => history.length);
+  await native.evaluate(el => el.setAttribute("data-same-document", "yes"));
+  await page.getByRole("link", { name: "Return to preview" }).click();
+  await rendered(2); await title("guide.pdf · Page 2 of 3 · PDF · Cyberdeck");
+  expect(await page.evaluate(() => history.length)).toBe(length + 1);
+  await page.goBack(); await title("guide.pdf · Original PDF · Cyberdeck");
+  expect(page.url()).toBe(selected);
+  expect(await native.getAttribute("data")).toBe(src);
+  expect(await native.getAttribute("data-same-document")).toBe("yes");
+  await page.goForward(); await rendered(2);
+  expect(requests.filter(r => r.path === "/guide.pdf")).toHaveLength(2);
+  expect(errors).toEqual([]); expect(mutations).toEqual([]);
+});
+
+for (const [file, expected] of [["missing-metadata", "PDF not found"], ["denied", "PDF access denied"], ["invalid", "Invalid PDF"]]) {
+  test(`PDF original shows a recoverable ${expected} state at the selected node on direct open and reload`, async () => {
+    await go("/"+file+".pdf", {node:"peer-a",original:"1"});
+    const expectedTitle=file+".pdf · "+expected+" · Peer A · Cyberdeck";
+    await title(expectedTitle); const url=page.url();
+    await page.reload(); await title(expectedTitle);
+    expect(await page.getByTestId("pdf-original").getByRole("alert").textContent()).toContain(expected);
+    expect(await page.locator("object").count()).toBe(0);
+    await page.getByTestId("nav-services").click();await title("Services · Cyberdeck");
+    await page.goBack();await title(expectedTitle);expect(page.url()).toBe(url);
+    expect(errors).toEqual([]);expect(mutations).toEqual([]);
+  });
+}
+test("PDF original retries in place and late local authorization only locks the selected original", async () => {
+  await go("/retry.pdf",{original:"1"});await title("retry.pdf · PDF unavailable · Cyberdeck");
+  const url=page.url(), length=await page.evaluate(()=>history.length);retrySucceeds=true;
+  await page.getByRole("button",{name:"Retry original"}).click();await title("retry.pdf · Original PDF · Cyberdeck");
+  expect(page.url()).toBe(url);expect(await page.evaluate(()=>history.length)).toBe(length);
+  await visit(route("/slow-locked.pdf", {original:"1"}));await held(":/slow-locked.pdf");
+  await page.getByTestId("nav-services").click();delayed.get(":/slow-locked.pdf")?.();
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid=pdf-original] [role=alert]')].some(e=>e.textContent?.includes("denied")));
+  await title("Services · Cyberdeck");await page.goBack();await title("Locked · Cyberdeck");
+  expect(await param("original")).toBe("1");expect(await page.locator("object").count()).toBe(0);
+  expect(mutations).toEqual([]);expect(errors).toEqual([]);
+});
+
+test("PDF original shared links stop at authentication in a fresh signed-out browser context", async () => {
+  await go("/private.pdf", {page:"2"}); await rendered(2);
+  const href = new URL((await page.getByRole("link",{name:"Open original"}).getAttribute("href"))!,page.url()).href;
+  const fresh = await browser.newContext();
+  try {
+    const tab = await fresh.newPage(); await tab.goto(href);
+    await tab.waitForFunction(() => document.title === "Locked · Cyberdeck");
+    expect(tab.url()).toBe(href); expect(await tab.locator("object").count()).toBe(0);
+    expect(requests.at(-1)?.query).not.toContain("token");
+    expect(requests.at(-1)?.authorization?.trim()).toBe("Bearer");
+  } finally { await fresh.close(); }
 });
