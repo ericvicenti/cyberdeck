@@ -1342,3 +1342,15 @@ regression results, settings and source. A match opened over an experiment
 preserves its underlying selection on Back. An incomplete evaluation, absent
 candidate and malformed experiment have distinct states. Clipper's Commander
 source, browser checks and backup are recorded in the November 24 Deck report.
+
+The workshop editor restores `editorShow=schema,api` for a particular tactic
+and version. Archived source, schema and parameters are read-only. The latest
+editor retains an unsaved draft through disclosure and history changes. A
+returned version must belong to the requested tactic. Malformed lists and
+wrong-owner results leave the selected URL in place with an error and retry.
+
+Remaining owners include independent transcript tool and handoff selections
+that lack a message ID, attachments, deeper workflow plan and activity details,
+Commander account/recording and live-game availability, and controls inside
+native PDF viewers and physical kiosks. See the run report for the verified
+fleet and the pending Starlight installation.
