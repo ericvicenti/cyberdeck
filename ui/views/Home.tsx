@@ -172,6 +172,10 @@ export function deployTone(d: DeployState | null, online: boolean | null): { sev
   if (!d) return { sev: "off", label: online === false ? "offline" : "no node" };
   if (d.updating) return { sev: "warn", label: "updating…" };
   if (d.error) return { sev: "bad", label: "check failed" };
+  // "behind AND ahead" means the auto-updater's `git pull --ff-only` cannot converge:
+  // local-only commits block the pull, so the node is stuck until someone merges, rebases or
+  // force-resets by hand. Flag it as its own red state instead of the quieter "behind" label.
+  if (d.behind > 0 && d.ahead > 0) return { sev: "bad", label: "diverged from origin" };
   if (d.behind > 0) return { sev: "warn", label: `${d.behind} behind origin` };
   // "ahead" without "behind" means local-only commits — the running code is not on origin and
   // no other machine has it; flag it louder than a pending pull.
@@ -196,13 +200,15 @@ function DeployWidget({ rows }: { rows: DeployRow[] }) {
               ? `updating…`
               : d.error
                 ? d.error
-                : d.behind > 0
-                  ? `${d.commit} · origin has ${d.behind} commit${d.behind === 1 ? "" : "s"}`
-                  : d.ahead > 0
-                    ? `${d.commit} · ${d.ahead} commit${d.ahead === 1 ? "" : "s"} not on origin · push to back up`
-                    : d.head && d.head !== d.commit
-                      ? `running ${d.commit} · checkout ${d.head} · restart to deploy`
-                      : `${d.commit}`
+                : d.behind > 0 && d.ahead > 0
+                  ? `${d.commit} · behind ${d.behind} + ahead ${d.ahead} · ff-pull refuses, resolve by hand`
+                  : d.behind > 0
+                    ? `${d.commit} · origin has ${d.behind} commit${d.behind === 1 ? "" : "s"}`
+                    : d.ahead > 0
+                      ? `${d.commit} · ${d.ahead} commit${d.ahead === 1 ? "" : "s"} not on origin · push to back up`
+                      : d.head && d.head !== d.commit
+                        ? `running ${d.commit} · checkout ${d.head} · restart to deploy`
+                        : `${d.commit}`
             : r.online === false ? "node offline" : r.node ? "no dashboard yet" : "no Cyberdeck node";
           return (
             <li key={r.id} className="flex items-center gap-2 text-[11px]" data-testid={`deploy-${r.name.toLowerCase()}`}>
