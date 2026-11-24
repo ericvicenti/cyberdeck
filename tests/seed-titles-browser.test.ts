@@ -14,6 +14,7 @@ const pending = new Set<() => void>();
 let hold = false;
 let graphStatus = 200, holdGraph = false, malformedGraph = "";
 let holdRunJournal = false, nestedRunTools = false;
+let earlierWindow = false, earlierHold = false, earlierStatus = 200, earlierMalformed = "";
 let recordedFailureOwner = "";
 let recordedStatus = 200, recordedMalformed = "", holdRecorded = false, durableOnly = false, recordedEmpty = false, recordedLive = false;
 let runStreamMode = "", runStreamTarget = "";
@@ -263,7 +264,26 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch
     }
     switch(action._){
       case "GetAgent":return ok({_:"GetAgentResponse",agent:agent(id,node),sessionCount:0});
-      case "GetSession":return ok({_:"GetSessionResponse",session:session(id,node),events:transcriptEvents(id),systemPromptMarkdown:"Fixture system prompt — read only", ...(id.startsWith("triggered") ? { triggerContext: {triggerId:"fixture-trigger",triggerName:"Recorded schedule",firingId:"firing /?&",source:{type:"schedule",schedule:{kind:"weekly",daysOfWeek:[1],timeOfDay:"09:00",timezone:"UTC"}},activityKey:"recorded:activity",activitySummary:"Recorded schedule tick",activity:{kind:"fixture",value:"Recorded activity payload"},firedAt:1,status:"fired",...(id!=="triggered-no-prompt" ? {prompt:"Recorded prompt body"} : {})} } : {})});
+      case "GetSession": {
+       if(earlierWindow && id === "contexts") {
+        const current = session(id, node);
+        const row = (seq:number) => ({id:"archived-" + seq, seq, sessionId:id, createdAt:seq,
+         event:{type:"message",role:"user",content:"Historical message " + seq,contextLines:["Historical context " + seq]}});
+        if(!action.beforeSeq)return ok({_:"GetSessionResponse",session:current,events:[row(201),row(202)],hasMoreBefore:true});
+        const before=action.beforeSeq, status=earlierStatus, malformed=earlierMalformed;
+        if(earlierHold)await new Promise<void>(resolve=>pending.add(resolve));
+        if(status!==200)return fail(status, "Previous transcript page unavailable");
+        const first=Math.max(1,before-100), events=Array.from({length:before-first},(_,i)=>row(first+i));
+        const result:any={_:"GetSessionResponse",session:current,events,hasMoreBefore:first>1};
+        if(malformed==="cursor")result.events=[row(before)];
+        if(malformed==="duplicate")result.events=[row(first),row(first)];
+        if(malformed==="owner")result.session={...current,account:"other"};
+        if(malformed==="row-owner")result.events=[{...row(first),sessionId:"other"}];
+        if(malformed==="empty")result.events=[];
+        return ok(result);
+       }
+       return ok({_:"GetSessionResponse",session:session(id,node),events:transcriptEvents(id),systemPromptMarkdown:"Fixture system prompt — read only", ...(id.startsWith("triggered") ? { triggerContext: {triggerId:"fixture-trigger",triggerName:"Recorded schedule",firingId:"firing /?&",source:{type:"schedule",schedule:{kind:"weekly",daysOfWeek:[1],timeOfDay:"09:00",timezone:"UTC"}},activityKey:"recorded:activity",activitySummary:"Recorded schedule tick",activity:{kind:"fixture",value:"Recorded activity payload"},firedAt:1,status:"fired",...(id!=="triggered-no-prompt" ? {prompt:"Recorded prompt body"} : {})} } : {})});
+      }
       case "GetRun":return ok({_:"GetRunResponse",run:run(id,node)});
       case "GetAgentTrigger":return ok({_:"GetAgentTriggerResponse",trigger:{id,agentId:"alpha",account,name:"Morning review",enabled:true,source:{type:"schedule",schedule:{kind:"weekly",daysOfWeek:[1],timeOfDay:"09:00",timezone:"UTC"}},prompt:"Fixture",createdAt:1,updatedAt:2},sessions:[],firings:[]});
       case "ListAgents":return ok({_:"ListAgentsResponse",agents:emptySeedLists ? [] : [agent("alpha",node),agent("beta",node)]});
@@ -364,7 +384,7 @@ async function fresh(fn:(page:Page)=>Promise<void>){
  page.setDefaultNavigationTimeout(process.env.CYBERDECK_TEST_ORIGIN ? 30000 : 12000);
  await page.route("**/*",route=>new URL(route.request().url()).origin===server.url.origin?route.continue():route.abort());
  try{await fn(page);}catch(e){console.error(JSON.stringify({title:await page.title(),body:(await page.locator("body").innerText()).slice(0,1800),errors,actions:actions.slice(-15)}));throw e;}
- finally{recordedFailureOwner="";recordedStatus=200;recordedMalformed="";holdRecorded=false;durableOnly=false;recordedEmpty=false;recordedLive=false;runStreamTarget="";inlineShared=false;inlineComposerAvailable=false;inlineWindowed=false;holdInlineCard=false;inlineLive=false;inlineErrorFixture=false;holdInlineGraph=false;inlineGraphStatus=200;holdInlineJournal=false;inlineWorkflow=false;malformedInlineCard="";inlineListStatus=200;inlineCardStatus=200;holdInlineList=false;malformedInlineList="";inlineSucceeded=false;runStreamMode="";holdTriggerRead=false;triggerReadStatus=200;nestedRunTools=false;holdRunJournal=false;holdHandoffRead=false;handoffReadStatus=200;detailRunStatus=200;holdDetailRun=false;malformedDetailRun="";graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
+ finally{earlierWindow=false;earlierHold=false;earlierStatus=200;earlierMalformed="";recordedFailureOwner="";recordedStatus=200;recordedMalformed="";holdRecorded=false;durableOnly=false;recordedEmpty=false;recordedLive=false;runStreamTarget="";inlineShared=false;inlineComposerAvailable=false;inlineWindowed=false;holdInlineCard=false;inlineLive=false;inlineErrorFixture=false;holdInlineGraph=false;inlineGraphStatus=200;holdInlineJournal=false;inlineWorkflow=false;malformedInlineCard="";inlineListStatus=200;inlineCardStatus=200;holdInlineList=false;malformedInlineList="";inlineSucceeded=false;runStreamMode="";holdTriggerRead=false;triggerReadStatus=200;nestedRunTools=false;holdRunJournal=false;holdHandoffRead=false;handoffReadStatus=200;detailRunStatus=200;holdDetailRun=false;malformedDetailRun="";graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
 }
 const href=(path:string,node="")=>`${server.url}#/seed?${new URLSearchParams({r:path,...(node?{node}:{})})}`;
 const title=(page:Page,value:string)=>page.waitForFunction(value=>document.title===value,value);
@@ -2197,7 +2217,7 @@ test("Seed run journal disconnected sockets report failure and recover automatic
 
 test("Seed run journal malformed stream messages are visible and retryable", () => fresh(async page => {
  runStreamMode="malformed";await page.goto(runHref("activity=1"));await title(page,interruptedTitle());
- await page.getByText("Run updates interrupted",{exact:true}).waitFor();await page.getByText("Recorded activity could not be loaded.",{exact:true}).waitFor();runStreamMode="";
+ await page.getByText("Run updates interrupted",{exact:true}).waitFor();await page.getByRole("button",{name:"info · Recorded activity 2",exact:true}).waitFor();runStreamMode="";
  await page.getByRole("button",{name:"Retry",exact:true}).click();await title(page,runTitle("Activity · "));
 }),browserBudget);
 
@@ -3315,3 +3335,114 @@ test("Seed durable inline and activity states fit phone and desktop", () => fres
   }
  }
 }), Math.max(browserBudget, 120000));
+
+const previousPages = (start: number) => reads.slice(start).filter(({action}) => action._ === "GetSession" && action.beforeSeq);
+for (const view of ["seed", "term"] as const) {
+ test(`Seed earlier message ${view} restores an archived context across pages, reload, fresh tabs and history`, () => fresh(async page => {
+  earlierWindow = true;
+  const start = reads.length;
+  await page.goto(contextHref(view, "archived-8", "peer-b"));
+  await title(page, contextTitle("peer-b"));
+  await page.getByRole("dialog").getByText("Historical context 8").waitFor();
+  const canonical = page.url();
+  expect(previousPages(start).map(({action}) => [action.beforeSeq,action.limit])).toEqual([[201,100],[101,100]]);
+  const composer = page.locator("textarea").first();
+  await composer.evaluate(el => el.dataset.messageOwner = "original");
+  const size = await page.evaluate(() => history.length), readsBeforeClose = reads.length;
+  await page.keyboard.press("Escape");
+  await page.getByRole("dialog").waitFor({state:"detached"});
+  await page.goBack();
+  await title(page, contextTitle("peer-b"));
+  await page.getByRole("dialog").getByText("Historical context 8").waitFor();
+  expect(await composer.getAttribute("data-message-owner")).toBe("original");
+  expect(page.url()).toBe(canonical);
+  expect(await page.evaluate(() => history.length)).toBe(size + 1);
+  expect(previousPages(readsBeforeClose)).toHaveLength(0);
+  await page.reload();
+  await title(page, contextTitle("peer-b"));
+  await fresh(async tab => {
+   await tab.goto(canonical);
+   await title(tab, contextTitle("peer-b"));
+   await tab.getByRole("dialog").getByText("Historical context 8").waitFor();
+  });
+ }), browserBudget);
+
+ test(`Seed earlier message ${view} distinguishes an exhausted transcript from a denied or incomplete page`, () => fresh(async page => {
+  earlierWindow = true;
+  earlierHold = true;
+  await page.goto(contextHref(view, "absent", "", ""));
+  await title(page, "Loading earlier message · Seed · Cyberdeck");
+  await page.getByRole("status").filter({hasText:"Loading earlier message…"}).waitFor();
+  expect(await page.getByText("Selected message is not in this transcript.").count()).toBe(0);
+  const size = await page.evaluate(() => history.length), url = page.url();
+  earlierHold = false;
+  for(const release of pending)release();
+  pending.clear();
+  await title(page, "Message not found · Seed · Cyberdeck");
+  await page.getByText("Selected message is not in this transcript.").waitFor();
+  expect(page.url()).toBe(url);
+  expect(await page.evaluate(() => history.length)).toBe(size);
+ }), browserBudget);
+}
+
+for (const [status, malformed] of [[403,""],[503,""],[200,"cursor"],[200,"duplicate"],[200,"owner"],[200,"row-owner"],[200,"empty"]] as const) {
+ test(`Seed earlier message rejects ${status} ${malformed || "read"} and retries the selected page without resubscribing`, () => fresh(async page => {
+  earlierWindow = true; earlierStatus = status; earlierMalformed = malformed;
+  await page.goto(contextHref("seed", "archived-108", "peer-b"));
+  await title(page, (status === 403 ? "Access denied" : "Message unavailable") + " · Seed · Peer B · Cyberdeck");
+  const retry = page.locator("[data-seed-earlier-message]").getByRole("button", {name:"Retry"});
+  await retry.waitFor();
+  expect(await page.getByText("Selected message context is not in this transcript.").count()).toBe(0);
+  const start = reads.length, url = page.url(), count = await page.evaluate(() => history.length), subCount = subscriptions.length;
+  earlierStatus = 200; earlierMalformed = "";
+  await retry.click();
+  await title(page, contextTitle("peer-b"));
+  await page.getByRole("dialog").getByText("Historical context 108").waitFor();
+  expect(previousPages(start).map(({action}) => action.beforeSeq)).toEqual([201]);
+  expect(page.url()).toBe(url);
+  expect(await page.evaluate(() => history.length)).toBe(count);
+  expect(subscriptions.length).toBe(subCount);
+ }), browserBudget);
+}
+
+test("Seed earlier message cancels further page reads after leaving a node or locking the host", () => fresh(async page => {
+ for (const lock of [false, true]) {
+  earlierWindow = true; earlierHold = true;
+  const start = reads.length;
+  await page.goto(contextHref("seed", "absent", "peer-b", ""));
+  await waitInlineFixture(() => pending.size > 0);
+  if (lock) await page.route("**/api/fs/list**", route => route.fulfill({status:401, json:{error:"Locked"}}));
+  await page.evaluate(url => location.hash = new URL(url).hash, lock ? server.url + "#/files" : contextHref("seed", "archived-201"));
+  const expected = lock ? "Locked · Cyberdeck" : contextTitle();
+  await title(page, expected);
+  earlierHold = false;
+  for (const release of pending) release();
+  pending.clear();
+  await page.waitForTimeout(150);
+  expect(await page.title()).toBe(expected);
+  expect(previousPages(start).map(({action}) => action.beforeSeq)).toEqual([201]);
+  await page.goto("about:blank");
+ }
+}), browserBudget);
+
+test("Seed earlier message shows the selected read on phone and desktop", () => fresh(async page => {
+ for (const width of [390, 1280]) for (const colorScheme of ["dark","light"] as const) {
+  earlierWindow = true;
+  await page.setViewportSize({width,height:900});
+  await page.emulateMedia({colorScheme});
+  for (const state of ["loading","error","restored"]) {
+   await page.goto("about:blank");
+   earlierHold = state === "loading"; earlierStatus = state === "error" ? 503 : 200;
+   await page.goto(contextHref("seed","archived-108","",""));
+   await title(page, state === "loading" ? "Loading earlier message · Seed · Cyberdeck" : state === "error" ? "Message unavailable · Seed · Cyberdeck" : "Message · local First conversation · Seed session · Cyberdeck");
+   const control = state === "restored" ? page.locator('[data-selected-event="archived-108"]') : page.locator("[data-seed-earlier-message]").getByRole(state === "error" ? "button" : "status");
+   await withinViewport(page,control);
+   if (width === 390 && state === "error") expect((await control.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+   if (process.env.CYBERDECK_NAV_SHOTS) await page.screenshot({path:join(process.env.CYBERDECK_NAV_SHOTS,`earlier-${state}-${width}-${colorScheme}.png`),animations:"disabled"});
+   earlierHold = false;
+   for (const release of pending) release();
+   pending.clear();
+  }
+ }
+}), Math.max(browserBudget,120000));

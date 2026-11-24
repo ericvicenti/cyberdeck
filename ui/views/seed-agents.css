@@ -61,6 +61,7 @@ html.dark {
 }
 
 @media (max-width: 767px) {
+  [data-seed-earlier-message] button,
   [aria-label="Run activity"] button,
   [data-inline-recorded-journal] button,
   [data-run-recorded-selection] button,
