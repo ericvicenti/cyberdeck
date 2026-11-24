@@ -59,3 +59,18 @@ html.dark {
   [data-seed-inline-error-trigger],
   [data-seed-inline-error] button { min-height: 44px; }
 }
+
+@media (max-width: 767px) {
+  [aria-label="Run activity"] button,
+  [data-inline-recorded-journal] button,
+  [data-run-recorded-selection] button,
+  [data-run-recorded-journal] button,
+  [data-run-journal-error] button { min-height: 44px; min-width: 44px; }
+}
+
+@media (max-width: 767px) {
+  [data-slot="dialog-content"]:has([data-run-journal-owner]) [data-slot="dialog-close"] {
+    min-height: 44px; min-width: 44px; display: grid; place-items: center;
+  }
+  [data-slot="dialog-content"]:has([data-run-journal-owner]) [data-slot="dialog-header"] { padding-inline: 44px; }
+}

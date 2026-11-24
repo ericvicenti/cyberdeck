@@ -1,8 +1,8 @@
 # Cyberdeck navigation coverage
 
-Updated 2026-11-19. This is an implementation inventory, not a completion claim.
+Updated 2026-11-23. This is an implementation inventory, not a completion claim.
 The nightly routine and fleet deployment status live in Deck's
-`handoff/routines/cyberdeck-navigation/2026-11-19.md`.
+`handoff/routines/cyberdeck-navigation/2026-11-23.md`.
 
 ## Source and rollout status
 
@@ -70,7 +70,7 @@ credentials should not be replayed from a link.
 | GamesSection / Games | installed native games and import form | Part of Applications. Play/import are actions; no automatic execution from links. |
 | CaseworkConsole | selected device, events, camera/media/QR, calls, native scene actions | Selected device is covered by `device=<id>`, including canonical default, reload/history, missing-device error/title and no action replay. Visited consoles retain their socket, calls and previews across apps, primary views, node URLs and history; lock tears them down. `media=<stored-name>` fetches only an existing authenticated upload: fresh open, reload and history never capture, upload or autoplay. Invalid, missing and denied previews have matching errors/titles. Tests use synthetic devices/tracks only. |
 | `applications?app=afterglow&tab=music` / Spotify (the listening room), SpotifyRecordings, SpotifyVisualizer | shelves, entities, query, pagination, recordings, immersive mode | One player everywhere, inside Afterglow: `shelf`, `id`, `q`, `radio`, `page`, `immersive` and `shelf=history&recording=<id>` restore through direct links, reload and history; OAuth returns to the requested content, including saved recordings; read failures and unavailable pages retain the link with an honest title and read-only retry. Late or hidden reads cannot replace another view; no link starts playback; the SDK/player stays mounted through URL and primary-view changes. Legacy `#/spotify` links are rewritten. |
-| `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session/message/tool/prompt, list pages, run, server, node | Nested paths, canonical defaults/errors, Back/Forward and node-preserving new-window links covered. Titles observe the displayed authenticated reads, including external servers; late responses are bound to the signing host/account, server and entity. Session message/prompt/tool inspectors and full tool input/output restore without replacing the transcript or composer. Agent session-list page counts restore and retry. Global/server list rounds and sub-session disclosures also restore (November 9). Server account/provider read dialogs restore through `dialog=accounts|providers`, with route-owned loading/errors and retry (November 10); write forms and credentials stay transient. Expanded transcript tool groups and recorded message Context popovers restore in Seed and Sessions (November 10). Run Code/Activity/full-entry disclosures restore from URLs and history (November 11). Run Tool calls open/collapsed state and root/child error popovers restore with displayed-read titles and graph retry (November 14). Recorded transcript tool details now restore with bounded, sorted `detail=<tool-call-id>` parameters in both Seed and Sessions (November 15). Selected details open their containing group; collapsing the group clears its details in one history transition. Composer, transcript and subscriptions survive disclosure/history edits. Workflow-plan reads have owned loading, denied/missing/unavailable/invalid states and read-only retry at the same URL. Message-share links retain selected details, server and signing node. Incoming continuation summaries, outgoing handoff summaries and full incoming projection dialogs now restore in both Seed and Sessions (November 15); namespaced, bounded `handoff=p:<event-id>|t:<call-id>` values and `panel=handoff&event=<event-id>` reconstruct recorded content without following or creating a successor. Missing handoffs keep honest titles, invalid/default values canonicalize, and history retains the composer and subscription. Standalone run graph tool details and input/output inspectors restore from recorded journal IDs (November 16), including descendant tools and workflow read/retry ownership. Recorded trigger prompt, activity and instructions disclosures restore in Seed and Sessions (November 16), including message links, missing-field titles and read-only retry. Standalone run journal subscription/signing/connection errors now own visible interruption, reconnect/retry states and titles while retaining recorded content and links (November 17). Inline run-card Tool calls lists now restore independently in Seed and Sessions with bounded, canonical per-run selections, historical completed-card restoration, matching titles and list/card read retry (November 18). Inline recorded tool details/input-output inspectors and root/descendant error popovers now restore independently of transcript-tool state in Seed and Sessions (November 19), including card ownership, delayed journal replay, graph/workflow retry, titles, canonical modal precedence and message-share details. Remaining: deeper nested workflow/plan/activity disclosures, historical journal completion and inline subscription diagnostics, attachment state and older-message history outside returned events. |
+| `seed` / SeedAgents + published agents UI | agent/tab/trigger/memory, session/message/tool/prompt, list pages, run, server, node | Nested paths, canonical defaults/errors, Back/Forward and node-preserving new-window links covered. Titles observe the displayed authenticated reads, including external servers; late responses are bound to the signing host/account, server and entity. Session message/prompt/tool inspectors and full tool input/output restore without replacing the transcript or composer. Agent session-list page counts restore and retry. Global/server list rounds and sub-session disclosures also restore (November 9). Server account/provider read dialogs restore through `dialog=accounts|providers`, with route-owned loading/errors and retry (November 10); write forms and credentials stay transient. Expanded transcript tool groups and recorded message Context popovers restore in Seed and Sessions (November 10). Run Code/Activity/full-entry disclosures restore from URLs and history (November 11). Run Tool calls open/collapsed state and root/child error popovers restore with displayed-read titles and graph retry (November 14). Recorded transcript tool details now restore with bounded, sorted `detail=<tool-call-id>` parameters in both Seed and Sessions (November 15). Selected details open their containing group; collapsing the group clears its details in one history transition. Composer, transcript and subscriptions survive disclosure/history edits. Workflow-plan reads have owned loading, denied/missing/unavailable/invalid states and read-only retry at the same URL. Message-share links retain selected details, server and signing node. Incoming continuation summaries, outgoing handoff summaries and full incoming projection dialogs now restore in both Seed and Sessions (November 15); namespaced, bounded `handoff=p:<event-id>|t:<call-id>` values and `panel=handoff&event=<event-id>` reconstruct recorded content without following or creating a successor. Missing handoffs keep honest titles, invalid/default values canonicalize, and history retains the composer and subscription. Standalone run graph tool details and input/output inspectors restore from recorded journal IDs (November 16), including descendant tools and workflow read/retry ownership. Recorded trigger prompt, activity and instructions disclosures restore in Seed and Sessions (November 16), including message links, missing-field titles and read-only retry. Standalone run journal subscription/signing/connection errors now own visible interruption, reconnect/retry states and titles while retaining recorded content and links (November 17). Inline run-card Tool calls lists now restore independently in Seed and Sessions with bounded, canonical per-run selections, historical completed-card restoration, matching titles and list/card read retry (November 18). Inline recorded tool details/input-output inspectors and root/descendant error popovers now restore independently of transcript-tool state in Seed and Sessions (November 19), including card ownership, delayed journal replay, graph/workflow retry, titles, canonical modal precedence and message-share details. Selected older root cards outside the latest 50 runs now restore through session/account/root-validated reads in both adapters (November 20); recovered cards, drafts and subscriptions survive disclosure/history changes. Inline run subscription/signing/socket failures now restore honest interruption/reconnect titles and read-only retry while retaining recorded content, drafts and journal ownership (November 22). Completed standalone run tools now recover through authenticated full durable journal reads, including entries outside the stream window, honest empty/missing states and independent read-only retry (November 23). Remaining: deeper nested workflow/plan/activity disclosures, inline/live journal completion, attachment state and older-message history outside returned events. |
 | `desktop` / Desktop | selected node and connection | Primary route/title and URL-selected node covered; connect/input/credentials remain explicit runtime actions. |
 | `desk` / Desk + voice | Fleet/Services/Agents glance tab, voice call, transcript, setup, mute | `tab=services` / `tab=agents` restore from fresh links and history; default fleet ignores stale local preferences, invalid tabs replace to the default, and titles match. Tab transitions retain the voice subtree without reconnecting. Calls and permissions stay explicit. The call owner now stays mounted across primary views, node changes and screen-remote navigation. Voice requests stay on the serving daemon’s hub relay; idle configuration refreshes on return. Simulated live-room tests prove no disconnect/reconnect during navigation, release of push-to-talk when hidden, and disconnect on authentication lock. Real calls/microphones are not used by tests. |
 | `projects` / Projects | selected project, nested slug, unassigned repos, query | URL selection, canonical default, filter, title, missing project covered. Nested slugs use the same `p` key. Editing launches Files/Editor. |
@@ -1147,7 +1147,7 @@ has not arrived remains visibly waiting, retaining its inspector and URL, rather
 than claiming it is absent. This does not finish inline stream diagnostics,
 independent deeper workflow/plan/activity disclosures, older root-run/message
 windows, attachments, Commander/live-seat or native/original-file coverage.
-The containing card's current root-run list still has its existing 50-run window.
+The ordinary root-run list retains its existing 50-run window; selected older roots now restore separately (November 20).
 
 
 Selected inline reads also reveal their content in the transcript viewport after
@@ -1156,3 +1156,145 @@ Restoration pauses automatic following so later journal updates cannot hide the
 selection. Manual wheel/touch/pointer/keyboard activity cancels pending reveal;
 transcript panels and explicit message anchors retain their own precedence.
 No focus, URL, history, transcript read or subscription changes are required.
+
+
+## 2026-11-20: Selected older run cards
+
+`inline-calls`, `inline-detail`, `inline-tool` and `inline-error` can identify
+root cards beyond the latest 50 session runs. Absence from that recent window
+no longer means the card is missing. Once the session and its run listing are
+read successfully, the UI reads only the selected missing roots with `GetRun`.
+Each response must match the selected ID, session, owning account, root identity and
+root depth, with valid recorded content and timestamps. Foreign-session,
+foreign-account and child-run responses never open a graph, tool inspector or
+journal. The owning account comes from the displayed session; an authorized
+collaborator can sign with a different identity. Missing/denied/unavailable/invalid
+outcomes retain the requested URL,
+show the matching title and offer read-only Retry without another transcript
+or session-list request.
+
+Recovered roots appear in transcript order alongside the ordinary run cards.
+Both completed and still-live older roots retain their recorded tool lists,
+details, input/output inspectors and root/descendant error selections. They do
+not replace the latest run's pinned card. The mounted session retains recovered
+cards when a disclosure closes, so Back/Forward and reopening use the same
+journal owners and preserve the real Seed composer. Once its final URL selection
+is removed, an older card is hidden; the visible transcript and activity match a
+fresh open of that URL. Retained background owners cannot change the latest
+pinned card or message timing. The current selection's
+loading-to-content transition reveals the restored card. Late formatted content
+and editor layout changes keep the selected read visible until manual scrolling;
+subsequent journal changes preserve that reading position. New tabs and reload reconstruct from the URL
+with the correct server and signing node. No URL executes a run or sends a
+message.
+
+Repeat after building: `bun test tests/seed-titles-browser.test.ts
+--test-name-pattern 'Seed older run' --timeout 30000`. These production-bundle
+Chromium fixtures use an actual 50-root recent window, mutation-rejecting
+synthetic signatures and records, separate node/server owners, delayed reads,
+foreign and malformed identities, real editor drafts, authentication lock,
+phone/desktop sizing and both color preferences. Fleet source/assets, rollback
+and private installed-bundle evidence are in the dated Deck run report.
+
+The ordinary run list has not become an unbounded archive browser. Older
+message/event windows, authoritative journal replay completion, inline stream
+health, deeper independent plan/activity states, attachments, Commander/live
+seats and native/original-file cases remain open. Overall acceptance is incomplete.
+
+## 2026-11-22: Inline run update interruptions
+
+Seed and Sessions now expose the existing run-journal connection state on inline
+cards. Saved `inline-calls`, `inline-detail`, `inline-tool` and `inline-error`
+links retain their canonical URL when signing, subscription, socket or malformed
+message failures interrupt the read. A missing acknowledgement times out; it no
+longer leaves selected tools waiting indefinitely after a known failure.
+
+The selected inspector or error popover contains its own **Retry** control;
+otherwise the notice appears on the card. Retry reconnects only that root's
+journal and retains recorded tools, card/transcript/composer ownership and all
+other subscriptions. Reconnect and recovery do not write history, reread the
+session/graph or execute a run. Empty failed lists describe the interruption;
+previously received content remains available. Multiple selected roots keep
+independent interruption/retry outcomes. Titles bind the session, root, server
+and signing identity; hidden recovered cards and late prior-node responses
+cannot rename a cleared URL, another view or a locked application.
+
+Repeat: `bun run typecheck`, `bun run build`, then
+`bun test tests/seed-titles-browser.test.ts --test-name-pattern 'Seed inline journal' --timeout 30000`.
+The real-browser cases cover direct links, refresh/fresh tabs, Back/Forward,
+independent retries, recorded content/draft retention, socket reconnect, invalid
+messages, missing acknowledgements, signing denial, delayed signing, external
+servers, hidden older cards, authentication lock and phone/desktop states under
+both color preferences. Fixture APIs reject mutations.
+
+Remaining: authoritative historical replay completion (a healthy stream still
+cannot prove an absent selected tool is missing), deeper workflow/plan/activity
+disclosures, attachments/original-file selections and older event windows,
+Commander deep/error/live-seat cases and native/physical-device boundaries.
+Main integration and the pending-host list are recorded in today's Deck report;
+this slice does not complete the routine's broader acceptance criteria.
+
+
+## 2026-11-23 — Completed standalone run journals
+
+A selected standalone run's tool list, tool details and input/output inspector
+now combine streamed content with authenticated `GetRunJournal` reads for that
+run and its descendants. The server contract returns all durable entries for
+one run, in sequence order. Reads begin only after the run graph resolves and
+every owned run is terminal. Live trees retain their stream and cannot be
+declared empty or missing from a partial recording. No new route keys are used.
+
+Successful complete reads restore tools outside the WebSocket's retained window.
+An empty completed tool list says that no tools were recorded; an absent selected
+tool retains its URL and shows an honest not-found result and title. Denied,
+unavailable and malformed reads retain received content and offer a read-only
+Retry. Responses validate run ownership, ordered unique sequences and entry
+shape before rendering. Queries bind the signing node, account, server, run and
+terminal revision, and cached immutable journals survive disclosure/history edits.
+Late prior-run/node reads cannot rename or reopen a different selection or a
+locked view. Stream retry and durable-read retry remain independent; their
+notices follow the selected inspector into its dialog when recovery opens it.
+
+Repeat: `bun run typecheck`, `bun run build`, then
+`bun test tests/seed-titles-browser.test.ts --test-name-pattern 'Seed completed journal|Seed standalone run tools|Seed run journal' --timeout 30000`.
+The real-browser matrix covers direct links, reload, fresh tabs, Back/Forward,
+missing/empty/denied/unavailable/malformed results, independent retry, retained
+stream content, terminal transitions, delayed reads, external servers, signing
+nodes and authentication lock. Fixtures reject mutations and execute no runs.
+Phone/desktop screenshots exercise old tools, missing selections, empty lists
+and errors under both color preferences.
+
+This closes authoritative restoration for completed standalone tool selections.
+Inline run-card completion, older activity/event windows, deeper workflow/plan
+disclosures, attachments/original files, Commander/live seats and native cases
+remain. See today's Deck report for exact fleet artifacts, rollback paths,
+main-integration constraints and any pending hosts.
+
+## 2026-11-24 — Historical run cards and activity entries
+
+In Seed and Sessions, opening a run card’s tool list, details, or input/output
+inspector reads the journals of that card and its descendants. The existing
+`inline-calls`, `inline-detail` and `inline-tool` links also recover calls that
+precede the retained stream. A card opened from an older conversation uses the
+same reads. A collapsed list by itself needs no journal snapshot.
+
+Standalone runs and inline cards both take an authenticated snapshot of live
+journals and keep their existing subscription. A future tool can still arrive.
+A terminal revision gets a fresh snapshot, and only successful reads for the
+entire terminal tree establish that a selection is missing. A failed descendant
+can be retried independently inside the open inspector. A retry retains the
+current URL, stream, draft and successful journal reads.
+
+Standalone Activity uses the same journal. It displays the latest 100 entries
+plus any older entries selected by `entry` in the URL. Following a link reveals
+the selected row inside the activity pane. Closing its disclosure removes that
+older row from the recent window. An empty completed journal and an absent
+selected entry have distinct messages. Access failures retain received entries.
+
+Repeat the browser checks with `bun run build` followed by
+`bun test tests/seed-titles-browser.test.ts --test-name-pattern 'Seed durable|Seed completed journal|Seed inline journal|Seed run disclosure|Seed activity entry' --timeout 30000`.
+The tests use read-only fixture data and synthetic signatures. Further owners
+include independent workflow/plan disclosures, attachments and original files,
+older conversation events, Commander nested/error routes and live remote seats,
+and native/physical-device boundaries. Deployment and rollback records are in
+the November 24 Deck report.
