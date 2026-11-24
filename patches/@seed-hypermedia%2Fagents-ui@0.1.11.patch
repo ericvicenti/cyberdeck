@@ -1,5 +1,5 @@
 diff --git a/chunks/index-ZHWGA37c.js b/chunks/index-ZHWGA37c.js
-index 46d2a63..23ecda2 100644
+index 46d2a63..c3a2c68 100644
 --- a/chunks/index-ZHWGA37c.js
 +++ b/chunks/index-ZHWGA37c.js
 @@ -21335,10 +21335,15 @@ const hue = [
@@ -1419,7 +1419,7 @@ index 46d2a63..23ecda2 100644
        /* @__PURE__ */ f("div", { className: "text-muted-foreground mb-2 text-xs font-medium", children: "Context shared with the agent" }),
        /* @__PURE__ */ f("pre", { className: "bg-muted max-h-64 overflow-auto rounded-md p-2 font-mono text-[11px] whitespace-pre-wrap", children: e.join(`
  `) })
-@@ -75688,17 +76192,303 @@ function qBe({ args: e }) {
+@@ -75688,17 +76192,308 @@ function qBe({ args: e }) {
      ] }, s.label)) })
    ] });
  }
@@ -1497,9 +1497,9 @@ index 46d2a63..23ecda2 100644
 +    if (previous.current !== selection) { previous.current = selection; manual.current = false; }
 +    if (manual.current) return;
 +    const container = containerRef.current;
-+    if (!container || route.panel || route.eventId) return;
++    if (!container || route.panel && !route.eventId) return;
 +    const details = seedInlineSelections(route.inlineRunDetails), roots = seedInlineRoots(route);
-+    if (!roots.length) return;
++    if (!roots.length && !route.eventId) return;
 +    let canceled = false, frame = 0, fallback, anchor, expectedScroll, height = container.clientHeight;
 +    const find = (attribute, value) => [...container.querySelectorAll(`[${attribute}]`)].find(element => element.getAttribute(attribute) === value);
 +    const visible = element => element && element.getBoundingClientRect().height > 0;
@@ -1524,6 +1524,11 @@ index 46d2a63..23ecda2 100644
 +    };
 +    const attempt = () => {
 +      if (canceled) return;
++      if (route.eventId) {
++        const target = find("data-selected-event", route.eventId) || container.querySelector("[data-seed-earlier-message]");
++        if (visible(target)) anchored(target);
++        return;
++      }
 +      const readProblem = container.querySelector('[data-inline-run-selection]');
 +      if (visible(readProblem)) { anchored(readProblem); return; }
 +      if (document.querySelector('[data-seed-inline-inspector][data-state="open"], [data-seed-inline-error][data-state="open"]')) { stop(); return; }
@@ -1540,7 +1545,7 @@ index 46d2a63..23ecda2 100644
 +    observer.observe(container, { childList: true, subtree: true, attributes: true });
 +    const events = ["wheel", "touchstart", "pointerdown", "keydown"];
 +    const stopForUser = () => { manual.current = true; stop(); };
-+    const stopForScroll = () => { if (anchor && expectedScroll !== undefined && Math.abs(container.scrollTop - expectedScroll) > 1) stopForUser(); };
++    const stopForScroll = () => { if (anchor && height === container.clientHeight && expectedScroll !== undefined && Math.abs(container.scrollTop - expectedScroll) > 1) stopForUser(); };
 +    for (const event of events) container.addEventListener(event, stopForUser, { passive: true });
 +    container.addEventListener("scroll", stopForScroll, { passive: true });
 +    schedule();
@@ -1726,7 +1731,7 @@ index 46d2a63..23ecda2 100644
      /* @__PURE__ */ A("div", { className: "grid min-h-0 gap-3", children: [
        /* @__PURE__ */ f(
          f_,
-@@ -75715,12 +76505,12 @@ function hK({
+@@ -75715,12 +76510,12 @@ function hK({
        /* @__PURE__ */ A("div", { className: "min-h-0 space-y-1", children: [
          /* @__PURE__ */ f("div", { className: "text-muted-foreground text-[10px] font-medium tracking-[0.18em] uppercase", children: "Input" }),
          /* @__PURE__ */ f("pre", { className: "bg-muted max-h-48 overflow-auto rounded-xl p-3 text-[11px] whitespace-pre-wrap", children: ca(a) }),
@@ -1741,7 +1746,7 @@ index 46d2a63..23ecda2 100644
        ] })
      ] })
    ] }) });
-@@ -76340,7 +77130,11 @@ function f3e({
+@@ -76340,7 +77135,11 @@ function f3e({
    seed: r
  }) {
    const i = Ul(), s = Dy(e, t, r ? void 0 : n), o = r ?? s.data ?? void 0, a = !!o && !Tr(o.status), { runsById: l, liveState: c } = $y(e, t, o?.rootRunId, o, a), d = o ? l[o.id] ?? o : void 0, u = Ce(() => d ? nx(l, d.id) : [], [l, d?.id]);
@@ -1754,7 +1759,7 @@ index 46d2a63..23ecda2 100644
      /* @__PURE__ */ f(d_, { run: d, serverUrl: e, accountUid: t }),
      /* @__PURE__ */ f(oK, { run: d, journal: c.journal, serverUrl: e, wide: !0 }),
      /* @__PURE__ */ f(
-@@ -76389,7 +77183,7 @@ function Lg({
+@@ -76389,7 +77188,7 @@ function Lg({
    agentId: i,
    sessionId: s
  }) {
@@ -1763,7 +1768,7 @@ index 46d2a63..23ecda2 100644
      n,
      r,
      s,
-@@ -76399,10 +77193,11 @@ function Lg({
+@@ -76399,10 +77198,11 @@ function Lg({
      () => ({ serverUrl: n, accountUid: r, agentId: i, sessionId: s }),
      [n, r, i, s]
    ), z = w && t?.phase === "tool" && (t.toolCallId ? t.toolCallId === e.id : t.toolName === e.name) ? t : void 0, Y = z?.outputTail ? o3e(z.outputTail) : "";
@@ -1776,7 +1781,7 @@ index 46d2a63..23ecda2 100644
          className: Oe(
            "group/toolrow toolrow my-1.5 mr-6 rounded-lg border px-2 py-1.5 text-xs",
            // Consecutive tool rows batch into one block: zero gap at the seam, corners squared,
-@@ -76423,6 +77218,7 @@ function Lg({
+@@ -76423,6 +77223,7 @@ function Lg({
                    {
                      type: "button",
                      title: o ? "Hide tool details" : "Show tool details",
@@ -1784,7 +1789,7 @@ index 46d2a63..23ecda2 100644
                      "aria-expanded": o,
                      onClick: (J) => {
                        J.stopPropagation(), a((Q) => !Q);
-@@ -76486,7 +77282,7 @@ function Lg({
+@@ -76486,7 +77287,7 @@ function Lg({
              }
            ),
            !o && Y ? /* @__PURE__ */ f("pre", { className: "bg-background/60 text-foreground/80 mt-1.5 overflow-hidden rounded-md border p-2 font-mono text-[10px] leading-4 break-all whitespace-pre-wrap", children: Y }) : null,
@@ -1793,7 +1798,7 @@ index 46d2a63..23ecda2 100644
              e.isError && e.result ? /* @__PURE__ */ f("pre", { className: "border-destructive/30 bg-destructive/5 text-destructive max-h-48 overflow-auto rounded-md border p-2 text-[11px] whitespace-pre-wrap", children: e.result }) : null,
              kv(e.name) ? /* @__PURE__ */ f(c3e, { item: e, serverUrl: n, accountUid: r }) : y ? /* @__PURE__ */ f(l3e, { item: e, liveTail: z?.outputTail }) : e.name === "read" && T ? /* @__PURE__ */ f(ZBe, { item: e }) : F?.kind === "write-command" ? /* @__PURE__ */ f(n3e, { item: e }) : e.name === "write" && T ? /* @__PURE__ */ f(e3e, { item: e }) : /* @__PURE__ */ A(ze, { children: [
                E.map((J) => /* @__PURE__ */ A("div", { className: "space-y-1", children: [
-@@ -76503,7 +77299,7 @@ function Lg({
+@@ -76503,7 +77304,7 @@ function Lg({
        }
      ),
      /* @__PURE__ */ f(hK, { item: e, open: l, onOpenChange: c })
@@ -1802,7 +1807,7 @@ index 46d2a63..23ecda2 100644
  }
  function AK({
    item: e,
-@@ -76549,6 +77345,7 @@ function SK() {
+@@ -76549,6 +77350,7 @@ function SK() {
        g && (g.scrollTop = g.scrollHeight);
      });
    }, [u]);
@@ -1810,7 +1815,7 @@ index 46d2a63..23ecda2 100644
    return xe(() => {
      const g = e.current;
      if (!g || !t) return;
-@@ -76556,7 +77353,7 @@ function SK() {
+@@ -76556,7 +77358,7 @@ function SK() {
        a.current && (g.scrollTop = g.scrollHeight);
      });
      return y.observe(t), () => y.disconnect();
@@ -1819,7 +1824,7 @@ index 46d2a63..23ecda2 100644
  }
  const yw = " | ";
  function m3e(e) {
-@@ -77815,7 +78612,7 @@ function FK({
+@@ -77815,7 +78617,7 @@ function FK({
    onOpenSession: o,
    readOnly: a = !1
  }) {
@@ -1828,7 +1833,7 @@ index 46d2a63..23ecda2 100644
      e,
      t,
      u ? d.rootRunId : void 0,
-@@ -77837,7 +78634,8 @@ function FK({
+@@ -77837,7 +78639,8 @@ function FK({
          onOpenSession: o,
          onCancelRun: (x) => c.mutate(x),
          cancelPending: c.isPending,
@@ -1838,7 +1843,7 @@ index 46d2a63..23ecda2 100644
        }
      ) });
    if (!r?.steps.length) return null;
-@@ -77845,13 +78643,20 @@ function FK({
+@@ -77845,13 +78648,20 @@ function FK({
    return v && r.steps.every((x) => x.status === "done" || x.status === "skipped") ? null : /* @__PURE__ */ f(GF, { compact: i, children: /* @__PURE__ */ f(qK, { compact: i, children: /* @__PURE__ */ f(zK, { plan: r, compact: i, settle: v ? "idle" : "live" }) }) });
  }
  function $K({
@@ -1860,7 +1865,7 @@ index 46d2a63..23ecda2 100644
    return d ? (
      // Same shell as the pinned card: this IS that card, frozen where the run finished.
      /* @__PURE__ */ f("div", { className: "border-border bg-card mr-6 flex flex-col gap-2 rounded-lg border p-2.5", children: /* @__PURE__ */ f(
-@@ -77866,7 +78671,8 @@ function $K({
+@@ -77866,7 +78676,8 @@ function $K({
          onOpenSession: i,
          onCancelRun: (h) => o.mutate(h),
          cancelPending: o.isPending,
@@ -1870,7 +1875,7 @@ index 46d2a63..23ecda2 100644
        }
      ) })
    ) : s.isLoading ? /* @__PURE__ */ f("div", { className: "flex py-1", children: /* @__PURE__ */ f(b_, {}) }) : null;
-@@ -77876,15 +78682,31 @@ function UK({
+@@ -77876,15 +78687,31 @@ function UK({
    accountUid: t,
    run: n,
    childRuns: r,
@@ -1904,7 +1909,7 @@ index 46d2a63..23ecda2 100644
    const [h, m] = ee(!1), p = Tr(n.status), g = n.status === "waiting", y = i.progress[n.id], v = (n.usage?.total ?? 0) + (n.usage?.children?.total ?? 0), x = !!s?.steps.length && s.steps.every((T) => T.status === "done" || T.status === "failed" || T.status === "skipped"), w = u && (n.status === "succeeded" || x && n.status !== "failed" && n.status !== "canceled" && !g), I = !p && !w && !d, k = r.filter((T) => T.status === "failed" || T.status === "canceled").length, S = Ce(() => {
      const T = n.error?.callSeq;
      if (typeof T == "number")
-@@ -77908,11 +78730,16 @@ function UK({
+@@ -77908,11 +78735,16 @@ function UK({
        onOpenSession: a,
        onCancelRun: d ? void 0 : l,
        cancelPending: c,
@@ -1923,7 +1928,7 @@ index 46d2a63..23ecda2 100644
        I ? /* @__PURE__ */ f(ji, { className: "text-muted-foreground size-3.5 flex-none animate-spin" }) : null,
        /* @__PURE__ */ f("span", { className: "min-w-0 flex-1 truncate text-xs font-medium", title: E, children: E }),
        /* @__PURE__ */ A("span", { className: "flex flex-none items-center gap-1.5", children: [
-@@ -77970,7 +78797,7 @@ function UK({
+@@ -77970,7 +78802,7 @@ function UK({
          }
        ) }) : null
      ] }) : null,
@@ -1932,7 +1937,7 @@ index 46d2a63..23ecda2 100644
      /* @__PURE__ */ A("div", { className: "border-border flex items-center gap-2 border-t pt-1", children: [
        /* @__PURE__ */ f(
          "span",
-@@ -77987,7 +78814,7 @@ function UK({
+@@ -77987,7 +78819,7 @@ function UK({
          " tokens"
        ] }) : null
      ] })
@@ -1941,7 +1946,7 @@ index 46d2a63..23ecda2 100644
  }
  function N3e(e) {
    const t = e.entry, n = `${e.runId}:${e.seq}`;
-@@ -78014,11 +78841,41 @@ function N3e(e) {
+@@ -78014,11 +78846,41 @@ function N3e(e) {
      entry: e
    } : null;
  }
@@ -1988,7 +1993,7 @@ index 46d2a63..23ecda2 100644
      /* @__PURE__ */ A(
        "button",
        {
-@@ -78037,15 +78894,22 @@ function P3e({ journal: e }) {
+@@ -78037,15 +78899,22 @@ function P3e({ journal: e }) {
        "div",
        {
          ref: r,
@@ -2013,7 +2018,7 @@ index 46d2a63..23ecda2 100644
    return /* @__PURE__ */ A("div", { children: [
      /* @__PURE__ */ f(
        "button",
-@@ -78053,6 +78917,7 @@ function _3e({ line: e }) {
+@@ -78053,6 +78922,7 @@ function _3e({ line: e }) {
          type: "button",
          "aria-expanded": t,
          title: t ? "Hide full entry" : "Show full entry",
@@ -2021,7 +2026,7 @@ index 46d2a63..23ecda2 100644
          className: `hover:bg-muted block w-full truncate rounded px-0.5 text-left ${r}`,
          onClick: () => n((i) => !i),
          children: e.text
-@@ -78062,8 +78927,8 @@ function _3e({ line: e }) {
+@@ -78062,8 +78932,8 @@ function _3e({ line: e }) {
    ] });
  }
  function O3e({ runs: e }) {
@@ -2032,7 +2037,7 @@ index 46d2a63..23ecda2 100644
      /* @__PURE__ */ A(
        "button",
        {
-@@ -78077,7 +78942,7 @@ function O3e({ runs: e }) {
+@@ -78077,7 +78947,7 @@ function O3e({ runs: e }) {
          ]
        }
      ),
@@ -2041,7 +2046,7 @@ index 46d2a63..23ecda2 100644
        r.length > 1 ? /* @__PURE__ */ f("span", { className: "text-muted-foreground text-[10px]", children: Jr(i) }) : null,
        /* @__PURE__ */ f(
          "pre",
-@@ -78400,8 +79265,11 @@ function jK({
+@@ -78400,8 +79270,11 @@ function jK({
    onOpenTrigger: s,
    agentName: o,
    activity: a,
@@ -2054,7 +2059,7 @@ index 46d2a63..23ecda2 100644
    const c = e.title || "Untitled session", d = ga(new Date(e.updatedAt)), u = a ? /* @__PURE__ */ f(pw, { tone: a.tone, label: a.label, className: l ? "size-2" : void 0 }) : /* @__PURE__ */ f(gw, { status: e.status, className: l ? "size-2" : void 0 }), h = e.startedByTrigger ? /* @__PURE__ */ A(
      "button",
      {
-@@ -78415,13 +79283,14 @@ function jK({
+@@ -78415,13 +79288,14 @@ function jK({
          e.startedByTrigger.triggerName
        ]
      }
@@ -2071,7 +2076,7 @@ index 46d2a63..23ecda2 100644
        onOpenSession: i
      }
    ) }) : null;
-@@ -78507,13 +79376,18 @@ function x_({
+@@ -78507,13 +79381,18 @@ function x_({
    compact: l = !1,
    showAgentName: c = !0,
    readState: d,
@@ -2092,7 +2097,7 @@ index 46d2a63..23ecda2 100644
      y ? /* @__PURE__ */ f(W, { size: l ? "sm" : void 0, color: "muted", className: l ? "px-2 py-1" : void 0, children: "Loading sessions…" }) : null,
      o.map((v) => /* @__PURE__ */ f(
        On,
-@@ -78535,6 +79409,7 @@ function x_({
+@@ -78535,6 +79414,7 @@ function x_({
          serverUrl: v,
          accountUid: t,
          compact: l,
@@ -2100,7 +2105,7 @@ index 46d2a63..23ecda2 100644
          agentName: c ? w?.definition.name || x.agentId : void 0,
          activity: d ? LMe(x, v, d, w?.activity) : void 0,
          onOpen: (I) => g({ serverUrl: v, agentId: x.agentId, sessionId: x.id }, I),
-@@ -78549,6 +79424,7 @@ function x_({
+@@ -78549,6 +79429,7 @@ function x_({
        },
        `${v}:${x.id}`
      )) }),
@@ -2108,7 +2113,7 @@ index 46d2a63..23ecda2 100644
      /* @__PURE__ */ f("div", { ref: p, "aria-hidden": "true", className: "h-px" }),
      i && e.length ? /* @__PURE__ */ f(W, { size: "sm", color: "muted", className: "text-center", children: "Loading more…" }) : null
    ] });
-@@ -85436,6 +86312,14 @@ function z5e({
+@@ -85436,6 +86317,14 @@ function z5e({
      G ? void 0 : k ?? void 0
    ), ye = m?.data?.totals, Ne = Ot(J5e), de = Ot(V5e), ce = ge(null), ae = ge(null), Pe = ge({ tree: l?.treeScrollTop ?? 0, file: l?.fileScrollTop ?? 0 }), He = ge(null), q = ge({ selectedPath: k, expandedDirs: c });
    q.current = { selectedPath: k, expandedDirs: c };
@@ -2123,7 +2128,7 @@ index 46d2a63..23ecda2 100644
    function N() {
      U5e(e, n, {
        selectedPath: q.current.selectedPath,
-@@ -86747,11 +87631,23 @@ function a$e({
+@@ -86747,11 +87636,23 @@ function a$e({
    triggerId: r,
    memoryPath: i
  }) {
@@ -2149,7 +2154,7 @@ index 46d2a63..23ecda2 100644
    const F = m.data?.agent.accessRole ?? "owner", B = tx(F), z = Ly(F), Y = F === "owner", [J, Q] = ee(""), [R, X] = ee(""), [re, L] = ee(""), [ie, ue] = ee(void 0), [le, G] = ee(void 0), [te, ye] = ee([]), Ne = FP(u, s, R, e), de = T.data?.find((Se) => Se.name === R)?.type, [ce, ae] = ee([]), [Pe, He] = ee(0), [q, N] = ee(!1), [_, H] = ee(!1), [V, se] = ee("idle"), [Z, De] = ee("idle"), rt = ge(0), ut = ge(0), oe = ge(null), be = ge(null), We = ge(null);
    xe(() => {
      n !== "sessions" || !u || _K(u, e, null);
-@@ -86947,11 +87843,14 @@ function a$e({
+@@ -86947,11 +87848,14 @@ function a$e({
              U.content,
              D.content,
              n === "sessions" ? /* @__PURE__ */ f("section", { className: "flex min-h-0 flex-1 flex-col", children: /* @__PURE__ */ A("div", { className: "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1", children: [
@@ -2165,7 +2170,7 @@ index 46d2a63..23ecda2 100644
                    serverUrl: u,
                    accountUid: s,
                    onOpen: (at) => l({ key: "agent-session", agentId: e, sessionId: Se.id, serverUrl: u }, at),
-@@ -86969,14 +87868,14 @@ function a$e({
+@@ -86969,14 +87873,14 @@ function a$e({
                  },
                  Se.id
                )),
@@ -2182,7 +2187,7 @@ index 46d2a63..23ecda2 100644
                    },
                    children: p.isFetchingNextPage ? "Loading…" : "Load more"
                  }
-@@ -88824,7 +89723,7 @@ function O$e() {
+@@ -88824,7 +89728,7 @@ function O$e() {
  }
  function R$e({ selectedAccountId: e }) {
    V0();
@@ -2191,7 +2196,7 @@ index 46d2a63..23ecda2 100644
      () => r.flatMap(
        (O, M) => (s[M]?.data || []).map((U) => ({ ...U, serverUrl: O }))
      ),
-@@ -88839,7 +89738,7 @@ function R$e({ selectedAccountId: e }) {
+@@ -88839,7 +89743,7 @@ function R$e({ selectedAccountId: e }) {
        (O) => !m.some((M) => M.serverUrl === O.serverUrl && M.id === O.agent.id)
      ),
      [m, g.agents]
@@ -2200,7 +2205,7 @@ index 46d2a63..23ecda2 100644
      const O = new Set(v.entries.map((U) => `${U.serverUrl}:${U.session.id}`)), M = g.sessions.filter((U) => !O.has(`${U.serverUrl}:${U.session.id}`));
      return M.length ? [...v.entries, ...M].sort((U, F) => F.session.updatedAt - U.session.updatedAt) : v.entries;
    }, [v.entries, g.sessions]), w = v.isLoading || g.isLoading && !x.length, I = Ce(
-@@ -88904,11 +89803,11 @@ function R$e({ selectedAccountId: e }) {
+@@ -88904,11 +89808,11 @@ function R$e({ selectedAccountId: e }) {
                            /* @__PURE__ */ f(u2, {}),
                            "Open Server"
                          ] }),
@@ -2214,7 +2219,7 @@ index 46d2a63..23ecda2 100644
                            /* @__PURE__ */ f(p2, {}),
                            "Providers"
                          ] })
-@@ -88944,8 +89843,6 @@ function R$e({ selectedAccountId: e }) {
+@@ -88944,8 +89848,6 @@ function R$e({ selectedAccountId: e }) {
              ] })
            ] }),
            r.map((O) => /* @__PURE__ */ f(B$e, { serverUrl: O, selectedAccountId: e }, O)),
@@ -2223,7 +2228,7 @@ index 46d2a63..23ecda2 100644
            d.content,
            u.content,
            p.length ? /* @__PURE__ */ A("section", { className: "flex flex-col gap-3", children: [
-@@ -88963,6 +89860,7 @@ function R$e({ selectedAccountId: e }) {
+@@ -88963,6 +89865,7 @@ function R$e({ selectedAccountId: e }) {
                `${O.serverUrl}:${O.agentId}`
              )) })
            ] }) : null,
@@ -2231,7 +2236,7 @@ index 46d2a63..23ecda2 100644
            D ? (
              // Nothing to list and nobody to talk to yet: the page's one job is getting a first agent.
              /* @__PURE__ */ f(
-@@ -88997,6 +89895,9 @@ function R$e({ selectedAccountId: e }) {
+@@ -88997,6 +89900,9 @@ function R$e({ selectedAccountId: e }) {
                  hasNextPage: v.hasNextPage,
                  isFetchingNextPage: v.isFetchingNextPage,
                  fetchNextPage: v.fetchNextPage,
@@ -2241,7 +2246,7 @@ index 46d2a63..23ecda2 100644
                  problems: E,
                  emptyText: r.length ? "No sessions yet. Start one below." : "No sessions yet."
                }
-@@ -89087,7 +89988,10 @@ function $$e({
+@@ -89087,7 +89993,10 @@ function $$e({
    routeAgentId: n,
    selectedAccountId: r
  }) {
@@ -2253,7 +2258,7 @@ index 46d2a63..23ecda2 100644
      const k = u?.error?.callSeq;
      if (!(!u || typeof k != "number"))
        return l_(d.journal.filter((S) => S.runId === u.id)).find(
-@@ -89103,7 +90007,32 @@ function $$e({
+@@ -89103,7 +90012,32 @@ function $$e({
        return k ? `${r_(k)} tokens` : null;
      })()
    ].filter(Boolean).join(" · ") : "";
@@ -2287,7 +2292,7 @@ index 46d2a63..23ecda2 100644
      /* @__PURE__ */ f(
        v_,
        {
-@@ -89170,6 +90099,10 @@ function $$e({
+@@ -89170,6 +90104,10 @@ function $$e({
            renderToolPart: w
          }
        ) }) : null,
@@ -2298,7 +2303,7 @@ index 46d2a63..23ecda2 100644
        /* @__PURE__ */ f(d_, { run: u, serverUrl: o, accountUid: r }),
        /* @__PURE__ */ f("section", { className: "border-border bg-card flex flex-col gap-2 rounded-lg border p-3", children: /* @__PURE__ */ f(
          u_,
-@@ -89180,6 +90113,8 @@ function $$e({
+@@ -89180,6 +90118,8 @@ function $$e({
            plan: u.plan,
            journal: d.journal,
            liveState: d,
@@ -2307,7 +2312,7 @@ index 46d2a63..23ecda2 100644
            onOpenSession: (k, S) => i({ key: "agent-session", sessionId: k, agentId: S, serverUrl: o }),
            onCancelRun: (k) => g.mutate(k),
            cancelPending: g.isPending,
-@@ -89187,9 +90122,9 @@ function $$e({
+@@ -89187,9 +90127,9 @@ function $$e({
          }
        ) }),
        /* @__PURE__ */ f(O3e, { runs: [u, ...h] }),
@@ -2319,7 +2324,7 @@ index 46d2a63..23ecda2 100644
  }
  function U$e({ error: e, onRetry: t, retryPending: n }) {
    const r = si(e, { failed: "Couldn’t load this run" });
-@@ -89222,9 +90157,10 @@ function J$e() {
+@@ -89222,9 +90162,10 @@ function J$e() {
  }
  function H$e({ routeServerUrl: e, selectedAccountId: t }) {
    V0();
@@ -2332,7 +2337,7 @@ index 46d2a63..23ecda2 100644
      serverUrl: g.serverUrl,
      notice: si(g.error, { failed: "Couldn’t load sessions" }),
      refetch: g.refetch,
-@@ -89264,7 +90200,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
+@@ -89264,7 +90205,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
              {
                variant: "outline",
                className: "max-sm:min-h-10",
@@ -2341,7 +2346,7 @@ index 46d2a63..23ecda2 100644
                children: [
                  /* @__PURE__ */ f(Bz, { className: "size-4" }),
                  "Accounts"
-@@ -89276,7 +90212,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
+@@ -89276,7 +90217,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
              {
                variant: "outline",
                className: "max-sm:min-h-10",
@@ -2350,7 +2355,7 @@ index 46d2a63..23ecda2 100644
                children: [
                  /* @__PURE__ */ f(p2, { className: "size-4" }),
                  "Providers"
-@@ -89285,8 +90221,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
+@@ -89285,8 +90226,7 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
            )
          ] })
        ] }),
@@ -2360,7 +2365,7 @@ index 46d2a63..23ecda2 100644
        l.content,
        s.isError ? /* @__PURE__ */ f(
          z$e,
-@@ -89308,6 +90243,9 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
+@@ -89308,6 +90248,9 @@ function H$e({ routeServerUrl: e, selectedAccountId: t }) {
            hasNextPage: d.hasNextPage,
            isFetchingNextPage: d.isFetchingNextPage,
            fetchNextPage: d.fetchNextPage,
@@ -2370,7 +2375,7 @@ index 46d2a63..23ecda2 100644
            problems: u,
            emptyText: s.data?.length ? "No sessions on this server yet. Start one below." : "No sessions on this server yet."
          }
-@@ -89330,9 +90268,13 @@ function j$e({
+@@ -89330,9 +90273,13 @@ function j$e({
    routeServerUrl: t,
    routeAgentId: n
  }) {
@@ -2382,12 +2387,12 @@ index 46d2a63..23ecda2 100644
 +    open: () => i({ ...selectedRoute, panel: "prompt" }),
 +    content: /* @__PURE__ */ f(ya, { open: selectedRoute.panel === "prompt", onOpenChange: open => { if (!open && selectedRoute.panel === "prompt") i({ ...selectedRoute, panel: void 0 }); }, children: /* @__PURE__ */ f(va, { className: "w-[min(44rem,calc(100vw-2rem))] max-h-[85vh]", children: /* @__PURE__ */ f(V$e, { input: { prompt: a.data?.systemPromptMarkdown || "", updatedAt: a.data?.session.updatedAt } }) }) })
 +  }, y = a.data?.events.filter((Z) => Z.seq !== Number.MAX_SAFE_INTEGER).at(-1)?.seq;
-+  const earlier = useSeedEarlierMessage(o, r, e, a.data, selectedRoute.eventId), revealedEvent = ge(null);
++  const earlier = useSeedEarlierMessage(o, r, e, a.data, selectedRoute.eventId);
 +  const readingEarlier = earlier.pending || !!earlier.error;
    UQ(o, e, qQ(a.data?.events));
    const v = Zu(
      o,
-@@ -89345,37 +90287,57 @@ function j$e({
+@@ -89345,37 +90292,57 @@ function j$e({
      r,
      r ? `account/${r}` : void 0
    );
@@ -2454,7 +2459,7 @@ index 46d2a63..23ecda2 100644
      (Z) => i({ key: "agent-session", agentId: l, sessionId: Z, serverUrl: o }),
      [l, i, o]
    ), He = HV({
-@@ -89416,9 +90378,20 @@ function j$e({
+@@ -89416,9 +90383,11 @@ function j$e({
    }, [D, T, w]), xe(() => {
      E.resetToBottom();
    }, [e]), xe(() => {
@@ -2462,23 +2467,14 @@ index 46d2a63..23ecda2 100644
 -    !Z || !M.some((De) => De.key === Z) || requestAnimationFrame(() => document.getElementById(`event-${Z}`)?.scrollIntoView({ block: "center" }));
 -  }, [M]);
 +    const Z = selectedRoute.eventId;
-+    if (!Z || !a.data) { revealedEvent.current = null; return; }
++    if (!Z || !a.data) return;
 +    const found = presented.some(De => De.key === Z);
 +    displayedHost.onReadOutcome?.({ kind: "session-event", serverUrl: o, accountUid: r, sessionId: e, path: Z, name: !found && earlier.error ? "Earlier message" : undefined, pending: !found && earlier.pending, error: found || earlier.pending ? undefined : earlier.error || { status: 404 } });
-+    const frame = requestAnimationFrame(() => {
-+      const container = E.containerRef.current;
-+      const target = found ? document.getElementById("event-" + Z) : container?.querySelector("[data-seed-earlier-message]");
-+      if (target && container?.contains(target) && revealedEvent.current !== target) {
-+        revealedEvent.current = target;
-+        E.revealContent(target);
-+      }
-+    });
-+    return () => cancelAnimationFrame(frame);
 +  }, [presented, selectedRoute.eventId, displayedHost, o, r, e, earlier.pending, earlier.error]);
    function N() {
      if (!a.data) return;
      const Z = a.data.session;
-@@ -89537,7 +90510,7 @@ function j$e({
+@@ -89537,7 +90506,7 @@ function j$e({
                    label: "Copy session URL",
                    disabled: !l,
                    onClick: () => {
@@ -2487,7 +2483,7 @@ index 46d2a63..23ecda2 100644
                      Z && (navigator.clipboard?.writeText(Z), we.success("Session URL copied"));
                    }
                  },
-@@ -89593,19 +90566,36 @@ function j$e({
+@@ -89593,19 +90562,36 @@ function j$e({
            "div",
            {
              ref: E.containerRef,
@@ -2526,7 +2522,7 @@ index 46d2a63..23ecda2 100644
                        serverUrl: o,
                        agentId: l,
                        accountUid: r,
-@@ -89620,7 +90610,7 @@ function j$e({
+@@ -89620,7 +90606,7 @@ function j$e({
                  Z.key
                )),
                x ? /* @__PURE__ */ f(K$e, { text: x }) : null,
@@ -2535,7 +2531,7 @@ index 46d2a63..23ecda2 100644
                  // Hidden while a thinking line or a pending tool row is showing its own live
                  // status, to avoid two spinners. A queued run, or one parked on children, has no
                  // live status anywhere else.
-@@ -89765,6 +90755,8 @@ const K$e = pe.memo(function({ text: t }) {
+@@ -89765,6 +90751,8 @@ const K$e = pe.memo(function({ text: t }) {
    return /* @__PURE__ */ f(h_, { parts: n, isStreaming: !0 });
  }), G$e = pe.memo(function({
    row: t,
@@ -2544,7 +2540,7 @@ index 46d2a63..23ecda2 100644
    serverUrl: n,
    agentId: r,
    accountUid: i,
-@@ -89779,6 +90771,7 @@ const K$e = pe.memo(function({ text: t }) {
+@@ -89779,6 +90767,7 @@ const K$e = pe.memo(function({ text: t }) {
      {
        context: t.context,
        instructions: t.instructions,
@@ -2552,7 +2548,7 @@ index 46d2a63..23ecda2 100644
        serverUrl: n,
        agentId: r
      }
-@@ -89798,6 +90791,7 @@ const K$e = pe.memo(function({ text: t }) {
+@@ -89798,6 +90787,7 @@ const K$e = pe.memo(function({ text: t }) {
        serverUrl: n,
        accountUid: i,
        runId: t.run.id,
@@ -2560,7 +2556,7 @@ index 46d2a63..23ecda2 100644
        plan: t.plan,
        onOpenSession: c
      }
-@@ -89805,6 +90799,8 @@ const K$e = pe.memo(function({ text: t }) {
+@@ -89805,6 +90795,8 @@ const K$e = pe.memo(function({ text: t }) {
      KV,
      {
        id: "continuation-handoff",
