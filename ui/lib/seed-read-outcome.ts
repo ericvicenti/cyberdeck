@@ -128,6 +128,8 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
     else title = seedAgentTitle(route, agent.name, trigger?.name);
   } else if (session && route.key === "agent-session") {
     title = session.error ? failure(session.error, "Session")
+      : event?.pending ? "Loading earlier message · Seed"
+      : event?.error && event.name === "Earlier message" ? failure(event.error, "Message")
       : tool?.error ? failure(tool.error, tool.name && route.fullPayload ? "Tool payload" : "Tool call")
       : inlineRuns?.error ? failure(inlineRuns.error, "Run cards")
       : inlineCard?.error ? failure(inlineCard.error, "Run card")

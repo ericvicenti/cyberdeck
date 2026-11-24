@@ -1,8 +1,8 @@
 # Cyberdeck navigation coverage
 
-Updated 2026-11-23. This is an implementation inventory, not a completion claim.
+Updated 2026-11-24. This is an implementation inventory, not a completion claim.
 The nightly routine and fleet deployment status live in Deck's
-`handoff/routines/cyberdeck-navigation/2026-11-23.md`.
+`handoff/routines/cyberdeck-navigation/2026-11-24.md`.
 
 ## Source and rollout status
 
@@ -1298,3 +1298,20 @@ include independent workflow/plan disclosures, attachments and original files,
 older conversation events, Commander nested/error routes and live remote seats,
 and native/physical-device boundaries. Deployment and rollback records are in
 the November 24 Deck report.
+
+### Earlier transcript messages
+
+An explicit message or Context link in Seed and Sessions can restore a message
+outside the returned transcript. The normal unbounded `GetSession` response
+already contains the full history. When a server sets `hasMoreBefore`, the
+selected view requests pages of up to 100 events using a strictly decreasing
+`beforeSeq`. It stops on the selected event, the end of the transcript, a read
+error, or navigation away. Page reads validate the displayed session, its
+account and agent, sequence order, and event identities before rendering.
+
+Reload, fresh opens and history traversal restore the same message. Closing
+the selection returns to the recent window and preserves the existing composer
+and subscriptions. Loading, retry and missing-message states keep the requested
+URL. Independent tool and handoff disclosures without a selected event can
+still depend on the returned window. Repeat the browser checks with
+`bun test tests/seed-titles-browser.test.ts --test-name-pattern 'Seed earlier message' --timeout 30000`.
