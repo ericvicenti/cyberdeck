@@ -39,7 +39,8 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
         const [runId] = JSON.parse(outcome.path);
         const details = (selected.inlineRunDetails || []).filter(value => JSON.parse(value)[0] === runId);
         const tool = selected.inlineRunTool && JSON.parse(selected.inlineRunTool)[0] === runId ? JSON.parse(selected.inlineRunTool)[1] : "";
-        return !!(details.length || tool) && JSON.stringify([runId, details, tool]) === outcome.path;
+        const open = !!selected.inlineRunTools?.includes("open:" + runId);
+        return !!(open || details.length || tool) && JSON.stringify([runId, details, tool, open]) === outcome.path;
       }
       case "session-inline-detail-read": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && !!selected.inlineRunDetails?.includes(outcome.path);
       case "session-thinking": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && !!selected.expandedThinking?.length && JSON.stringify(selected.expandedThinking) === outcome.path;
@@ -160,7 +161,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       : runTools?.error ? failure(runTools.error, "Recorded tools")
       : runDetailRead?.error ? failure(runDetailRead.error, "Workflow run")
       : runDetailRead?.pending ? "Loading workflow run · Seed"
-      : disclosure?.error ? failure(disclosure.error, "Workflow source")
+      : disclosure?.error ? failure(disclosure.error, disclosure.name || "Workflow source")
       : `${runDetails?.pending ? "Waiting for selected tools · " : ""}${route.expandedDetails?.length ? `${route.expandedDetails.length} tool detail${route.expandedDetails.length === 1 ? "" : "s"} · ` : ""}${runTools?.pending ? "Waiting for tool calls · " : ""}${disclosure?.pending ? "Waiting for activity · " : ""}${route.runCode ? "Code · " : ""}${route.runTools ? `Tool calls ${route.runTools === "open" ? "open" : "collapsed"} · ` : ""}${route.runActivity ? route.activityEntries?.length ? `${route.activityEntries.length} activity entr${route.activityEntries.length === 1 ? "y" : "ies"} · ` : "Activity · " : ""}${run.name?.trim() || route.runId} · Seed run`;
   }
   return { host: observed, title };

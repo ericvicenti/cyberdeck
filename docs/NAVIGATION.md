@@ -1269,3 +1269,32 @@ Inline run-card completion, older activity/event windows, deeper workflow/plan
 disclosures, attachments/original files, Commander/live seats and native cases
 remain. See today's Deck report for exact fleet artifacts, rollback paths,
 main-integration constraints and any pending hosts.
+
+## 2026-11-24 — Historical run cards and activity entries
+
+In Seed and Sessions, opening a run card’s tool list, details, or input/output
+inspector reads the journals of that card and its descendants. The existing
+`inline-calls`, `inline-detail` and `inline-tool` links also recover calls that
+precede the retained stream. A card opened from an older conversation uses the
+same reads. A collapsed list by itself needs no journal snapshot.
+
+Standalone runs and inline cards both take an authenticated snapshot of live
+journals and keep their existing subscription. A future tool can still arrive.
+A terminal revision gets a fresh snapshot, and only successful reads for the
+entire terminal tree establish that a selection is missing. A failed descendant
+can be retried independently inside the open inspector. A retry retains the
+current URL, stream, draft and successful journal reads.
+
+Standalone Activity uses the same journal. It displays the latest 100 entries
+plus any older entries selected by `entry` in the URL. Following a link reveals
+the selected row inside the activity pane. Closing its disclosure removes that
+older row from the recent window. An empty completed journal and an absent
+selected entry have distinct messages. Access failures retain received entries.
+
+Repeat the browser checks with `bun run build` followed by
+`bun test tests/seed-titles-browser.test.ts --test-name-pattern 'Seed durable|Seed completed journal|Seed inline journal|Seed run disclosure|Seed activity entry' --timeout 30000`.
+The tests use read-only fixture data and synthetic signatures. Further owners
+include independent workflow/plan disclosures, attachments and original files,
+older conversation events, Commander nested/error routes and live remote seats,
+and native/physical-device boundaries. Deployment and rollback records are in
+the November 24 Deck report.

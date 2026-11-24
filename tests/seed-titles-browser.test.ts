@@ -14,6 +14,7 @@ const pending = new Set<() => void>();
 let hold = false;
 let graphStatus = 200, holdGraph = false, malformedGraph = "";
 let holdRunJournal = false, nestedRunTools = false;
+let recordedFailureOwner = "";
 let recordedStatus = 200, recordedMalformed = "", holdRecorded = false, durableOnly = false, recordedEmpty = false, recordedLive = false;
 let runStreamMode = "", runStreamTarget = "";
 let inlineListStatus = 200, inlineCardStatus = 200, holdInlineList = false, malformedInlineList = "", inlineSucceeded = false, malformedInlineCard = "";
@@ -95,10 +96,25 @@ const transcriptEvents = (id: string) => id === "inline" ? [{id:"inline-message"
  id: eventId, sessionId: id, seq: index + 1, createdAt: index + 1,
  event: { type: "message", role: index ? "assistant" : "user", content: `Fixture transcript message ${index + 1}` },
 })) : [];
+const inlineJournalEntries = (id: string) => {
+ const rows = [];
+ const child = [...inlineIds, archivedInlineId].some(root => id === inlineChildId(root));
+ for(let callSeq = 1; callSeq <= (child ? 1 : 7); callSeq++) {
+  const workflow = !child && inlineWorkflow && callSeq === 2;
+  const input = workflow ? {script:"return 42",brief:"Recorded inline workflow"} : {path:child ? "Recorded descendant input" : `Recorded inline call ${callSeq}`};
+  const output = workflow ? {runId:"detail-run",output:{recorded:42}} : {content:child ? "Recorded descendant result" : `Recorded inline result ${callSeq}`};
+  rows.push({runId:id,seq:callSeq*2-1,createdAt:callSeq*2-1,entry:{kind:"call",op:"tool",callSeq,tool:workflow ? "run_workflow" : "read",input}});
+  rows.push({runId:id,seq:callSeq*2,createdAt:callSeq*2,entry:{kind:"result",callSeq,status:"succeeded",output}});
+ }
+ return rows;
+};
+const inlineJournalOwner = (id: string) => [...inlineIds,archivedInlineId].some(root => id === root || id === inlineChildId(root));
 const completedEntries = (id:string) => {
  const rows:any[]=[];
  const append=(seq:number,entry:any)=>rows.push({runId:id,seq,createdAt:seq,entry});
  if(recordedEmpty)return rows;
+ if(inlineJournalOwner(id))rows.push(...inlineJournalEntries(id));
+ if(id==="activity")for(let seq=1;seq<=(durableOnly ? 120 : 2);seq++)append(seq,{kind:"log",level:"info",message:`Recorded activity ${seq}`,detail:`Full recorded detail ${seq}`});
  if(id==="failed-run")for(let index=1;index<=7;index++){
   append(index*2-1,{kind:"call",op:"tool",callSeq:index,tool:"read",input:{path:`Recorded run call ${index}`}});
   append(index*2,{kind:"result",callSeq:index,status:"succeeded",output:{content:`Recorded run result ${index}`}});
@@ -107,7 +123,7 @@ const completedEntries = (id:string) => {
   append(101,{kind:"call",op:"tool",callSeq:id===errorChild?9:99,tool:id===errorChild?"read":"run_workflow",input:id===errorChild?{path:"Recorded descendant input"}:{script:"export default async () => 42",brief:"Recorded nested workflow"}});
   append(102,{kind:"result",callSeq:id===errorChild?9:99,status:"succeeded",output:id===errorChild?{content:"Recorded descendant result"}:{runId:"detail-run",output:{recorded:42}}});
  }
- if(durableOnly && id==="failed-run"){
+ if(durableOnly && (id==="failed-run" || inlineJournalOwner(id))){
   append(1001,{kind:"call",op:"tool",callSeq:501,tool:"read",input:{path:"Old durable input outside the stream window"}});
   append(1002,{kind:"result",callSeq:501,status:"succeeded",output:{content:"Old durable result outside the stream window"}});
  }
@@ -266,8 +282,8 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch
       case "ListMcpServers":return ok({_:"ListMcpServersResponse",servers:[]});
       case "ListSigningIdentities":return ok({_:"ListSigningIdentitiesResponse",identities:[]});
       case "GetRunJournal": {
-       const status=recordedStatus, malformed=recordedMalformed, entries=completedEntries(action.runId);
-       if(holdRecorded || holdRunJournal)await new Promise<void>(resolve=>pending.add(resolve));
+       const status=!recordedFailureOwner || recordedFailureOwner===action.runId ? recordedStatus : 200, malformed=recordedMalformed, entries=completedEntries(action.runId);
+       if(holdRecorded || holdRunJournal || holdInlineJournal && inlineJournalOwner(action.runId))await new Promise<void>(resolve=>pending.add(resolve));
        if(status!==200)return fail(status,"Recorded journal read failed");
        const response:any={_:"GetRunJournalResponse",runId:action.runId,entries};
        if(malformed==="response")response._="GetRunResponse";
@@ -321,13 +337,10 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch
  if([...inlineIds,archivedInlineId].some(id=>envelope.action?.key === `runs/${id}`)) {
   const id=envelope.action.key.slice(5);
   if(holdInlineJournal) await new Promise<void>(resolve=>pending.add(resolve));
-  if(inlineErrorFixture){
-   ws.send(JSON.stringify({_:"append",key:envelope.action.key,runId:inlineChildId(id),seq:1,createdAt:20,entry:{kind:"call",op:"tool",callSeq:1,tool:"read",input:{path:"Recorded descendant input"}}}));
-   ws.send(JSON.stringify({_:"append",key:envelope.action.key,runId:inlineChildId(id),seq:2,createdAt:21,entry:{kind:"result",callSeq:1,status:"succeeded",output:{content:"Recorded descendant result"}}}));
-  }
-  for(let callSeq=1;callSeq<=7;callSeq++) {
-   ws.send(JSON.stringify({_:"append",key:envelope.action.key,runId:id,seq:callSeq*2-1,createdAt:callSeq*2-1,entry:{kind:"call",op:"tool",callSeq,tool:inlineWorkflow && callSeq===2 ? "run_workflow" : "read",input:inlineWorkflow && callSeq===2 ? {script:"return 42",brief:"Recorded inline workflow"} : {path:`Recorded inline call ${callSeq}`}}}));
-   ws.send(JSON.stringify({_:"append",key:envelope.action.key,runId:id,seq:callSeq*2,createdAt:callSeq*2,entry:{kind:"result",callSeq,status:"succeeded",output:inlineWorkflow && callSeq===2 ? {runId:"detail-run",output:{recorded:42}} : {content:`Recorded inline result ${callSeq}`}}}));
+  if(recordedEmpty)return;
+  const ids = inlineErrorFixture ? [id, inlineChildId(id)] : [id];
+  for(const owner of ids)for(const row of inlineJournalEntries(owner)) {
+   ws.send(JSON.stringify({_:"append",key:envelope.action.key,...row}));
   }
  }
  if(holdRunJournal && envelope.action?.key === "runs/failed-run") await new Promise<void>(resolve=>pending.add(resolve));
@@ -341,7 +354,7 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch
    ws.send(JSON.stringify({_:"append",key:"runs/failed-run",runId,seq:102,createdAt:102,entry:{kind:"result",callSeq,status:"succeeded",output}}));
   }
  }
- if(envelope.action?.key === "runs/activity") for (let seq=1;seq<=2;seq++) ws.send(JSON.stringify({_:"append",key:"runs/activity",runId:"activity",seq,createdAt:seq,entry:{kind:"log",level:"info",message:`Recorded activity ${seq}`,detail:`Full recorded detail ${seq}`}}));
+ if(!recordedEmpty && envelope.action?.key === "runs/activity") for (let seq=1;seq<=2;seq++) ws.send(JSON.stringify({_:"append",key:"runs/activity",runId:"activity",seq,createdAt:seq,entry:{kind:"log",level:"info",message:`Recorded activity ${seq}`,detail:`Full recorded detail ${seq}`}}));
 },close(ws){runSockets.delete(ws);}}});
 let browser:Browser;
 beforeAll(async()=>{browser=await chromium.launch();});
@@ -351,7 +364,7 @@ async function fresh(fn:(page:Page)=>Promise<void>){
  page.setDefaultNavigationTimeout(process.env.CYBERDECK_TEST_ORIGIN ? 30000 : 12000);
  await page.route("**/*",route=>new URL(route.request().url()).origin===server.url.origin?route.continue():route.abort());
  try{await fn(page);}catch(e){console.error(JSON.stringify({title:await page.title(),body:(await page.locator("body").innerText()).slice(0,1800),errors,actions:actions.slice(-15)}));throw e;}
- finally{recordedStatus=200;recordedMalformed="";holdRecorded=false;durableOnly=false;recordedEmpty=false;recordedLive=false;runStreamTarget="";inlineShared=false;inlineComposerAvailable=false;inlineWindowed=false;holdInlineCard=false;inlineLive=false;inlineErrorFixture=false;holdInlineGraph=false;inlineGraphStatus=200;holdInlineJournal=false;inlineWorkflow=false;malformedInlineCard="";inlineListStatus=200;inlineCardStatus=200;holdInlineList=false;malformedInlineList="";inlineSucceeded=false;runStreamMode="";holdTriggerRead=false;triggerReadStatus=200;nestedRunTools=false;holdRunJournal=false;holdHandoffRead=false;handoffReadStatus=200;detailRunStatus=200;holdDetailRun=false;malformedDetailRun="";graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
+ finally{recordedFailureOwner="";recordedStatus=200;recordedMalformed="";holdRecorded=false;durableOnly=false;recordedEmpty=false;recordedLive=false;runStreamTarget="";inlineShared=false;inlineComposerAvailable=false;inlineWindowed=false;holdInlineCard=false;inlineLive=false;inlineErrorFixture=false;holdInlineGraph=false;inlineGraphStatus=200;holdInlineJournal=false;inlineWorkflow=false;malformedInlineCard="";inlineListStatus=200;inlineCardStatus=200;holdInlineList=false;malformedInlineList="";inlineSucceeded=false;runStreamMode="";holdTriggerRead=false;triggerReadStatus=200;nestedRunTools=false;holdRunJournal=false;holdHandoffRead=false;handoffReadStatus=200;detailRunStatus=200;holdDetailRun=false;malformedDetailRun="";graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
 }
 const href=(path:string,node="")=>`${server.url}#/seed?${new URLSearchParams({r:path,...(node?{node}:{})})}`;
 const title=(page:Page,value:string)=>page.waitForFunction(value=>document.title===value,value);
@@ -1488,11 +1501,11 @@ test("Seed run disclosure links canonicalize defaults, duplicate entries and inv
  expect(await page.getByText(/Full recorded detail/).count()).toBe(2);
 }), browserBudget);
 
-test("Seed run missing source and pending activity keep honest titles and clean up on navigation", () => fresh(async page => {
+test("Seed run missing source and completed activity keep honest titles and clean up on navigation", () => fresh(async page => {
  await page.goto(href("run/review?code=1"));await title(page,"Workflow source not found · Seed · Cyberdeck");
  await page.getByRole("alert").filter({hasText:"Workflow source is not available"}).waitFor();
- await page.goto(href("run/review?activity=1&entry=missing"));await title(page,runTitle("Waiting for activity · 1 activity entry · "));
- await page.getByText("Waiting for recorded activity…").waitFor();
+ await page.goto(href("run/review?activity=1&entry=missing"));await title(page,"Run activity not found · Seed · Cyberdeck");
+ await page.getByRole("alert").filter({hasText:"selected activity entry"}).waitFor();
  await page.goto(href("session/one"));await title(page,"local First conversation · Seed session · Cyberdeck");
 }), browserBudget);
 
@@ -1512,9 +1525,9 @@ test("Seed run disclosures ignore late previous-run reads and retain selected ac
  await page.getByText(/Full recorded detail 2/).waitFor();
 }), browserBudget);
 
-test("Seed activity entry selection is bounded and missing stream entries remain pending", () => fresh(async page => {
+test("Seed activity entry selection is bounded and completed journals confirm missing entries", () => fresh(async page => {
  const entries=Array.from({length:105},(_,index)=>`entry=missing-${String(index).padStart(3,"0")}`).join("&");
- await page.goto(runHref(entries));await title(page,runTitle("Waiting for activity · 100 activity entries · "));
+ await page.goto(runHref(entries));await title(page,"Run activity not found · Seed · Cyberdeck");
  const path=new URLSearchParams(new URL(page.url()).hash.slice(7)).get("r")!;
  expect(new URLSearchParams(path.split("?")[1]).getAll("entry").length).toBe(100);
  expect(await page.getByRole("button",{name:"info · Recorded activity 1",exact:true}).isDisabled()).toBe(true);
@@ -2379,7 +2392,7 @@ for(const view of ["Seed","Sessions"])test(`Seed inline run ${view} visual state
 }),browserBudget);
 
 // Inline journal tool IDs are scoped to their containing card, independently of
-// transcript tool IDs. A missing replay entry remains waiting, never a false 404.
+// transcript tool IDs. Only a completed durable read can establish absence.
 const inlineSelection = (root = inlineIds[0], seq = 2) => JSON.stringify([root, `wf-${root}:${seq}`]);
 const inlineDetailHref = (view: string, details: string[] = [inlineSelection()], inspector = "", node = "", states: string[] = [], external = false) => {
  const link = new URL(inlineHref(view,states,node,external));
@@ -2420,13 +2433,13 @@ for(const view of ["Seed","Sessions"]) {
   await title(page,inlineDetailTitle(1,false,"",[`open:${inlineIds[0]}`]));
   expect(inlineParams(page,view).getAll("inline-detail")).toEqual([inlineSelection()]);expect(inlineParams(page,view).get("inline-tool")).toBeNull();
   const length=await page.evaluate(()=>history.length);await page.waitForTimeout(100);expect(await page.evaluate(()=>history.length)).toBe(length);
-  await page.goto(inlineDetailHref(view,Array.from({length:105},(_,i)=>inlineSelection(inlineIds[0],i+1))));await title(page,"Waiting for selected recorded tools · Seed · Cyberdeck");expect(inlineParams(page,view).getAll("inline-detail").length).toBe(100);
+  await page.goto(inlineDetailHref(view,Array.from({length:105},(_,i)=>inlineSelection(inlineIds[0],i+1))));await title(page,"Recorded tools not found · Seed · Cyberdeck");expect(inlineParams(page,view).getAll("inline-detail").length).toBe(100);
  }),browserBudget);
- test(`Seed inline tools ${view} completed cards reveal details and missing journal entries wait honestly`,()=>fresh(async page=>{
+ test(`Seed inline tools ${view} completed cards reveal details and prove absent journal entries`,()=>fresh(async page=>{
   inlineSucceeded=true;await page.goto(inlineDetailHref(view));await title(page,inlineDetailTitle());await page.getByTitle("Hide tool details",{exact:true}).waitFor();
-  await page.goto(inlineDetailHref(view,[inlineSelection(inlineIds[0],99)],inlineSelection(inlineIds[0],99)));await title(page,"Waiting for selected recorded tools · Seed · Cyberdeck");
-  await page.getByRole("dialog").getByRole("status").getByText("Waiting for selected recorded tools…",{exact:true}).waitFor();
-  expect(page.url()).toContain("inline-tool");await page.keyboard.press("Escape");await title(page,"Waiting for selected recorded tools · Seed · Cyberdeck");
+  await page.goto(inlineDetailHref(view,[inlineSelection(inlineIds[0],99)],inlineSelection(inlineIds[0],99)));await title(page,"Recorded tools not found · Seed · Cyberdeck");
+  await page.getByRole("dialog").getByText("The selected tool is not in this completed run's recorded journal.",{exact:true}).waitFor();
+  expect(page.url()).toContain("inline-tool");await page.keyboard.press("Escape");await title(page,"Recorded tools not found · Seed · Cyberdeck");
   await page.goto(inlineDetailHref(view,[inlineSelection("absent")]));await title(page,"Run cards not found · Seed · Cyberdeck");
  }),browserBudget);
  test(`Seed inline tools ${view} delayed journal restoration does not replace composer or add history`,()=>fresh(async page=>{
@@ -2467,7 +2480,7 @@ for(const view of ["Seed","Sessions"]) {
  }),browserBudget);
  test(`Seed inline tools ${view} unavailable graph retry retains the selected inspector and URL`,()=>fresh(async page=>{
   inlineGraphStatus=503;await page.goto(inlineDetailHref(view,[],inlineSelection(inlineIds[0],99)));await title(page,"Recorded tools unavailable · Seed · Cyberdeck");
-  const link=page.url(),length=await page.evaluate(()=>history.length);inlineGraphStatus=200;await page.getByRole("dialog").getByRole("button",{name:"Retry",exact:true}).click();await title(page,"Waiting for selected recorded tools · Seed · Cyberdeck");expect(page.url()).toBe(link);expect(await page.evaluate(()=>history.length)).toBe(length);
+  const link=page.url(),length=await page.evaluate(()=>history.length);inlineGraphStatus=200;await page.getByRole("dialog").getByRole("button",{name:"Retry",exact:true}).click();await title(page,"Recorded tools not found · Seed · Cyberdeck");expect(page.url()).toBe(link);expect(await page.evaluate(()=>history.length)).toBe(length);
  }),browserBudget);
  test(`Seed inline tools ${view} late journal entries cannot reopen another node or authenticated owner`,()=>fresh(async page=>{
   holdInlineJournal=true;await page.goto(inlineDetailHref(view,[],inlineSelection()));await title(page,"Waiting for selected recorded tools · Seed · Cyberdeck");while(!pending.size)await page.waitForTimeout(10);
@@ -2480,7 +2493,7 @@ for(const view of ["Seed","Sessions"]) {
   for(const width of [390,1280])for(const scheme of ["light","dark"] as const){
    await page.setViewportSize({width,height:900});await page.emulateMedia({colorScheme:scheme});
    for(const state of ["detail","inspector","waiting","loading","error"]){
-    inlineWorkflow=state === "loading" || state === "error";holdDetailRun=state === "loading";detailRunStatus=state === "error"?503:200;
+    inlineLive=state === "waiting";inlineWorkflow=state === "loading" || state === "error";holdDetailRun=state === "loading";detailRunStatus=state === "error"?503:200;
     await page.goto("about:blank");await page.goto(inlineDetailHref(view,state === "inspector" ? [] : [inlineSelection()],state === "inspector" ? inlineSelection() : state === "waiting" ? inlineSelection(inlineIds[0],99) : ""));
     await title(page,state === "loading" ? "Loading workflow run · Seed · Cyberdeck" : state === "error" ? "Workflow run unavailable · Seed · Cyberdeck" : state === "waiting" ? "Waiting for selected recorded tools · Seed · Cyberdeck" : inlineDetailTitle(state === "inspector" ? 0 : 1,state === "inspector"));
     if(state === "inspector")await page.getByRole("dialog").getByText("Recorded inline result 2",{exact:false}).waitFor();
@@ -2868,7 +2881,7 @@ for(const view of ["Seed","Sessions"]){
   await popover.getByText("Recorded inline child error",{exact:false}).waitFor();expect(page.url()).toBe(link);expect(await page.evaluate(()=>history.length)).toBe(count);
  }),browserBudget);
  test(`Seed inline journal ${view} empty failed lists show an interruption instead of waiting for tools`,()=>fresh(async page=>{
-  runStreamMode="error";runStreamTarget=`runs/${inlineIds[0]}`;await page.goto(inlineHref(view,[`open:${inlineIds[0]}`]));await title(page,inlineJournalTitle());
+  holdRecorded=true;runStreamMode="error";runStreamTarget=`runs/${inlineIds[0]}`;await page.goto(inlineHref(view,[`open:${inlineIds[0]}`]));await title(page,inlineJournalTitle());
   await page.getByText("Recorded tool calls could not be loaded.",{exact:true}).waitFor();
   expect(await page.getByText("Waiting for recorded tool calls…",{exact:true}).count()).toBe(0);
   const link=page.url(),count=await page.evaluate(()=>history.length);runStreamMode="";
@@ -3056,9 +3069,11 @@ test("Seed completed journal external-server reads remain bound to the selected 
 }),browserBudget);
 
 test("Seed completed journal never treats a live run as an authoritative missing-tool result",()=>fresh(async page=>{
- recordedLive=true;durableOnly=true;const before=reads.filter(row=>row.action._==="GetRunJournal").length;
+ recordedLive=true;durableOnly=false;const before=reads.length;
  await page.goto(selectionHref(runToolQuery(recordedOldId)));await title(page,`Waiting for tool · ${recordedOldId} · local Review navigation · Seed run · Cyberdeck`);
- await page.waitForTimeout(100);expect(reads.filter(row=>row.action._==="GetRunJournal").length).toBe(before);
+ await waitInlineFixture(()=>reads.slice(before).some(row=>row.action._==="GetRunJournal" && row.action.runId==="failed-run"));
+ await page.waitForTimeout(100);expect(await page.getByText("Recorded tool not found",{exact:true}).count()).toBe(0);
+ durableOnly=true;
  recordedLive=false;for(const[socket,owner]of runSockets)if(owner.key==="runs/failed-run")socket.send(JSON.stringify({_:"change",key:owner.key,value:run("failed-run","local")}));
  await title(page,runInspectorTitle());await page.getByRole("dialog").getByText(/Old durable result outside the stream window/).waitFor();
 }),browserBudget);
@@ -3082,3 +3097,221 @@ test("Seed completed journal old tools, missing selections, empty lists and read
   }
  }
 }),browserBudget);
+
+const inlineRecorded = (page: Page, root = inlineIds[0]) =>
+ page.locator(`[data-inline-recorded-journal=${JSON.stringify(root)}]`);
+const oldInline = (root = inlineIds[0], owner = root) => JSON.stringify([root, `wf-${owner}:501`]);
+const journalReads = (start: number) => reads.slice(start).filter(row => row.action._ === "GetRunJournal");
+
+for (const view of ["Seed", "Sessions"]) {
+ test(`Seed durable inline ${view} restores a descendant beyond the stream on direct links, reload and fresh tabs`, () => fresh(async page => {
+  durableOnly = true;
+  inlineErrorFixture = true;
+  inlineWindowed = true;
+  const root = inlineIds[0], child = inlineChildId(root), start = reads.length;
+  const link = inlineDetailHref(view, [], oldInline(root, child), "peer-b");
+  await page.goto(link);
+  await title(page, inlineDetailTitle(0, true, "peer-b"));
+  await page.getByRole("dialog").getByText(/Old durable result outside the stream window/).waitFor();
+  expect(journalReads(start).map(row => row.action.runId).sort()).toEqual([root, child].sort());
+  const canonical = page.url();
+  await page.reload();
+  await title(page, inlineDetailTitle(0, true, "peer-b"));
+  expect(page.url()).toBe(canonical);
+  await fresh(async tab => {
+   await tab.goto(canonical);
+   await title(tab, inlineDetailTitle(0, true, "peer-b"));
+   await tab.getByRole("dialog").getByText(/Old durable input outside the stream window/).waitFor();
+  });
+ }), browserBudget);
+
+ test(`Seed durable inline ${view} history keeps the original composer, card and subscriptions`, () => fresh(async page => {
+  durableOnly = true;
+  const states = [`open:${inlineIds[0]}`];
+  await page.goto(inlineHref(view, states));
+  await title(page, inlineTitle(states));
+  const result = page.getByLabel("Run tool calls").getByText(/Old durable result outside the stream window/);
+  await result.waitFor();
+  const composer = page.locator("textarea").first();
+  await composer.fill("Keep my unsent draft");
+  await composer.evaluate(element => element.dataset.historyOwner = "original");
+  await waitInlineFixture(() => [...runSockets.values()].some(owner => owner.key === "runs/" + inlineIds[1]));
+  const link = page.url(), historySize = await page.evaluate(() => history.length), subscribed = subscriptions.length;
+  const scope = result.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " toolrow ")][1]');
+  await scope.getByTitle("Show tool details", {exact:true}).click();
+  await title(page, inlineDetailTitle(1, false, "", states));
+  await scope.getByTitle("View raw tool input/output", {exact:true}).click();
+  await title(page, inlineDetailTitle(1, true, "", states));
+  expect(inlineParams(page, view).get("inline-tool")).toBe(oldInline());
+  await page.goBack();
+  await title(page, inlineDetailTitle(1, false, "", states));
+  await page.goBack();
+  await title(page, inlineTitle(states));
+  expect(page.url()).toBe(link);
+  await page.goForward();
+  await title(page, inlineDetailTitle(1, false, "", states));
+  expect(await page.evaluate(() => history.length)).toBe(historySize + 2);
+  expect(await composer.getAttribute("data-history-owner")).toBe("original");
+  expect(await composer.inputValue()).toBe("Keep my unsent draft");
+  expect(subscriptions.length).toBe(subscribed);
+ }), browserBudget);
+
+ test(`Seed durable inline ${view} retries only the denied descendant inside its inspector`, () => fresh(async page => {
+  const root = inlineIds[0], child = inlineChildId(root);
+  inlineErrorFixture = true;
+  durableOnly = true;
+  recordedFailureOwner = child;
+  recordedStatus = 403;
+  await page.goto(inlineDetailHref(view, [inlineSelection(inlineIds[1], 3)], oldInline(root, child)));
+  await title(page, "Access denied · Seed · Cyberdeck");
+  const dialog = page.getByRole("dialog");
+  const retry = dialog.locator("[data-inline-recorded-journal]").getByRole("button", {name:"Retry"});
+  await retry.waitFor();
+  await waitInlineFixture(() => [...runSockets.values()].some(owner => owner.key === "runs/" + inlineIds[1]));
+  const link = page.url(), count = await page.evaluate(() => history.length), start = reads.length;
+  recordedStatus = 200;
+  await retry.click();
+  await title(page, inlineDetailTitle(1, true));
+  await dialog.getByText(/Old durable result outside the stream window/).waitFor();
+  expect(journalReads(start).map(row => row.action.runId)).toEqual([child]);
+  expect(page.url()).toBe(link);
+  expect(await page.evaluate(() => history.length)).toBe(count);
+ }), browserBudget);
+
+ test(`Seed durable inline ${view} restores live history and waits for a future tool until completion`, () => fresh(async page => {
+  inlineLive = true;
+  durableOnly = true;
+  await page.goto(inlineDetailHref(view, [], oldInline()));
+  await title(page, inlineDetailTitle(0, true));
+  await page.getByRole("dialog").getByText(/Old durable result outside the stream window/).waitFor();
+  await page.evaluate(url => location.hash = new URL(url).hash, inlineDetailHref(view, [], inlineSelection(inlineIds[0], 999)));
+  await title(page, "Waiting for selected recorded tools · Seed · Cyberdeck");
+  const link = page.url(), count = await page.evaluate(() => history.length);
+  await waitInlineFixture(() => [...runSockets.values()].some(owner => owner.key === "runs/" + inlineIds[0]));
+  inlineLive = false;
+  for (const [socket, owner] of runSockets) if (owner.key === "runs/" + inlineIds[0]) {
+   socket.send(JSON.stringify({_: "change", key:owner.key, value:inlineRun(inlineIds[0], "local")}));
+  }
+  await title(page, "Recorded tools not found · Seed · Cyberdeck");
+  await page.getByRole("dialog").getByText("The selected tool is not in this completed run's recorded journal.").waitFor();
+  expect(page.url()).toBe(link);
+  expect(await page.evaluate(() => history.length)).toBe(count);
+ }), browserBudget);
+
+ test(`Seed durable inline ${view} late reads cannot rename a different node, closed card or locked host`, () => fresh(async page => {
+  for (const target of ["node", "closed", "lock"]) {
+   await page.goto("about:blank");
+   holdRecorded = true;
+   recordedStatus = 503;
+   await page.goto(inlineDetailHref(view, [], oldInline(), "peer-a"));
+   await waitInlineFixture(() => pending.size > 0);
+   const closed = [`closed:${inlineIds[0]}`];
+   const url = target === "lock" ? server.url + "#/files" : inlineHref(view, closed, target === "node" ? "peer-b" : "peer-a");
+   if (target === "lock") await page.route("**/api/fs/list**", route => route.fulfill({status:401, json:{error:"Locked"}}));
+   await page.evaluate(link => location.hash = new URL(link).hash, url);
+   const expected = target === "lock" ? "Locked · Cyberdeck" : inlineTitle(closed, target === "node" ? "peer-b" : "peer-a");
+   await title(page, expected);
+   holdRecorded = false;
+   for (const release of pending) release();
+   pending.clear();
+   await page.waitForTimeout(100);
+   expect(await page.title()).toBe(expected);
+   expect(await page.getByRole("dialog").count()).toBe(0);
+  }
+ }), browserBudget);
+}
+
+test("Seed durable inline external journals stay on their displayed server and signing node", () => fresh(async page => {
+ durableOnly = true;
+ const start = reads.length, signed = signingNodes.length;
+ await page.goto(inlineDetailHref("Seed", [], oldInline(), "peer-b", [], true));
+ await title(page, "Recorded tool input/output · read · external First conversation · Seed session · Peer B · Cyberdeck");
+ expect(journalReads(start).map(row => row.node)).toEqual(["external"]);
+ expect(signingNodes.slice(signed).length).toBeGreaterThan(0);
+ expect(signingNodes.slice(signed).every(node => node === "peer-b")).toBe(true);
+}), browserBudget);
+
+test("Seed durable activity keeps selected older entries alongside the recent hundred on fresh open and history", () => fresh(async page => {
+ durableOnly = true;
+ const query = "activity=1&entry=activity%3A8";
+ const area = page.getByLabel("Run activity"), old = area.getByRole("button", {name:"info · Recorded activity 8", exact:true});
+ await page.goto(runHref(query, "peer-a"));
+ await title(page, runTitle("1 activity entry · ", "peer-a"));
+ const link = page.url();
+ await area.getByText(/Full recorded detail 8"/).waitFor();
+ expect(await area.getByRole("button").count()).toBe(101);
+ expect(await old.getAttribute("aria-expanded")).toBe("true");
+ await page.reload();
+ await title(page, runTitle("1 activity entry · ", "peer-a"));
+ await area.evaluate(el => el.dataset.activityOwner = "same");
+ const count = await page.evaluate(() => history.length);
+ await old.click();
+ await title(page, runTitle("Activity · ", "peer-a"));
+ await old.waitFor({state:"detached"});
+ await page.goBack();
+ await title(page, runTitle("1 activity entry · ", "peer-a"));
+ expect(page.url()).toBe(link);
+ expect(await area.getAttribute("data-activity-owner")).toBe("same");
+ await page.goForward();
+ await title(page, runTitle("Activity · ", "peer-a"));
+ expect(await page.evaluate(() => history.length)).toBe(count + 1);
+ await fresh(async tab => {
+  await tab.goto(link);
+  await title(tab, runTitle("1 activity entry · ", "peer-a"));
+  await tab.getByLabel("Run activity").getByText(/Full recorded detail 8"/).waitFor();
+ });
+}), browserBudget);
+
+test("Seed durable activity denied, malformed and empty journals retain the selected URL", () => fresh(async page => {
+ for (const malformed of ["", "row-owner"]) {
+  durableOnly = true;
+  recordedMalformed = malformed;
+  recordedStatus = malformed ? 200 : 403;
+  await page.goto("about:blank");
+  await page.goto(runHref("activity=1&entry=activity%3A8"));
+  await title(page, (malformed ? "Run activity unavailable" : "Access denied") + " · Seed · Cyberdeck");
+  const link = page.url(), count = await page.evaluate(() => history.length);
+  recordedMalformed = "";
+  recordedStatus = 200;
+  await recordedNotice(page).getByRole("button", {name:"Retry"}).click();
+  await title(page, runTitle("1 activity entry · "));
+  expect(page.url()).toBe(link);
+  expect(await page.evaluate(() => history.length)).toBe(count);
+ }
+ recordedEmpty = true;
+ await page.goto("about:blank");
+ await page.goto(runHref("activity=1"));
+ await title(page, runTitle("Activity · "));
+ await page.getByText("No activity was recorded in this completed run.", {exact:true}).waitFor();
+}), browserBudget);
+
+test("Seed durable inline and activity states fit phone and desktop", () => fresh(async page => {
+ for (const width of [390, 1280]) for (const colorScheme of ["light", "dark"] as const) {
+  await page.setViewportSize({width, height:900});
+  await page.emulateMedia({colorScheme});
+  for (const state of ["tool", "missing", "error", "empty", "activity"]) {
+   await page.goto("about:blank");
+   durableOnly = true;
+   recordedEmpty = state === "empty";
+   recordedStatus = state === "error" ? 503 : 200;
+   const open = [`open:${inlineIds[0]}`];
+   await page.goto(state === "activity" ? runHref("activity=1&entry=activity%3A8") : state === "empty" ? inlineHref("Seed", open) : inlineDetailHref("Seed", [], state === "missing" ? inlineSelection(inlineIds[0], 999) : oldInline()));
+   const expected = state === "activity" ? runTitle("1 activity entry · ") : state === "empty" ? inlineTitle(open) : state === "error" ? "Recorded tools unavailable · Seed · Cyberdeck" : state === "missing" ? "Recorded tools not found · Seed · Cyberdeck" : inlineDetailTitle(0, true);
+   await title(page, expected);
+   const dialog = page.getByRole("dialog");
+   if (state === "empty") await page.getByText("No tool calls were recorded in this completed run.", {exact:true}).waitFor();
+   else if (state === "activity") {
+    const old = page.getByRole("button", {name:"info · Recorded activity 8", exact:true});
+    await old.scrollIntoViewIfNeeded();
+    if (width === 390) expect((await old.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+   } else {
+    await dialog.evaluate(async el => { await Promise.all(el.getAnimations({subtree:true}).filter(animation => Number.isFinite(animation.effect?.getComputedTiming().endTime)).map(animation => animation.finished.catch(() => {}))); });
+    const control = state === "tool" ? dialog.getByRole("button", {name:"Close", exact:true}) : dialog.getByRole("button", {name:"Retry", exact:true});
+    await withinViewport(page, control);
+    if (width === 390) expect((await control.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+   }
+   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+   if (process.env.CYBERDECK_NAV_SHOTS) await page.screenshot({path:join(process.env.CYBERDECK_NAV_SHOTS, `durable-${state}-${width}-${colorScheme}.png`), animations:"disabled"});
+  }
+ }
+}), Math.max(browserBudget, 120000));
