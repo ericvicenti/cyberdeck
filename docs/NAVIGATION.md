@@ -1359,3 +1359,33 @@ A selected transcript message stays visible when the composer or viewport change
 height after restoration. Scrolling, touching or using the keyboard inside the
 transcript releases that positioning. The installed PDF smoke script also checks
 **Open original** with an authenticated generated file and a signed-out browser.
+
+### Historical transcript selections and message attachments (November 25)
+
+Seed and Sessions recover transcript tool inspectors, tool detail and thinking
+disclosures, and incoming and outgoing handoffs even when their URL has no
+message ID. The search follows authenticated transcript pages until it finds
+each selected call or event. It includes the beginning of a contiguous tool
+group before replacing a tool URL with its canonical message anchor. A result
+in the latest page can therefore recover an input from an earlier page. Loading,
+access errors, and Retry retain the selection. After the transcript is exhausted,
+valid selected handoffs remain visible alongside an absent selection.
+
+A recorded message lists links for its attached files. Both views accept
+`panel=attachment&event=<message-id>&attachment=<content-sha256>`. An attachment
+opens only if the selected message lists that file for that session. The
+recipient's signing account and selected server own the read. Preview and inline
+renderers share a query scoped to that owner. The response must identify the
+requested file and session and match its byte count. Browsers with Web Crypto
+also verify the content digest. A share link contains no attachment bytes or
+credentials. The preview shows raster images, plain text or JSON (first 64 KiB),
+or metadata for other file types. Image decoding and read failures can retry
+in place. Escape returns to the message. Browser Back restores the preview.
+
+Repeat the focused checks with `bun test tests/seed-titles-browser.test.ts
+--test-name-pattern 'Seed archived selection|Seed attachment|Seed earlier message'
+--timeout 30000` after a frozen install and build. Use
+`CYBERDECK_NAV_SHOTS=<directory>` to capture visual cases. Outstanding coverage
+includes deeper workflow plan/activity disclosures, older run lists, Commander
+account/recording errors and naturally active seats, opaque PDF controls and
+physical kiosk/gamepad behavior. The dated Deck run report records host status.

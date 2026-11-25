@@ -97,12 +97,13 @@ function TermPane({ session, onStatus, onRemove }: { session: LiveSession; onSta
   );
 }
 /** A Seed session in Seed's UI: tool calls, runs, plan, sub-sessions, model and stop/retry. */
-const transcriptKeys = ["panel", "event", "tool", "full", "thinking", "detail", "handoff", "trigger-context", "inline-calls", "inline-detail", "inline-tool", "inline-error"];
+const transcriptKeys = ["panel", "event", "tool", "full", "attachment", "thinking", "detail", "handoff", "trigger-context", "inline-calls", "inline-detail", "inline-tool", "inline-error"];
 function transcriptParams(params: URLSearchParams, next: Extract<SeedAgentsRoute, { key: "agent-session" }>) {
   const result = new URLSearchParams(params);
   for (const key of transcriptKeys) result.delete(key);
   if (next.panel) result.set("panel", next.panel);
   if (next.eventId) result.set("event", next.eventId);
+  if (next.panel === "attachment" && next.attachmentId) result.set("attachment", next.attachmentId);
   if (next.panel === "tool" && next.toolId) result.set("tool", next.toolId);
   if (next.panel === "tool" && next.fullPayload) result.set("full", next.fullPayload);
   const detailRoots = new Set((next.inlineRunDetails || []).map(value => JSON.parse(value)[0]));
@@ -127,7 +128,8 @@ function NativeSeedSession({ id, node, params }: { id: string; node: string; par
     : undefined, [id, sessionId, node, filter]);
   const eventId = params.get("event") || undefined, toolId = params.get("tool") || undefined;
   const selectedPanel = params.get("panel"), full = params.get("full");
-  const panel = selectedPanel === "prompt" ? "prompt" : (selectedPanel === "message" || selectedPanel === "context" || selectedPanel === "handoff") && eventId ? selectedPanel : selectedPanel === "tool" && toolId ? "tool" : undefined;
+  const attachmentId = params.get("attachment") || undefined;
+  const panel = selectedPanel === "attachment" && eventId && /^[0-9a-f]{64}$/.test(attachmentId || "") ? "attachment" : selectedPanel === "prompt" ? "prompt" : (selectedPanel === "message" || selectedPanel === "context" || selectedPanel === "handoff") && eventId ? selectedPanel : selectedPanel === "tool" && toolId ? "tool" : undefined;
   // Match the pinned Seed route contract without eagerly loading the full UI in
   // ordinary terminal tabs. Browser cases exercise both adapters together.
   const inlineSelections = (values: (string | null)[]) => {
@@ -157,6 +159,7 @@ function NativeSeedSession({ id, node, params }: { id: string; node: string; par
   const expandedTriggerContext = [...new Set(params.getAll("trigger-context").filter((value): value is "activity" | "instructions" | "prompt" => ["activity", "instructions", "prompt"].includes(value)))].sort();
   const route: Extract<SeedAgentsRoute, { key: "agent-session" }> = {
     key: "agent-session", sessionId, eventId, panel, inlineRunTools, inlineRunDetails, inlineRunTool, inlineRunError, expandedThinking, expandedDetails, expandedHandoffs, expandedTriggerContext,
+    attachmentId: panel === "attachment" ? attachmentId : undefined,
     toolId: panel === "tool" ? toolId : undefined,
     fullPayload: panel === "tool" && (full === "input" || full === "output" || full === "both") ? full : undefined,
   };

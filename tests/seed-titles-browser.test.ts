@@ -87,7 +87,18 @@ const handoffEvents = [
  { type: "tool_result", toolCallId: continuationId, name: "continue_session", output: { successorSessionId: "two", title: "Recorded successor" } },
  { type: "message", role: "assistant", content: "Recorded continuation complete" },
 ];
-const transcriptEvents = (id: string) => id === "inline" ? [{id:"inline-message",sessionId:id,seq:1,createdAt:1,event:{type:"message",role:"user",content:"Inspect the recorded inline runs"}}] : id.startsWith("triggered") ? [{ id: "trigger-message", sessionId: id, seq: 1, createdAt: 1, event: { type: "message", role: "user", content: id === "triggered-no-instructions" ? "Recorded trigger session" : "Recorded trigger session\n<trigger_context>\n<trigger_instructions>\nRecorded instructions body\n</trigger_instructions>\n</trigger_context>" } }] : id === "handoffs" ? handoffEvents.map((event,index)=>({id:index?`handoff-event-${index+1}`:projectionId,sessionId:id,seq:index+1,createdAt:index+1,event})) : id === "workflow-details" ? workflowEvents.map((event, index) => ({id: `workflow-event-${index + 1}`, sessionId: id, seq: index + 1, createdAt: index + 1, event})) : id === "contexts" ? ["context-one", "context two/?&", "no-context"].map((eventId, index) => ({
+const attachmentFiles = [
+ {name:"Notes & draft.txt", mimeType:"text/plain", bytes:new TextEncoder().encode("Read-only attachment\n<script>literal text</script>")},
+ {name:"Pixel.png", mimeType:"image/png", bytes:Uint8Array.from(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=","base64"))},
+ {name:"Opaque.bin", mimeType:"application/octet-stream", bytes:new Uint8Array([1,2,3])},
+ {name:"Broken.png", mimeType:"image/png", bytes:new Uint8Array([1,2,3,4])},
+].map(file => ({...file,id:new Bun.CryptoHasher("sha256").update(file.bytes).digest("hex")}));
+const attachmentInfo = (file:typeof attachmentFiles[number]) => ({id:file.id,name:file.name,mimeType:file.mimeType,size:file.bytes.length,sessionId:"attachments",createdAt:1});
+let attachmentStatus = 200, attachmentMalformed = "", holdAttachment = false;
+const transcriptEvents = (id: string) => id === "attachments" ? [
+ {id:"attached-event",sessionId:id,seq:1,createdAt:1,event:{type:"message",role:"user",content:"Recorded files",attachments:attachmentFiles.map(attachmentInfo)}},
+ {id:"other-event",sessionId:id,seq:2,createdAt:2,event:{type:"message",role:"user",content:"A separate message"}}
+] : id === "inline" ? [{id:"inline-message",sessionId:id,seq:1,createdAt:1,event:{type:"message",role:"user",content:"Inspect the recorded inline runs"}}] : id.startsWith("triggered") ? [{ id: "trigger-message", sessionId: id, seq: 1, createdAt: 1, event: { type: "message", role: "user", content: id === "triggered-no-instructions" ? "Recorded trigger session" : "Recorded trigger session\n<trigger_context>\n<trigger_instructions>\nRecorded instructions body\n</trigger_instructions>\n</trigger_context>" } }] : id === "handoffs" ? handoffEvents.map((event,index)=>({id:index?`handoff-event-${index+1}`:projectionId,sessionId:id,seq:index+1,createdAt:index+1,event})) : id === "workflow-details" ? workflowEvents.map((event, index) => ({id: `workflow-event-${index + 1}`, sessionId: id, seq: index + 1, createdAt: index + 1, event})) : id === "contexts" ? ["context-one", "context two/?&", "no-context"].map((eventId, index) => ({
  id: eventId, sessionId: id, seq: index + 1, createdAt: index + 1,
  event: { type: "message", role: "user", content: `Context fixture message ${index + 1}`, ...(index < 2 ? { contextLines: [`Recorded window ${index + 1}`, `Recorded project ${index + 1}`] } : {}) },
 })) : id === "thinking" ? thinkingEvents.map((event, index) => ({ id: `thinking-event-${index + 1}`, sessionId: id, seq: index + 1, createdAt: index + 1, event })) : id === "tools" ? toolEvents.map((event, index) => ({
@@ -130,7 +141,7 @@ const completedEntries = (id:string) => {
  }
  return rows;
 };
-const readActions = new Set(["ListAgents","GetAgent","GetSession","GetSessionEvent","GetRun","GetAgentTrigger","ListSessions","ListRuns","ListAgentTriggers","ListAgentMemoryDir","ReadAgentMemoryFile","ListAgentTools","ListAgentCollaborators","ListAgentInvites","ListModelProviders","ListProviderModels","ListMcpServers","ListSigningIdentities","GetRunJournal"]);
+const readActions = new Set(["ListAgents","GetAgent","GetSession","ReadSessionAttachment","GetSessionEvent","GetRun","GetAgentTrigger","ListSessions","ListRuns","ListAgentTriggers","ListAgentMemoryDir","ReadAgentMemoryFile","ListAgentTools","ListAgentCollaborators","ListAgentInvites","ListModelProviders","ListProviderModels","ListMcpServers","ListSigningIdentities","GetRunJournal"]);
 const ok = (value: unknown) => new Response(cbor.encode(value) as unknown as BodyInit,{headers:{"content-type":"application/cbor"}});
 const fail = (status: number, message: string) => new Response(cbor.encode({_:"Error",message}) as unknown as BodyInit,{status,headers:{"content-type":"application/cbor"}});
 const agent = (id: string, node: string) => ({id,account:inlineShared ? sharedOwner : account,...(inlineShared ? {accessRole:"writer"} : {}),definition:{name:renamed || `${node} ${id === "beta" ? "Beta assistant" : "Alpha assistant"}`,systemPrompt:"Fixture",model:"fixture",modelProvider:"fixture",mcpServers:[]},stateDir:"",status:"idle",createdAt:1,updatedAt:2});
@@ -238,6 +249,17 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch
       return ok({ _: "GetRunResponse", run: { ...run(id, node), plan: { steps: [{ id: "recorded-step", label: "Recorded plan step", status: "done" }] } } });
     }
     if (action._ === "GetRun" && id === "review" && runReadStatus !== 200) return fail(runReadStatus, "Run read failed");
+    if (action._ === "ReadSessionAttachment") {
+      const file = attachmentFiles.find(item => item.id === action.attachmentId);
+      const status = attachmentStatus, malformed = attachmentMalformed;
+      if (holdAttachment) await new Promise<void>(resolve => pending.add(resolve));
+      if (status !== 200 || !file) return fail(file ? status : 404, "Attachment read failed");
+      const info = attachmentInfo(file);
+      if (malformed === "session") info.sessionId = "other-session";
+      if (malformed === "file") info.id = "other-id";
+      if (malformed === "size") info.size++;
+      return ok({_:malformed === "type" ? "GetSessionResponse" : "ReadSessionAttachmentResponse", attachment:info, data:malformed === "bytes" ? new Uint8Array(file.bytes.length) : file.bytes});
+    }
     if (action._ === "GetSessionEvent") {
       const status = payloadStatus, malformed = malformedPayload;
       if (holdPayload) await new Promise<void>(r => pending.add(r));
@@ -265,10 +287,27 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch
     switch(action._){
       case "GetAgent":return ok({_:"GetAgentResponse",agent:agent(id,node),sessionCount:0});
       case "GetSession": {
-       if(earlierWindow && id === "contexts") {
+       if(earlierWindow && ["contexts", "tools", "thinking", "handoffs"].includes(id)) {
         const current = session(id, node);
-        const row = (seq:number) => ({id:"archived-" + seq, seq, sessionId:id, createdAt:seq,
+        const historicalMessage = (seq:number) => ({id:"archived-" + seq, seq, sessionId:id, createdAt:seq,
          event:{type:"message",role:"user",content:"Historical message " + seq,contextLines:["Historical context " + seq]}});
+        const rows = transcriptEvents(id);
+        const row = (seq: number) => {
+          // The result is recent, the call is on the previous page and the
+          // first tool in its display group is one page further back.
+          if (id === "tools") {
+            if (seq === 100) return { ...historicalMessage(seq), event: {type:"tool_call", id:"first-call", name:"status", input:{}} };
+            if (seq === 101 || seq === 201) return { ...rows[seq === 101 ? 1 : 2], seq, createdAt:seq };
+            if (seq > 101 && seq < 201) return { ...historicalMessage(seq), event:{type:"tool_result", toolCallId:"first-call", name:"status", output:{}} };
+          }
+          if (id === "thinking" || id === "handoffs") {
+            const offset = seq < 101 ? 5 : 105;
+            const index = seq - offset;
+            if (index >= 0 && index < rows.length && (index < 2) === (seq < 101))
+              return { ...rows[index], seq, createdAt:seq };
+          }
+          return historicalMessage(seq);
+        };
         if(!action.beforeSeq)return ok({_:"GetSessionResponse",session:current,events:[row(201),row(202)],hasMoreBefore:true});
         const before=action.beforeSeq, status=earlierStatus, malformed=earlierMalformed;
         if(earlierHold)await new Promise<void>(resolve=>pending.add(resolve));
@@ -384,7 +423,7 @@ async function fresh(fn:(page:Page)=>Promise<void>){
  page.setDefaultNavigationTimeout(process.env.CYBERDECK_TEST_ORIGIN ? 30000 : 12000);
  await page.route("**/*",route=>new URL(route.request().url()).origin===server.url.origin?route.continue():route.abort());
  try{await fn(page);}catch(e){console.error(JSON.stringify({title:await page.title(),body:(await page.locator("body").innerText()).slice(0,1800),errors,actions:actions.slice(-15)}));throw e;}
- finally{earlierWindow=false;earlierHold=false;earlierStatus=200;earlierMalformed="";recordedFailureOwner="";recordedStatus=200;recordedMalformed="";holdRecorded=false;durableOnly=false;recordedEmpty=false;recordedLive=false;runStreamTarget="";inlineShared=false;inlineComposerAvailable=false;inlineWindowed=false;holdInlineCard=false;inlineLive=false;inlineErrorFixture=false;holdInlineGraph=false;inlineGraphStatus=200;holdInlineJournal=false;inlineWorkflow=false;malformedInlineCard="";inlineListStatus=200;inlineCardStatus=200;holdInlineList=false;malformedInlineList="";inlineSucceeded=false;runStreamMode="";holdTriggerRead=false;triggerReadStatus=200;nestedRunTools=false;holdRunJournal=false;holdHandoffRead=false;handoffReadStatus=200;detailRunStatus=200;holdDetailRun=false;malformedDetailRun="";graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
+ finally{attachmentStatus=200;attachmentMalformed="";holdAttachment=false;earlierWindow=false;earlierHold=false;earlierStatus=200;earlierMalformed="";recordedFailureOwner="";recordedStatus=200;recordedMalformed="";holdRecorded=false;durableOnly=false;recordedEmpty=false;recordedLive=false;runStreamTarget="";inlineShared=false;inlineComposerAvailable=false;inlineWindowed=false;holdInlineCard=false;inlineLive=false;inlineErrorFixture=false;holdInlineGraph=false;inlineGraphStatus=200;holdInlineJournal=false;inlineWorkflow=false;malformedInlineCard="";inlineListStatus=200;inlineCardStatus=200;holdInlineList=false;malformedInlineList="";inlineSucceeded=false;runStreamMode="";holdTriggerRead=false;triggerReadStatus=200;nestedRunTools=false;holdRunJournal=false;holdHandoffRead=false;handoffReadStatus=200;detailRunStatus=200;holdDetailRun=false;malformedDetailRun="";graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
 }
 const href=(path:string,node="")=>`${server.url}#/seed?${new URLSearchParams({r:path,...(node?{node}:{})})}`;
 const title=(page:Page,value:string)=>page.waitForFunction(value=>document.title===value,value);
@@ -3475,3 +3514,177 @@ test("Seed earlier message stays visible through transcript resize and releases 
   await page.evaluate(() => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
   expect(await row.evaluate(element => element.getBoundingClientRect().bottom < element.closest("[data-seed-transcript-scroll]")!.getBoundingClientRect().top)).toBe(true);
 }), browserBudget);
+
+const archivedToolHref = (view: string) => {
+ const query = new URLSearchParams({panel:"tool", tool:toolId});
+ return view === "Seed" ? href("session/tools?" + query, "peer-b")
+  : `${server.url}#/term?${new URLSearchParams({session:"seed-tools",node:"peer-b",filter:"peer-b"})}&${query}`;
+};
+
+for (const view of ["Seed", "Sessions"]) {
+ test(`Seed archived selection ${view} restores a split call and result and canonicalizes the owning row once`, () => fresh(async page => {
+  earlierWindow = true;
+  const start = reads.length;
+  await page.goto(archivedToolHref(view));
+  await title(page, toolTitle("peer-b", "Tool input/output", " · Peer B"));
+  const dialog = page.getByRole("dialog");
+  expect(await dialog.innerText()).toContain("Truncated fixture input");
+  expect(await dialog.innerText()).toContain("Truncated fixture output");
+  const canonical = page.url(), outer = new URLSearchParams(new URL(canonical).hash.split("?")[1]);
+  const params = view === "Seed" ? new URLSearchParams(outer.get("r")!.split("?")[1]) : outer;
+  expect(params.get("event")).toBe("archived-100");
+  expect(previousPages(start).map(({node,action}) => [node,action.beforeSeq])).toEqual([["peer-b",201],["peer-b",101]]);
+  const historySize = await page.evaluate(() => history.length);
+  const composer = page.locator("textarea").first();
+  await composer.evaluate(el => el.dataset.archiveOwner = "retained");
+  await page.keyboard.press("Escape"); await dialog.waitFor({state:"hidden"});
+  await page.goBack(); await title(page, toolTitle("peer-b", "Tool input/output", " · Peer B"));
+  expect(await composer.getAttribute("data-archive-owner")).toBe("retained");
+  expect(page.url()).toBe(canonical);
+  expect(await page.evaluate(() => history.length)).toBe(historySize + 1);
+  await page.goForward(); await dialog.waitFor({state:"hidden"});
+  await page.goBack(); await page.reload();
+  await title(page, toolTitle("peer-b", "Tool input/output", " · Peer B"));
+  await fresh(async tab => {
+   await tab.goto(canonical); await title(tab, toolTitle("peer-b", "Tool input/output", " · Peer B"));
+   expect(await tab.getByRole("dialog").innerText()).toContain("Truncated fixture input");
+  });
+ }), browserBudget);
+
+ test(`Seed archived selection ${view} restores both handoffs and keeps a valid sibling on exhaustion`, () => fresh(async page => {
+  earlierWindow = true;
+  await page.goto(handoffHref(view,handoffTokens,"peer-b")); await title(page,handoffTitle(2,"peer-b"));
+  await page.getByText("Recorded incoming handoff",{exact:true}).waitFor();
+  await page.getByText("Recorded outgoing handoff",{exact:true}).waitFor();
+  await withinViewport(page,page.locator("[data-handoff-token]").first());
+  const owner = page.getByPlaceholder("Untitled session");
+  await owner.evaluate(el => el.dataset.archiveOwner = "retained");
+  const link = handoffHref(view,[handoffTokens[0],"t:absent"],"peer-b");
+  await page.evaluate(url => location.hash = new URL(url).hash,link);
+  await title(page,"Handoff not found · Seed · Peer B · Cyberdeck");
+  await page.getByText("Recorded incoming handoff",{exact:true}).waitFor();
+  await page.goBack(); await title(page,handoffTitle(2,"peer-b"));
+  expect(await owner.getAttribute("data-archive-owner")).toBe("retained");
+  await page.reload(); await title(page,handoffTitle(2,"peer-b"));
+ }), browserBudget);
+
+ test(`Seed archived selection ${view} restores separate tool detail and thinking disclosures`, () => fresh(async page => {
+  earlierWindow = true;
+  await page.goto(detailHref(view,"thinking",thinkingIds,"peer-b"));
+  await title(page,detailTitle(2,"peer-b"));
+  expect(await page.locator("[data-tool-detail]").count()).toBe(2);
+  await page.goto(thinkingHref(view === "Seed" ? "seed" : "term", thinkingIds, "peer-b"));
+  await title(page,thinkingTitle(2,"peer-b"));
+  expect(await page.locator('[data-thinking-group] button[title="Hide tool calls"]').count()).toBe(2);
+ }), browserBudget);
+
+ test(`Seed archived selection ${view} preserves the requested inspector through a denied page and retry`, () => fresh(async page => {
+  earlierWindow = true; earlierHold = true; earlierStatus = 403;
+  await page.goto(archivedToolHref(view)); await title(page,"Loading earlier transcript entries · Seed · Peer B · Cyberdeck");
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("status").waitFor();
+  const url = page.url(), size = await page.evaluate(() => history.length);
+  earlierHold = false; for (const release of pending) release(); pending.clear();
+  await title(page,"Access denied · Seed · Peer B · Cyberdeck");
+  expect(page.url()).toBe(url);
+  earlierStatus = 200; await dialog.getByRole("button",{name:/retry/i}).click();
+  await title(page, toolTitle("peer-b", "Tool input/output", " · Peer B"));
+  expect(await page.evaluate(() => history.length)).toBe(size);
+ }), browserBudget);
+}
+
+const attachmentHref = (view: string, {file = attachmentFiles[0].id, event = "attached-event", node = "peer-b"} = {}) => {
+ const selection = new URLSearchParams({panel:"attachment",event,attachment:file});
+ return view === "Seed" ? href("session/attachments?" + selection,node)
+  : `${server.url}#/term?${new URLSearchParams({session:"seed-attachments",filter:"retained",node})}&${selection}`;
+};
+const attachmentTitle = (name: string) => name + " · peer-b First conversation · Seed session · Peer B · Cyberdeck";
+for (const view of ["Seed","Sessions"]) {
+ test(`Seed attachment ${view} restores signed text in a new tab and keeps parent history and composer`, () => fresh(async page => {
+  const start = reads.length;
+  await page.goto(attachmentHref(view));
+  await title(page,attachmentTitle("Notes & draft.txt"));
+  const dialog = page.getByRole("dialog");
+  await dialog.getByText("Read-only attachment",{exact:false}).waitFor();
+  expect(await dialog.locator("pre").innerText()).toContain("<script>literal text</script>");
+  const href = page.url(), size = await page.evaluate(() => history.length);
+  const composer = page.locator("textarea").first();
+  await composer.evaluate(el => el.dataset.attachmentOwner = "retained");
+  await page.keyboard.press("Escape"); await dialog.waitFor({state:"hidden"});
+  await page.goBack(); await title(page,attachmentTitle("Notes & draft.txt"));
+  expect(page.url()).toBe(href); expect(await composer.getAttribute("data-attachment-owner")).toBe("retained");
+  expect(await page.evaluate(() => history.length)).toBe(size+1);
+  await page.goForward(); await dialog.waitFor({state:"hidden"});
+  await page.getByRole("link",{name:"Pixel.png",exact:true}).click();
+  await title(page,attachmentTitle("Pixel.png")); await dialog.getByRole("img",{name:"Pixel.png"}).waitFor();
+  await page.reload(); await title(page,attachmentTitle("Pixel.png"));
+  expect(await dialog.getByRole("img").evaluate((img: HTMLImageElement) => img.decode().then(() => img.naturalWidth))).toBe(1);
+  await fresh(async tab => {
+   await tab.goto(href); await title(tab,attachmentTitle("Notes & draft.txt"));
+   await tab.getByRole("dialog").getByText("Read-only attachment",{exact:false}).waitFor();
+  });
+  const signed = reads.slice(start).filter(row => row.action._ === "ReadSessionAttachment");
+  expect(signed.map(row => row.node)).toEqual(["peer-b","peer-b","peer-b","peer-b"]);
+  expect(signed.every(row => row.action.sessionId === "attachments")).toBe(true);
+ }), browserBudget);
+
+ test(`Seed attachment ${view} requires the attachment on the selected event and canonicalizes invalid links`, () => fresh(async page => {
+  const start = reads.length;
+  await page.goto(attachmentHref(view,{event:"other-event"}));
+  await title(page,"Attachment not found · Seed · Peer B · Cyberdeck");
+  await page.getByRole("alert").getByText("This attachment is not on the selected message.").waitFor();
+  await page.goto(attachmentHref(view,{file:"invalid"}));
+  await title(page,"Message · peer-b First conversation · Seed session · Peer B · Cyberdeck");
+  expect(page.url()).not.toContain("invalid");
+  expect(reads.slice(start).some(row => row.action._ === "ReadSessionAttachment")).toBe(false);
+ }), browserBudget);
+}
+for (const [status,malformed,expected] of [[403,"","Access denied"],[404,"","Attachment not found"],[503,"","Attachment unavailable"],
+ [200,"session","Attachment unavailable"],[200,"file","Attachment unavailable"],[200,"size","Attachment unavailable"],[200,"bytes","Attachment unavailable"],[200,"type","Attachment unavailable"]] as const) {
+ test(`Seed attachment handles ${status} ${malformed || "read"} and retries without rewriting the link`, () => fresh(async page => {
+  attachmentStatus=status; attachmentMalformed=malformed;
+  await page.goto(attachmentHref("Seed"));
+  await title(page,expected + " · Seed · Peer B · Cyberdeck");
+  const dialog=page.getByRole("dialog"), url=page.url(), size=await page.evaluate(() => history.length);
+  expect(await dialog.locator("pre").count()).toBe(0);
+  attachmentStatus=200;attachmentMalformed="";
+  await dialog.getByRole("button",{name:/Retry/i}).click();
+  await title(page,attachmentTitle("Notes & draft.txt"));
+  expect(page.url()).toBe(url);expect(await page.evaluate(() => history.length)).toBe(size);
+ }), browserBudget);
+}
+
+test("Seed attachment releases late signed reads when the node changes or the browser locks", () => fresh(async page => {
+ holdAttachment=true;attachmentStatus=403;
+ await page.goto(attachmentHref("Sessions"));
+ await title(page,"Loading attachment · Seed · Peer B · Cyberdeck");
+ await page.waitForFunction(() => !!document.querySelector('[role="dialog"] [role="status"]'));
+ await waitInlineFixture(() => pending.size === 1);
+ holdAttachment=false;attachmentStatus=200;
+ await page.evaluate(link => location.hash = new URL(link).hash, attachmentHref("Sessions",{node:"peer-a",file:attachmentFiles[2].id}));
+ await page.getByText("Preview unavailable for this file type.").waitFor();
+ for (const release of pending) release(); pending.clear();
+ await title(page,"Opaque.bin · peer-a First conversation · Seed session · Peer A · Cyberdeck");
+ holdAttachment=true;
+ await page.evaluate(link => location.hash = new URL(link).hash, attachmentHref("Sessions",{file:attachmentFiles[1].id}));
+ await waitInlineFixture(() => pending.size === 1);
+ await page.route("**/api/fs/list**", route => route.fulfill({status:401,json:{error:"Locked"}}));
+ await page.evaluate(() => location.hash = "#/files");
+ await title(page,"Locked · Cyberdeck");
+ for (const release of pending) release(); pending.clear();
+ await title(page,"Locked · Cyberdeck");
+ expect(await page.getByRole("dialog").count()).toBe(0);
+}), browserBudget);
+
+test("Seed attachment shows image errors and file metadata at phone and desktop widths", () => fresh(async page => {
+ for (const [width,colorScheme] of [[390,"light"],[1280,"dark"]] as const) {
+  await page.setViewportSize({width,height:820}); await page.emulateMedia({colorScheme});
+  for (const [index,state] of [[0,"text"],[1,"image"],[2,"metadata"],[3,"error"]] as const) {
+   await page.goto(attachmentHref("Seed",{file:attachmentFiles[index].id}));
+   await title(page,index === 3 ? "Attachment unavailable · Seed · Peer B · Cyberdeck" : attachmentTitle(attachmentFiles[index].name));
+   const dialog=page.getByRole("dialog");await dialog.waitFor();
+   const box=await dialog.boundingBox(); expect(box!.x).toBeGreaterThanOrEqual(0); expect(box!.x+box!.width).toBeLessThanOrEqual(width+1);
+   if(process.env.CYBERDECK_NAV_SHOTS) await page.screenshot({path:join(process.env.CYBERDECK_NAV_SHOTS,`attachment-${state}-${width}-${colorScheme}.png`),animations:"disabled"});
+  }
+ }
+}), Math.max(browserBudget,90000));
