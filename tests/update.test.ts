@@ -1,10 +1,10 @@
 // Self-update endpoint + fleet convergence plumbing.
 import { test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { startTestServer, testConfig, type TestServer } from "./helpers";
-import { currentCommit } from "../src/daemon/updater";
+import { currentCommit, getLastUpdateAttempt, resetLastUpdateAttempt, setUpdatePersistPath } from "../src/daemon/updater";
 
 let srv: TestServer;
 beforeAll(() => {
@@ -126,6 +126,58 @@ test("rev-list counts local commits that origin does not have (ahead of origin)"
     await aheadProc.exited;
     expect(parseInt((await new Response(aheadProc.stdout).text()).trim(), 10)).toBe(3);
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("lastAttempt persists across a simulated daemon restart", async () => {
+  // A chronic auto-update failure must still be visible on the Deploy widget right after a daemon
+  // restart, not hidden for up to an hour until the next cycle writes a fresh in-memory copy.
+  // setUpdatePersistPath wires a JSON file; a later call with the same path (the "restart") reloads it.
+  const dir = mkdtempSync(join(tmpdir(), "cyberdeck-lastattempt-"));
+  const path = join(dir, "last-update.json");
+  try {
+    resetLastUpdateAttempt();
+    setUpdatePersistPath(path);
+    // No prior file -> no attempt loaded, no file written yet.
+    expect(getLastUpdateAttempt()).toBeNull();
+    expect(existsSync(path)).toBe(false);
+
+    // Seed the file as if a previous process had recorded a failure, then "restart" by re-pointing
+    // the persist path. The new process reads what was there.
+    const failure = { at: Date.now() - 20 * 60 * 1000, ok: false, detail: "git pull failed: fatal: Not possible to fast-forward, aborting." };
+    writeFileSync(path, JSON.stringify(failure));
+    resetLastUpdateAttempt(); // wipes memory AND the file if a path is set
+    expect(existsSync(path)).toBe(false);
+
+    // Re-seed and re-point to simulate boot after a prior process wrote the file.
+    writeFileSync(path, JSON.stringify(failure));
+    setUpdatePersistPath(null); // detach so the next set is a true cold boot
+    resetLastUpdateAttempt();
+    writeFileSync(path, JSON.stringify(failure)); // reset deleted it; put it back
+    setUpdatePersistPath(path);
+    const loaded = getLastUpdateAttempt();
+    expect(loaded).not.toBeNull();
+    expect(loaded!.ok).toBe(false);
+    expect(loaded!.detail).toContain("Not possible to fast-forward");
+
+    // Garbage in the file does not crash boot and leaves lastAttempt null.
+    setUpdatePersistPath(null);
+    resetLastUpdateAttempt();
+    writeFileSync(path, "not json");
+    setUpdatePersistPath(path);
+    expect(getLastUpdateAttempt()).toBeNull();
+
+    // A missing `detail` field is rejected, not loaded as half-valid.
+    setUpdatePersistPath(null);
+    resetLastUpdateAttempt();
+    writeFileSync(path, JSON.stringify({ at: 1, ok: false }));
+    setUpdatePersistPath(path);
+    expect(getLastUpdateAttempt()).toBeNull();
+  } finally {
+    // Leave persistence off for the rest of the suite.
+    setUpdatePersistPath(null);
+    resetLastUpdateAttempt();
     rmSync(dir, { recursive: true, force: true });
   }
 });

@@ -5,7 +5,8 @@ import { createServer, VERSION } from "./server";
 import { runScan } from "./indexer/scan";
 import { runDataScan } from "./indexer/data";
 import { startWatcher } from "./indexer/watch";
-import { startAutoUpdater } from "./updater";
+import { startAutoUpdater, setUpdatePersistPath } from "./updater";
+import { join } from "path";
 
 const cfg = loadConfig();
 configureProbeTransport(cfg.probe);
@@ -44,4 +45,8 @@ setInterval(() => {
   runScan(db, cfg).catch((err) => console.error("periodic scan failed:", err));
 }, 60 * 60 * 1000);
 if (cfg.watch) startWatcher(db, cfg);
+// Mirror the updater's last-attempt record to disk BEFORE the auto-updater starts,
+// so a daemon that just rebooted on a chronically failing node already shows the
+// prior failure on the Deploy widget instead of hiding it for an hour.
+setUpdatePersistPath(join(CYBERDECK_HOME, "last-update.json"));
 if (cfg.autoUpdate) startAutoUpdater(db);

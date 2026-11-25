@@ -5,6 +5,7 @@ import { transportFetch } from "./probe";
 // the new code. Nodes nudge peers whose commit differs, so an update pushed
 // anywhere propagates across the fleet within minutes.
 import { dirname, join } from "path";
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
 import type { Database } from "bun:sqlite";
 import { bus } from "./events";
 
@@ -41,11 +42,40 @@ export async function currentCommit(): Promise<string> {
 /** The outcome of the last `applyUpdate` call, kept in memory so the dashboard can show
  *  that the auto-updater has been failing silently (a diverged node retries every hour
  *  and quietly aborts; without this, the widget can only guess from the drift counts).
- *  `detail` is the trimmed error message or short success summary — safe to show. */
+ *  `detail` is the trimmed error message or short success summary — safe to show.
+ *  Also persisted to disk (see `setUpdatePersistPath`) so a daemon restart does not hide
+ *  a chronic failure for up to an hour until the next auto-update cycle refills it. */
 let lastAttempt: { at: number; ok: boolean; detail: string } | null = null;
 export const getLastUpdateAttempt = () => lastAttempt;
+/** Where `lastAttempt` is mirrored to disk; `null` (the default and the test mode) skips persistence entirely,
+ *  so unit tests never touch the real ~/.cyberdeck. Main wires it to `~/.cyberdeck/last-update.json`. */
+let persistPath: string | null = null;
+export function setUpdatePersistPath(p: string | null): void {
+  persistPath = p;
+  if (!p) return;
+  // Eager load: a restart's first dashboard read already sees the last recorded attempt,
+  // closing the window where a chronic failure would be invisible between boot and the
+  // next hourly auto-update cycle.
+  try {
+    if (!existsSync(p)) return;
+    const parsed = JSON.parse(readFileSync(p, "utf8"));
+    if (parsed && typeof parsed.at === "number" && typeof parsed.ok === "boolean" && typeof parsed.detail === "string") {
+      lastAttempt = { at: parsed.at, ok: parsed.ok, detail: parsed.detail };
+    }
+  } catch (err) {
+    console.error("updater: could not load persisted lastAttempt:", err);
+  }
+}
+function persistLastAttempt(): void {
+  if (!persistPath || !lastAttempt) return;
+  try { writeFileSync(persistPath, JSON.stringify(lastAttempt)); }
+  catch (err) { console.error("updater: could not persist lastAttempt:", err); }
+}
 /** Test-only: wipe the recorded attempt so an earlier run in the same process does not bleed in. */
-export function resetLastUpdateAttempt(): void { lastAttempt = null; }
+export function resetLastUpdateAttempt(): void {
+  lastAttempt = null;
+  if (persistPath && existsSync(persistPath)) { try { unlinkSync(persistPath); } catch {} }
+}
 
 export async function checkForUpdate(): Promise<{ commit: string; behind: number; ahead: number; head?: string; error?: string }> {
   await ensureBoot();
@@ -99,6 +129,7 @@ export async function applyUpdate(): Promise<{ ok: boolean; detail: string }> {
     console.log(`updated to ${target.out}; restarting`);
     const detail = `updated to ${target.out}, restarting`;
     lastAttempt = { at: Date.now(), ok: true, detail };
+    persistLastAttempt();
     // Give the HTTP response time to flush, then let the supervisor restart us.
     setTimeout(() => process.exit(0), 750);
     return { ok: true, detail };
@@ -107,6 +138,7 @@ export async function applyUpdate(): Promise<{ ok: boolean; detail: string }> {
     bus.emit({ kind: "update:failed", error: detail });
     console.error("self-update failed:", detail);
     lastAttempt = { at: Date.now(), ok: false, detail };
+    persistLastAttempt();
     updating = false;
     return { ok: false, detail };
   }
