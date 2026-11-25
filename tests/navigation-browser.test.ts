@@ -26,6 +26,9 @@ const entry = (name: string, size = 1) => ({ name, size, type: "file", mtime: si
 const session = (id: string) => ({ id, title: `Shell ${id}`, cwd: "/home/test", cmd: null, tool: "shell", prompt: null, runner: "pty", state: "running", createdAt: 1, exitedAt: null, exitCode: null, clients: 0, lastOutputAt: null, bells: 0, busy: false });
 const server = Bun.serve<{legacy:boolean;terminal?:boolean}>({port:0,hostname:"127.0.0.1",async fetch(req, server) {
   const u = new URL(req.url), original = u.pathname;
+  // The primary-title matrix represents a reachable screen. The dedicated
+  // screen suite exercises disconnects, refusal and retry.
+  if (original === "/api/kiosk/stream" && server.upgrade(req,{data:{legacy:false,terminal:true}})) return;
   if (original.endsWith("/sessions/one/attach") || original.endsWith("/sessions/two/attach") || original.endsWith("/sessions/remote/attach")) {
     if (server.upgrade(req,{data:{legacy:false,terminal:true}})) return;
   }
