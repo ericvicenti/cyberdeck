@@ -48,21 +48,21 @@ export function targetsOf(f: FleetNodes | null, selfName = "local"): Target[] {
   return [{ id: "", name: f?.self.name ?? selfName, online: true, self: true }, ...(f?.nodes ?? []).map((n) => ({ id: n.id, name: n.name, online: n.online, self: false }))];
 }
 
-export function useFleet(intervalMs = 30_000): { fleet: FleetNodes | null; targets: Target[]; error: string | null; refresh: () => Promise<void> } {
+export function useFleet(intervalMs = 30_000): { fleet: FleetNodes | null; targets: Target[]; error: string | null; unauthorized: boolean; refresh: () => Promise<void> } {
   const [fleet, setFleet] = useState<FleetNodes | null>(cache?.value ?? null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
   useEffect(() => {
     let alive = true;
-    const tick = () => fetchNodes().then((f) => { if (alive) { setFleet(f); setError(null); } }).catch((e) => { if (alive) setError(e instanceof Error ? e.message : String(e)); });
+    const tick = () => fetchNodes().then((f) => { if (alive) { setFleet(f); setError(null); } }).catch((e) => { if (alive) setError(e instanceof Error ? e : new Error(String(e))); });
     tick();
     const iv = setInterval(tick, intervalMs);
-    const on = (f: FleetNodes) => { if (alive) setFleet(f); };
+    const on = (f: FleetNodes) => { if (alive) { setFleet(f); setError(null); } };
     listeners.add(on);
     return () => { alive = false; clearInterval(iv); listeners.delete(on); };
   }, [intervalMs]);
   const targets = useMemo(() => targetsOf(fleet), [fleet]);
-  const refresh = async () => { invalidateNodes(); try { setFleet(await fetchNodes()); } catch {} };
-  return { fleet, targets, error, refresh };
+  const refresh = async () => { invalidateNodes(); try { setFleet(await fetchNodes()); setError(null); } catch (e) { setError(e instanceof Error ? e : new Error(String(e))); } };
+  return { fleet, targets, error: error?.message ?? null, unauthorized: error instanceof ApiError && error.status === 401, refresh };
 }
 
 // ---- fan-out ----

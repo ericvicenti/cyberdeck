@@ -4,10 +4,11 @@ import { routeHash, updateParams, useRouteTitle } from "../lib/navigation";
 import type { FleetNodes } from "../lib/fleet";
 import { VolumeControl } from "../components/VolumeControl";
 
-export function ScreenRemote({ params, self, fleetError, refreshFleet }: { params: URLSearchParams; self?: FleetNodes["self"]; fleetError: string | null; refreshFleet: () => Promise<void> }) {
+export function ScreenRemote({ params, self, fleetError, unauthorized, onLocked, refreshFleet }: { params: URLSearchParams; self?: FleetNodes["self"]; fleetError: string | null; unauthorized: boolean; onLocked: () => void; refreshFleet: () => Promise<void> }) {
   const requested = params.get("node"), scroll = params.get("mode") === "scroll";
   const local = !requested || requested === self?.nodeId;
   const screen = self?.name || "this machine";
+  useEffect(() => { if (unauthorized) onLocked(); }, [unauthorized, onLocked]);
   const modeTitle = scroll ? "Scroll mode · Screen remote" : "Screen remote";
   const localHref = routeHash("remote", scroll ? { mode: "scroll" } : {});
   useEffect(() => {
@@ -25,7 +26,7 @@ export function ScreenRemote({ params, self, fleetError, refreshFleet }: { param
   const [generation, setGeneration] = useState(0);
   const send = (value: unknown) => { if (local && live && socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify(value)); };
   useEffect(() => {
-    if (!local) return;
+    if (!local || unauthorized) return;
     let stopped = false;
     setLive(false); setFailure(false); setStatus("Connecting to the screen…");
     let timer: ReturnType<typeof setTimeout>;
@@ -71,7 +72,7 @@ export function ScreenRemote({ params, self, fleetError, refreshFleet }: { param
     };
     connect();
     return () => { stopped = true; clearTimeout(timer); socket.current?.close(); gesture.current = null; };
-  }, [generation, local]);
+  }, [generation, local, unauthorized]);
   const point = (e: { clientX: number; clientY: number }) => {
     const c = canvas.current!, r = c.getBoundingClientRect();
     return { x: Math.max(0, Math.min(c.width - 1, (e.clientX - r.left) * c.width / r.width)), y: Math.max(0, Math.min(c.height - 1, (e.clientY - r.top) * c.height / r.height)) };

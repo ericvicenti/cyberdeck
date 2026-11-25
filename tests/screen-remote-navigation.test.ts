@@ -99,3 +99,12 @@ test("Screen remote unavailable fleet identity retries only the owner lookup",()
  await page.waitForURL(url("mode=scroll"));await title(page,"Scroll mode · Screen remote");
  expect(connections).toBe(start+1);expect(await page.evaluate(()=>history.length)).toBe(before);
 }),30000);
+
+test("Screen remote signed-out node links keep the requested URL at the token gate",()=>fresh(async page=>{
+ const start=connections;
+ await page.route("**/api/fleet/nodes",route=>route.fulfill({status:401,json:{error:"Authentication required"}}));
+ const link=url("mode=scroll&node=unpaired");await page.goto(link);await title(page,"Locked");
+ expect(page.url()).toBe(link);expect(connections).toBe(start);
+ expect(await page.locator("canvas").count()).toBe(0);
+ await page.reload();await title(page,"Locked");expect(page.url()).toBe(link);
+}),30000);

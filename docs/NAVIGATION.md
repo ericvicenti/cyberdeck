@@ -1418,7 +1418,7 @@ out-of-window owners, denied reads, malformed lineage and late navigation.
 `#/remote?mode=scroll` selects scrolling. A mode change keeps the screen socket,
 canvas and unsent input. Connection failures own the title, and **Reconnect**
 retries at the same URL. A link that explicitly names a different node leaves
-the local screen disconnected. Screen input, volume and kiosk navigation remain
+the local screen disconnected. An expired or absent credential opens the token gate at the requested remote URL. Screen input, volume and kiosk navigation remain
 explicit user actions. The fixture opens an isolated screen stream and records
 every outgoing command. Run `bun test tests/screen-remote-navigation.test.ts`.
 

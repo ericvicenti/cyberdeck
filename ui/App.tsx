@@ -53,7 +53,7 @@ export function App() {
   const [route, setRoute] = useState<Route>(parseHash());
   const [locked, setLocked] = useState(false);
   const [sessionDrafts] = useState<SessionDraftStore>(() => ({ values: new Map(), pending: new Set(), generation: 0 }));
-  const { fleet, error: fleetError, refresh: refreshFleet } = useFleet();
+  const { fleet, error: fleetError, unauthorized: fleetUnauthorized, refresh: refreshFleet } = useFleet();
   const knownRoute = NAV.some(item => item.view === route.view) || ["edit", "remote", "storage"].includes(route.view);
   // a machine-bound view remounts when its machine changes, so nothing of the old machine lingers
   const nodeId = route.params.get("node") ?? "";
@@ -122,7 +122,7 @@ export function App() {
 
   return (
     <>
-    {route.view === "remote" && <ScreenRemote params={route.params} self={fleet?.self} fleetError={fleetError} refreshFleet={refreshFleet} />}
+    {route.view === "remote" && <ScreenRemote params={route.params} self={fleet?.self} fleetError={fleetError} unauthorized={fleetUnauthorized} onLocked={lock} refreshFleet={refreshFleet} />}
     <div style={route.view === "remote" ? { display: "none" } : undefined} inert={route.view === "remote"} className="scanlines flex h-[100dvh] flex-col overflow-hidden bg-zinc-950 text-zinc-200">
       {/* title bar: game HUD */}
       <header className="hud-chrome flex h-9 shrink-0 items-center gap-2 border-b px-3">
