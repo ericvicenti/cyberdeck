@@ -62,6 +62,8 @@ const toolEvents = [
  { type: "tool_result", toolCallId: "continued-call", name: "continue_session", output: { sessionId: "two", title: "Recorded successor" } },
  { type: "message", role: "assistant", content: "These are recorded tool results" },
 ];
+let recordedSteps = false, stepGraphStatus = 200, largeGraph = false, outsideRead = 200, outsideMode = "", holdOutside = false;
+const stepChild = "script step /?&", outsideChild = "late:child /?&", outsideParent = "archived parent";
 const workflowId = "workflow /?&";
 const workflowEvents = [
  { type: "message", role: "user", content: "Inspect a recorded workflow" },
@@ -125,6 +127,11 @@ const completedEntries = (id:string) => {
  const rows:any[]=[];
  const append=(seq:number,entry:any)=>rows.push({runId:id,seq,createdAt:seq,entry});
  if(recordedEmpty)return rows;
+ if(largeGraph && id===outsideChild) {
+  append(1,{kind:"call",op:"tool",callSeq:1,tool:"read",input:{path:"Archived step input"}});
+  append(2,{kind:"result",callSeq:1,status:"succeeded",output:{content:"Archived step output"}});
+  append(3,{kind:"log",level:"info",message:"Archived step activity",detail:"Full archived activity"});
+ }
  if(inlineJournalOwner(id))rows.push(...inlineJournalEntries(id));
  if(id==="activity")for(let seq=1;seq<=(durableOnly ? 120 : 2);seq++)append(seq,{kind:"log",level:"info",message:`Recorded activity ${seq}`,detail:`Full recorded detail ${seq}`});
  if(id==="failed-run")for(let index=1;index<=7;index++){
@@ -228,6 +235,19 @@ const server = Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:60,async fetch
       if(holdInlineGraph)await new Promise<void>(resolve=>pending.add(resolve));
       if(status !== 200)return fail(status,"Recorded inline graph failed");
       return ok({_:"ListRunsResponse",runs:inlineErrorFixture ? [{...run(inlineChildId(action.rootRunId),node),rootRunId:action.rootRunId,parentRunId:action.rootRunId,depth:1,sessionId:"inline",planStepId:"inline-step",status:"failed",title:"Recorded inline child",error:{code:"INLINE_CHILD_ERROR",message:"Recorded inline child error",detail:{recorded:"Child error detail"}}}] : []});
+    }
+    if (recordedSteps && action._ === "ListRuns" && action.rootRunId === "detail-run") {
+      if (stepGraphStatus !== 200) return fail(stepGraphStatus, "Recorded steps unavailable");
+      return ok({_: "ListRunsResponse", runs:[{...run(stepChild,node),rootRunId:"detail-run",parentRunId:"detail-run",depth:1,kind:"script",planStepId:"recorded-step",title:"Transform dataset",status:"failed",error:{code:"STEP_ERROR",message:"Recorded transformation failed",detail:{operation:"fixture mapping"}}}]});
+    }
+    if (largeGraph && action._ === "ListRuns" && action.rootRunId === "failed-run") {
+      return ok({_: "ListRunsResponse", runs:Array.from({length:Math.min(action.limit || 50,200)},(_,i)=>({...run(`recent-step-${i}`,node),depth:1,parentRunId:"failed-run",rootRunId:"failed-run"}))});
+    }
+    if (largeGraph && action._ === "GetRun" && [outsideChild,outsideParent].includes(id)) {
+      const status=outsideRead, mode=outsideMode;
+      if(holdOutside)await new Promise<void>(resolve=>pending.add(resolve));
+      if(status!==200)return fail(status,"Archived step unavailable");
+      return ok({_: "GetRunResponse",run:{...run(id,node),rootRunId:mode==="root"?"other":"failed-run",account:mode==="account"?"other":account,depth:id===outsideChild?2:1,parentRunId:id===outsideChild?outsideParent:mode==="cycle"?outsideChild:"failed-run",planStepId:"child-step",title:id===outsideChild?"Archived transform":"Archived batch",error:{code:"ARCHIVED",message:"Archived transformation failed"},status:"failed"}});
     }
     if (action._ === "ListRuns" && action.rootRunId === "failed-run") {
       const status = graphStatus, malformed = malformedGraph;
@@ -423,7 +443,7 @@ async function fresh(fn:(page:Page)=>Promise<void>){
  page.setDefaultNavigationTimeout(process.env.CYBERDECK_TEST_ORIGIN ? 30000 : 12000);
  await page.route("**/*",route=>new URL(route.request().url()).origin===server.url.origin?route.continue():route.abort());
  try{await fn(page);}catch(e){console.error(JSON.stringify({title:await page.title(),body:(await page.locator("body").innerText()).slice(0,1800),errors,actions:actions.slice(-15)}));throw e;}
- finally{attachmentStatus=200;attachmentMalformed="";holdAttachment=false;earlierWindow=false;earlierHold=false;earlierStatus=200;earlierMalformed="";recordedFailureOwner="";recordedStatus=200;recordedMalformed="";holdRecorded=false;durableOnly=false;recordedEmpty=false;recordedLive=false;runStreamTarget="";inlineShared=false;inlineComposerAvailable=false;inlineWindowed=false;holdInlineCard=false;inlineLive=false;inlineErrorFixture=false;holdInlineGraph=false;inlineGraphStatus=200;holdInlineJournal=false;inlineWorkflow=false;malformedInlineCard="";inlineListStatus=200;inlineCardStatus=200;holdInlineList=false;malformedInlineList="";inlineSucceeded=false;runStreamMode="";holdTriggerRead=false;triggerReadStatus=200;nestedRunTools=false;holdRunJournal=false;holdHandoffRead=false;handoffReadStatus=200;detailRunStatus=200;holdDetailRun=false;malformedDetailRun="";graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
+ finally{recordedSteps=false;stepGraphStatus=200;largeGraph=false;outsideRead=200;outsideMode="";holdOutside=false;attachmentStatus=200;attachmentMalformed="";holdAttachment=false;earlierWindow=false;earlierHold=false;earlierStatus=200;earlierMalformed="";recordedFailureOwner="";recordedStatus=200;recordedMalformed="";holdRecorded=false;durableOnly=false;recordedEmpty=false;recordedLive=false;runStreamTarget="";inlineShared=false;inlineComposerAvailable=false;inlineWindowed=false;holdInlineCard=false;inlineLive=false;inlineErrorFixture=false;holdInlineGraph=false;inlineGraphStatus=200;holdInlineJournal=false;inlineWorkflow=false;malformedInlineCard="";inlineListStatus=200;inlineCardStatus=200;holdInlineList=false;malformedInlineList="";inlineSucceeded=false;runStreamMode="";holdTriggerRead=false;triggerReadStatus=200;nestedRunTools=false;holdRunJournal=false;holdHandoffRead=false;handoffReadStatus=200;detailRunStatus=200;holdDetailRun=false;malformedDetailRun="";graphStatus=200;holdGraph=false;malformedGraph="";serverDialogStatus=200;holdServerDialog=false;malformedServerDialog="";populatedServerDialog=false;emptySeedLists=false;childEmpty=false;childLists=false;childReadStatus=200;holdChildRead=false;malformedChild=false;globalPaged=false;globalListStatus=200;globalFailCursor="";holdGlobalList=false;malformedList="";hold=false;renamed="";memoryRemoved=false;memoryReadStatus=200;holdMemoryRead=false;sessionReadStatus=200;runReadStatus=200;listReadStatus=200;holdListRead=false;payloadStatus=200;holdPayload=false;malformedPayload="";for(const release of pending)release();pending.clear();await page.close();}
 }
 const href=(path:string,node="")=>`${server.url}#/seed?${new URLSearchParams({r:path,...(node?{node}:{})})}`;
 const title=(page:Page,value:string)=>page.waitForFunction(value=>document.title===value,value);
@@ -3684,7 +3704,114 @@ test("Seed attachment shows image errors and file metadata at phone and desktop 
    await title(page,index === 3 ? "Attachment unavailable · Seed · Peer B · Cyberdeck" : attachmentTitle(attachmentFiles[index].name));
    const dialog=page.getByRole("dialog");await dialog.waitFor();
    const box=await dialog.boundingBox(); expect(box!.x).toBeGreaterThanOrEqual(0); expect(box!.x+box!.width).toBeLessThanOrEqual(width+1);
+   if(width < 768) {
+    await dialog.evaluate(el=>Promise.all(el.getAnimations().map(animation=>animation.finished)));
+    for(const button of await dialog.getByRole("button").all()) {
+     const hit=await button.boundingBox();expect(hit!.height).toBeGreaterThanOrEqual(44);expect(hit!.width).toBeGreaterThanOrEqual(44);
+    }
+   }
    if(process.env.CYBERDECK_NAV_SHOTS) await page.screenshot({path:join(process.env.CYBERDECK_NAV_SHOTS,`attachment-${state}-${width}-${colorScheme}.png`),animations:"disabled"});
   }
  }
 }), Math.max(browserBudget,90000));
+
+function nestedErrorHref(view:string, child=stepChild, node="peer-b") {
+ const parent=detailHref(view,"workflow-details",[workflowId],node), token=JSON.stringify([workflowId,child]);
+ if(view==="Sessions")return parent+"&"+new URLSearchParams({"workflow-error":token});
+ const url=new URL(parent), query=new URLSearchParams(url.hash.split("?")[1]);
+ const path=query.get("r")!+"&"+new URLSearchParams({"workflow-error":token});
+ return href(path,node);
+}
+const workflowErrorTitle = "Error · Transform dataset · Seed workflow · Peer B · Cyberdeck";
+
+for(const view of ["Seed","Sessions"]) {
+ test(`Seed workflow steps ${view} links a finished step error, restores it and keeps the transcript`,()=>fresh(async page=>{
+  recordedSteps=true;
+  await page.goto(detailHref(view,"workflow-details",[workflowId],"peer-b"));
+  await title(page,detailTitle(1,"peer-b"));
+  const trigger=page.getByRole("button",{name:"Recorded transformation failed",exact:true});
+  await trigger.waitFor();await trigger.evaluate(el=>(el as any).__sameStep=true);
+  const before=await page.evaluate(()=>history.length);
+  await trigger.click();await title(page,workflowErrorTitle);
+  const link=page.url();expect(await page.evaluate(()=>history.length)).toBe(before+1);
+  await page.getByRole("dialog").getByText("STEP_ERROR",{exact:true}).waitFor();
+  await page.goBack();await title(page,detailTitle(1,"peer-b"));expect(await trigger.evaluate(el=>(el as any).__sameStep)).toBe(true);
+  await page.goForward();await title(page,workflowErrorTitle);
+  await page.reload();await title(page,workflowErrorTitle);await page.getByRole("dialog").waitFor();
+  await fresh(async tab=>{await tab.goto(link);await title(tab,workflowErrorTitle);await tab.getByRole("dialog").waitFor();});
+  expect(subscriptions.filter(s=>JSON.stringify(s).includes("detail-run")).length).toBe(0);
+ }),browserBudget);
+ test(`Seed workflow steps ${view} keeps the error URL through a denied tree read and Retry`,()=>fresh(async page=>{
+  recordedSteps=true;stepGraphStatus=403;
+  await page.goto(nestedErrorHref(view));await title(page,"Access denied · Seed · Peer B · Cyberdeck");
+  const link=page.url(),before=await page.evaluate(()=>history.length);
+  stepGraphStatus=200;await page.getByRole("button",{name:"Retry",exact:true}).click();await title(page,workflowErrorTitle);
+  expect(page.url()).toBe(link);expect(await page.evaluate(()=>history.length)).toBe(before);
+  await page.goto(nestedErrorHref(view,"absent"));await title(page,"Workflow error not found · Seed · Peer B · Cyberdeck");
+  await page.getByText("The selected error is not in this workflow.").waitFor();
+ }),browserBudget);
+}
+test("Seed workflow window resolves signed child and parent outside the list on reload",()=>fresh(async page=>{
+ largeGraph=true;
+ await page.goto(selectionHref("error="+encodeURIComponent(outsideChild),"peer-a"));
+ const expected="Error · Archived transform · Seed run · Peer A · Cyberdeck";
+ await title(page,expected);await page.getByRole("dialog").getByText("Archived transformation failed",{exact:true}).waitFor();
+ await page.reload();await title(page,expected);
+ expect(reads.some(r=>r.node==="peer-a" && r.action._==="ListRuns" && r.action.limit===200)).toBe(true);
+ for(const id of [outsideParent,outsideChild])expect(reads.some(r=>r.node==="peer-a" && r.action._==="GetRun" && r.action.runId===id)).toBe(true);
+}),browserBudget);
+test("Seed workflow window rejects foreign ancestry and releases a late read on navigation",()=>fresh(async page=>{
+ largeGraph=true;
+ for(const mode of ["root","account","cycle"]){
+  outsideMode=mode;await page.goto("about:blank");await page.goto(selectionHref("error="+encodeURIComponent(outsideChild)));
+  await page.waitForFunction(()=>/not found|unavailable/.test(document.title));expect(await page.getByRole("dialog").count()).toBe(0);
+  expect(reads.some(r=>r.action._==="GetRunJournal" && r.action.runId===outsideChild)).toBe(false);
+ }
+ outsideMode="";holdOutside=true;await page.goto("about:blank");await page.goto(selectionHref("error="+encodeURIComponent(outsideChild)));
+ await waitInlineFixture(()=>pending.size>0);
+ await page.evaluate(url=>location.hash=new URL(url).hash,href("session/two","peer-b"));
+ for(const release of pending)release();pending.clear();
+ await title(page,"peer-b Second conversation · Seed session · Peer B · Cyberdeck");
+ expect(await page.getByRole("dialog").count()).toBe(0);
+}),browserBudget);
+
+for(const view of ["Seed","Sessions","Run"])test(`Seed workflow steps ${view} journal workflow owns the linked error and clears it when the detail closes`,()=>fresh(async page=>{
+ recordedSteps=true;inlineWorkflow=true;nestedRunTools=true;
+ const parent=view==="Run"?selectionHref(runDetailQuery("wf-failed-run:99"),"peer-b"):inlineDetailHref(view,[inlineSelection()],"","peer-b");
+ await page.goto(parent);
+ await page.getByRole("button",{name:"Recorded transformation failed",exact:true}).click();await title(page,workflowErrorTitle);
+ const link=page.url();await page.reload();await title(page,workflowErrorTitle);await page.getByRole("dialog").waitFor();
+ await page.keyboard.press("Escape");await page.getByRole("dialog").waitFor({state:"hidden"});
+ expect(page.url()).not.toBe(link);await page.goBack();await title(page,workflowErrorTitle);
+}),browserBudget);
+
+test("Seed workflow steps Sessions opens a script-only step on the same node and restores its parent",()=>fresh(async page=>{
+ recordedSteps=true;const parent=detailHref("Sessions","workflow-details",[workflowId],"peer-b");
+ await page.goto(parent);await title(page,detailTitle(1,"peer-b"));
+ await page.getByText("Recorded plan step",{exact:true}).click();
+ await page.waitForFunction(()=>location.hash.startsWith("#/seed?"));
+ expect(new URLSearchParams(new URL(page.url()).hash.split("?")[1]).get("node")).toBe("peer-b");
+ expect(selectedPath(page.url())).toContain("run/"+encodeURIComponent(stepChild));
+ await page.goBack();await title(page,detailTitle(1,"peer-b"));await page.getByRole("button",{name:"Recorded transformation failed"}).waitFor();
+}),browserBudget);
+
+test("Seed workflow window loads only named journals for a linked inspector and Activity entry",()=>fresh(async page=>{
+ largeGraph=true;
+ for(const kind of ["tool","activity"]){
+  await page.goto("about:blank");const begin=reads.length;
+  const query=kind==="tool"?runToolQuery(`wf-${outsideChild}:1`):"activity=1&entry="+encodeURIComponent(outsideChild+":3");
+  await page.goto(selectionHref(query,"peer-a"));
+  const content=kind==="tool"?page.getByRole("dialog").getByText("Archived step input",{exact:false}):page.getByText("Full archived activity",{exact:false});
+  await content.first().waitFor();
+  const owners=reads.slice(begin).filter(r=>r.action._==="GetRunJournal").map(r=>r.action.runId);
+  expect([...new Set(owners)]).toEqual([outsideChild]);
+ }
+}),browserBudget);
+test("Seed workflow window retries an unavailable ancestor at the same link",()=>fresh(async page=>{
+ largeGraph=true;outsideRead=503;await page.goto(selectionHref("error="+encodeURIComponent(outsideChild)));
+ await title(page,"Run error unavailable · Seed · Cyberdeck");
+ const before=await page.evaluate(()=>history.length),link=page.url();outsideRead=200;
+ await page.getByRole("button",{name:"Retry",exact:true}).first().click();
+ await title(page,"Error · Archived transform · Seed run · Cyberdeck");
+ expect(page.url()).toBe(link);expect(await page.evaluate(()=>history.length)).toBe(before);
+}),browserBudget);

@@ -28,6 +28,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       case "session-list": return selected.key === "agent" && selected.agentId === outcome.agentId && (!selected.tab || selected.tab === "sessions") && String(selected.sessionPages || 1) === outcome.path;
       case "agent": return selected.key === "agent" && selected.agentId === outcome.agentId;
       case "session": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId;
+      case "workflow-error": return (selected.key === "agent-session" && selected.sessionId === outcome.owner || selected.key === "agent-run" && selected.runId === outcome.owner) && selected.workflowError === outcome.path;
       case "session-attachment": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId && selected.panel === "attachment" && JSON.stringify([selected.eventId, selected.attachmentId]) === outcome.path;
       case "session-history": return selected.key === "agent-session" && selected.sessionId === outcome.sessionId &&
         JSON.stringify([selected.panel === "tool" ? selected.toolId : selected.eventId, selected.panel === "tool", selected.expandedDetails, selected.expandedThinking, selected.expandedHandoffs]) === outcome.path;
@@ -87,6 +88,7 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
   let title: string | undefined = route.key === "agents" || route.key === "agent-server" ? "Loading sessions · Seed" : undefined;
   const memory = get("memory-file"), agent = get("agent"), session = get("session"), run = get("run"), event = get("session-event");
   const list = get("session-list"), selection = get("memory-selection"), trigger = get("trigger");
+  const workflow = get("workflow-error");
   const history = get("session-history"), attachment = get("session-attachment");
   const tool = get("session-tool"), globalList = get("global-session-list"), thinking = get("session-thinking"), context = get("session-context");
   const children = results?.host === host ? Object.values(results.values).filter((value): value is Outcome => !!value && value.kind === "child-session-list" && owns(route, value)) : [];
@@ -173,6 +175,9 @@ export function useSeedReadOutcome(host: SeedAgentsHost | null, route: SeedAgent
       : runDetailRead?.pending ? "Loading workflow run · Seed"
       : disclosure?.error ? failure(disclosure.error, disclosure.name || "Workflow source")
       : `${runDetails?.pending ? "Waiting for selected tools · " : ""}${route.expandedDetails?.length ? `${route.expandedDetails.length} tool detail${route.expandedDetails.length === 1 ? "" : "s"} · ` : ""}${runTools?.pending ? "Waiting for tool calls · " : ""}${disclosure?.pending ? "Waiting for activity · " : ""}${route.runCode ? "Code · " : ""}${route.runTools ? `Tool calls ${route.runTools === "open" ? "open" : "collapsed"} · ` : ""}${route.runActivity ? route.activityEntries?.length ? `${route.activityEntries.length} activity entr${route.activityEntries.length === 1 ? "y" : "ies"} · ` : "Activity · " : ""}${run.name?.trim() || route.runId} · Seed run`;
+  }
+  if ((route.key === "agent-session" || route.key === "agent-run") && route.workflowError && !session?.error && !run?.error && !history?.error && !history?.pending && workflow) {
+    title = workflow.error ? failure(workflow.error, "Workflow error") : workflow.pending ? "Loading workflow error · Seed" : `Error · ${workflow.name || "Workflow step"} · Seed workflow`;
   }
   return { host: observed, title };
 }

@@ -97,10 +97,14 @@ function TermPane({ session, onStatus, onRemove }: { session: LiveSession; onSta
   );
 }
 /** A Seed session in Seed's UI: tool calls, runs, plan, sub-sessions, model and stop/retry. */
-const transcriptKeys = ["panel", "event", "tool", "full", "attachment", "thinking", "detail", "handoff", "trigger-context", "inline-calls", "inline-detail", "inline-tool", "inline-error"];
+const transcriptKeys = ["panel", "event", "tool", "full", "attachment", "workflow-error", "thinking", "detail", "handoff", "trigger-context", "inline-calls", "inline-detail", "inline-tool", "inline-error"];
 function transcriptParams(params: URLSearchParams, next: Extract<SeedAgentsRoute, { key: "agent-session" }>) {
   const result = new URLSearchParams(params);
   for (const key of transcriptKeys) result.delete(key);
+  if (!next.panel && !next.inlineRunTool && !next.inlineRunError && next.workflowError) {
+    const [owner] = JSON.parse(next.workflowError);
+    if (next.expandedDetails?.includes(owner) || next.inlineRunDetails?.includes(owner)) result.set("workflow-error", next.workflowError);
+  }
   if (next.panel) result.set("panel", next.panel);
   if (next.eventId) result.set("event", next.eventId);
   if (next.panel === "attachment" && next.attachmentId) result.set("attachment", next.attachmentId);
@@ -159,6 +163,14 @@ function NativeSeedSession({ id, node, params }: { id: string; node: string; par
   const expandedTriggerContext = [...new Set(params.getAll("trigger-context").filter((value): value is "activity" | "instructions" | "prompt" => ["activity", "instructions", "prompt"].includes(value)))].sort();
   const route: Extract<SeedAgentsRoute, { key: "agent-session" }> = {
     key: "agent-session", sessionId, eventId, panel, inlineRunTools, inlineRunDetails, inlineRunTool, inlineRunError, expandedThinking, expandedDetails, expandedHandoffs, expandedTriggerContext,
+    workflowError: (() => {
+      try {
+        const tuple = JSON.parse(params.get("workflow-error") || "");
+        if (!panel && !inlineRunTool && !inlineRunError && Array.isArray(tuple) && tuple.length === 2 &&
+          (expandedDetails.includes(tuple[0]) || inlineRunDetails.includes(tuple[0])) && typeof tuple[1] === "string" &&
+          tuple[1].length > 0 && tuple[1].length <= 512 && !/[\u0000-\u001f]/.test(tuple[1])) return JSON.stringify(tuple);
+      } catch {}
+    })(),
     attachmentId: panel === "attachment" ? attachmentId : undefined,
     toolId: panel === "tool" ? toolId : undefined,
     fullPayload: panel === "tool" && (full === "input" || full === "output" || full === "both") ? full : undefined,

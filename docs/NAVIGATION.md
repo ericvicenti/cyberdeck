@@ -1,8 +1,8 @@
 # Cyberdeck navigation coverage
 
-Updated 2026-11-24. This is an implementation inventory, not a completion claim.
+Updated 2026-11-25. Open coverage is listed with each route owner.
 The nightly routine and fleet deployment status live in Deck's
-`handoff/routines/cyberdeck-navigation/2026-11-24.md`.
+`handoff/routines/cyberdeck-navigation/2026-11-25.md`.
 
 ## Source and rollout status
 
@@ -1389,3 +1389,25 @@ Repeat the focused checks with `bun test tests/seed-titles-browser.test.ts
 includes deeper workflow plan/activity disclosures, older run lists, Commander
 account/recording errors and naturally active seats, opaque PDF controls and
 physical kiosk/gamepad behavior. The dated Deck run report records host status.
+
+### Recorded workflow steps and large run trees
+
+An expanded workflow tool on a transcript, a recorded run card, or a standalone
+run can open its child step error. The URL uses `workflow-error` with a JSON
+pair containing the expanded detail token and the failed child run ID. On an
+inline card the detail token also identifies its owning run. Back returns to the
+same step and transcript. A link to a script-only step opens its Seed run on the
+selected node. A completed workflow reads its recorded step tree without
+subscribing to a live run.
+
+Run trees request up to 200 steps. When that window fills, the UI identifies
+the limit. A linked error, tool or Activity entry can resolve an older child
+and its ancestors with signed reads. The account, root, chain and depth must
+agree before the selected child's recorded journal is read. General Code,
+Activity and tool lists show the steps returned by the service. The service
+offers no continuation cursor for enumerating the entire tree.
+
+Run the workflow regression cases with `bun test tests/seed-titles-browser.test.ts
+--test-name-pattern 'Seed workflow (steps|window)' --timeout 30000`. They cover
+both transcript hosts, standalone and inline journals, script-only steps,
+out-of-window owners, denied reads, malformed lineage and late navigation.

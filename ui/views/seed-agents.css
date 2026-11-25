@@ -75,3 +75,11 @@ html.dark {
   }
   [data-slot="dialog-content"]:has([data-run-journal-owner]) [data-slot="dialog-header"] { padding-inline: 44px; }
 }
+
+@media (max-width: 767px) {
+  [data-seed-attachment-preview] button,
+  [data-seed-history-status] button { min-height: 44px; min-width: 44px; }
+  [data-seed-attachment-preview] [data-slot="dialog-close"],
+  [data-seed-history-status] [data-slot="dialog-close"] { display: grid; place-items: center; }
+  [data-seed-attachment-preview] [data-slot="dialog-header"] { padding-inline: 44px; }
+}
