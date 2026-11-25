@@ -82,7 +82,7 @@ credentials should not be replayed from a link.
 | `term` / Term, TermPane, SeedPane, PromptBar | node/session, new-session form, cwd prefill; transcript pagination | `filter` selects the tab-strip machine (`self` = serving node, absent = every machine); `target` selects the New form destination independently of the underlying session node. Both restore on reload/new-tab/Back/Forward, and selecting a session retains its filter. Default selection waits for its owner and replaces once; offline/unknown nodes have distinct errors, delayed peers do not become false missing sessions. Seed session links use authenticated entity titles. Links never create a process. Daemon persistence covered in existing E2E. Filtered links now default within their selected machine; unknown filters, fleet lookup errors and failed/denied lists preserve honest URLs and titles. Older overlapping polls cannot replace newer content or trigger stale locks. New-session drafts survive view/history changes in memory per machine and cwd prefill; refresh/lock clears them. Explicit Open preserves newer drafts and never redirects a different view when it finishes. Terminal disconnect, exit and lost states now have matching titles; reconnect needs no route write or process restart. Seed transcript controls and deeper attachment failure diagnostics remain. |
 | `cmux` / Cmux | surface, scrollback, creation form | Surface/scrollback URL/default/title covered. Polling screen response guarded. Workspace creation, input and desktop focus are explicit actions. Missing surfaces have a not-found state/title and never poll a nonexistent terminal. Backend unavailable has its own title. |
 | `cloud` / Cloud + RemoteBrowser | profile, target URL, archive query, provider+conversation | Covered. Remote URL/title state mirrors into the parent route after a request acknowledgement; initial profile state cannot overwrite direct links, redirects replace the requested URL, page/user navigation pushes once, and Back/Forward restores without remounting the persistent browser. The UI settles unacknowledged state for older daemons during rolling updates. Missing profiles, invalid target URLs and unavailable browsers show matching errors/titles before any browser socket is opened. |
-| `remote` / ScreenRemote | physical screen connection, text/scroll mode, remote buttons | Static route/title; captures server kiosk, which has its own navigation. Do not attach normal Playwright to active kiosk (it changes emulated focus); only noDefaults/raw CDP for future physical verification. |
+| `remote` / ScreenRemote | serving kiosk, tap/drag or scroll mode, connection status | `mode=scroll` restores the gesture mode and preserves the live canvas and unsent text through history. Explicit foreign-node links leave the kiosk disconnected. Physical device input and browser-native controls still need live verification. |
 | Standalone player documents | `/vault-player.html`, `/spotify-player.html` | Internal player/SDK transports, not independently reconstructable media links. Preserve their authenticated message channels; represent navigable content in their parent view. `/samples/:name` serves media bytes, not a view. |
 | Markdown / Widgets / PromptBar / VolumeControl | rendering, panel links, new-run draft, session strip, volume | No independent routes. Session strip links now encode node and session in a single transition. Input/volume are actions/preferences. |
 
@@ -1411,3 +1411,20 @@ Run the workflow regression cases with `bun test tests/seed-titles-browser.test.
 --test-name-pattern 'Seed workflow (steps|window)' --timeout 30000`. They cover
 both transcript hosts, standalone and inline journals, script-only steps,
 out-of-window owners, denied reads, malformed lineage and late navigation.
+
+### Screen remote and Commander recording comparisons
+
+`#/remote` opens the serving machine's screen in tap/drag mode.
+`#/remote?mode=scroll` selects scrolling. A mode change keeps the screen socket,
+canvas and unsent input. Connection failures own the title, and **Reconnect**
+retries at the same URL. A link that explicitly names a different node leaves
+the local screen disconnected. Screen input, volume and kiosk navigation remain
+explicit user actions. The fixture opens an isolated screen stream and records
+every outgoing command. Run `bun test tests/screen-remote-navigation.test.ts`.
+
+Commander on Clipper accepts `compare=<tactic-id>` in recording, replay and
+workshop inspectors. It restores the receiving account's comparison selection
+and the requested decision without executing a tactic. The recording player
+and inspector now read one transcript. Read failures and mismatched recording
+or match IDs retain the link and offer Retry. See Clipper's
+`~/Code/Commander/docs/navigation.md` and the November 25 Deck report.

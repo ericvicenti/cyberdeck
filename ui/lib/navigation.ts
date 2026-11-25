@@ -25,6 +25,12 @@ export function readRoute(hash = location.hash): Route {
   if (view === "applications" && params.get("app") === "steam") {
     params.set("app", "vimm"); params.set("tab", "steam");
   }
+  if (view === "remote") {
+    const mode = params.get("mode"), node = params.get("node");
+    for (const key of [...params.keys()]) params.delete(key);
+    if (mode === "scroll") params.set("mode", mode);
+    if (node && node !== "self") params.set("node", node);
+  }
   if (!params.get("node")) params.delete("node");
   return { view, params };
 }
@@ -99,6 +105,7 @@ export function routeTitle(route = readRoute()): string {
     : route.view === "cmux" ? p.get("surface")
     : route.view === "agents" ? p.get("run") || p.get("task")
     : route.view === "cloud" ? p.get("conversation") || p.get("profile") : null;
+  if (route.view === "remote" && p.get("mode") === "scroll") title = "Scroll mode · Screen remote";
   if (detail) title = `${detail} · ${title}`;
   if (route.view === "applications" && p.get("app")) {
     title = p.get("app") === "vimm" ? `${p.get("tab") === "steam" ? "PC games · " : ""}The Vault`
