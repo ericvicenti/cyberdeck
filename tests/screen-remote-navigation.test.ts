@@ -8,14 +8,14 @@ const frame = {
 };
 const owners = new Set<Bun.ServerWebSocket<undefined>>();
 const commands: string[] = [], errors: string[] = [];
-let connections = 0, behavior: "frame" | "denied" | "error" | "invalid" = "frame", fleetStatus = 200;
+let connections = 0, behavior: "frame" | "denied" | "error" | "invalid" = "frame";
 const server = Bun.serve({ hostname:"127.0.0.1", port:0,
   async fetch(req, transport) {
     const url=new URL(req.url), path=url.pathname;
     if(path==="/api/kiosk/stream" && transport.upgrade(req))return;
     if(req.method!=="GET"){commands.push(req.method+" "+path);return new Response(null,{status:405});}
     if(path==="/api/auth/whoami")return Response.json({method:"none"});
-    if(path==="/api/fleet/nodes")return Response.json({self:{nodeId:"serving",name:"Test kiosk",urls:[]},nodes:[]},{status:fleetStatus});
+    if(path==="/api/fleet/nodes")return Response.json({self:{nodeId:"serving",name:"Test kiosk",urls:[]},nodes:[]});
     if(path==="/api/audio")return Response.json({available:true,volume:25,muted:false});
     if(path.startsWith("/api/"))return Response.json({error:"No fixture for this resource"},{status:404});
     const installed=process.env.CYBERDECK_TEST_ORIGIN;
@@ -85,12 +85,17 @@ test("Screen remote releases a previous stream and title when leaving the view",
 }),30000);
 
 test("Screen remote unavailable fleet identity retries only the owner lookup",()=>fresh(async page=>{
- behavior="frame";fleetStatus=503;const start=connections;
- try {
-  await page.goto(url("mode=scroll&node=serving"));await title(page,"Screen owner unavailable · Screen remote");
-  expect(connections).toBe(start);const before=await page.evaluate(()=>history.length);
-  fleetStatus=200;await page.getByRole("button",{name:"Retry screen owner"}).click();await page.getByText("Connected",{exact:true}).waitFor();
-  await page.waitForURL(url("mode=scroll"));await title(page,"Scroll mode · Screen remote");
-  expect(connections).toBe(start+1);expect(await page.evaluate(()=>history.length)).toBe(before);
- } finally {fleetStatus=200;}
+ behavior="frame";const start=connections;
+ await page.addInitScript(()=>document.addEventListener("click",event=>{
+  if((event.target as HTMLElement)?.textContent==="Retry screen owner")(window as any).__retriedOwner=true;
+ },true));
+ await page.route("**/api/fleet/nodes",async route=>{
+  if(await page.evaluate(()=>Boolean((window as any).__retriedOwner)))return route.continue();
+  return route.fulfill({status:503,json:{error:"Owner lookup unavailable"}});
+ });
+ await page.goto(url("mode=scroll&node=serving"));await title(page,"Screen owner unavailable · Screen remote");
+ expect(connections).toBe(start);const before=await page.evaluate(()=>history.length);
+ await page.getByRole("button",{name:"Retry screen owner"}).click();await page.getByText("Connected",{exact:true}).waitFor();
+ await page.waitForURL(url("mode=scroll"));await title(page,"Scroll mode · Screen remote");
+ expect(connections).toBe(start+1);expect(await page.evaluate(()=>history.length)).toBe(before);
 }),30000);
